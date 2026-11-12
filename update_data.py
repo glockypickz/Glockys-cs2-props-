@@ -71,11 +71,35 @@ async def do_team(s, t, cutoff, out):
             e["logs"].append(r["log"])
     print("done:", tname, sorted(roster))
 
+async def upcoming(s):
+    """Scheduled / running matches -> games.json entries (no scores, no odds)."""
+    games = []
+    try:
+        d = await get(s, "/matches", {
+            "scope": "widget-matches", "page[offset]": 0, "page[limit]": 100,
+            "sort": "start_date", "filter[matches.status][in]": "upcoming,current",
+            "filter[matches.discipline_id][eq]": 1, "with": "teams,tournament,games"})
+        for m in d.get("results", []):
+            t1, t2 = m.get("team1") or {}, m.get("team2") or {}
+            if not t1.get("name") or not t2.get("name") or not m.get("start_date"):
+                continue
+            start = m["start_date"]
+            if not start.endswith("Z") and "+" not in start[10:]:
+                start += "Z"
+            games.append({"id": m["id"], "start": start, "team1": t1["name"], "team2": t2["name"],
+                          "tournament": (m.get("tournament") or {}).get("name", ""),
+                          "bo": m.get("bo_type")})
+    except Exception as e:
+        print("schedule fetch failed:", e)
+    return games
+
 async def main():
     out = {}
     cutoff = (datetime.date.today() - datetime.timedelta(days=ACTIVE_DAYS)).isoformat()
     async with aiohttp.ClientSession(headers=H) as s:
         teams = await ranked_teams(s)
+        ranks = {t.get("name", t["slug"]): t["rank"] for t in teams if t.get("rank")}
+        games = await upcoming(s)
         print(len(teams), "ranked teams")
         for t in teams:
             try:
@@ -84,7 +108,12 @@ async def main():
                 print("skip", t.get("slug"), e)
     if len(out) < 20:
         raise SystemExit(f"Only {len(out)} players fetched, keeping the old players.json")
-    data = {"updated": datetime.date.today().isoformat(), "players": list(out.values())}
+    today = datetime.date.today().isoformat()
+    if games:
+        json.dump({"updated": today, "games": games}, open("games.json", "w"),
+                  separators=(",", ":"), ensure_ascii=False)
+        print("wrote games.json:", len(games), "games")
+    data = {"updated": today, "ranks": ranks, "players": list(out.values())}
     json.dump(data, open("players.json", "w"), separators=(",", ":"), ensure_ascii=False)
     print("wrote players.json:", len(out), "players")
 
