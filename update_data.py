@@ -43,5 +43,5 @@ async def do_team(s, t, cutoff, out):
         "sort": "-start_date", "filter[matches.status][in]": "finished",
         "filter[matches.team_ids][overlap]": tid,
         "filter[matches.discipline_id][eq]": 1, "with": "teams,tournament,games"}))["results"]
-    if not ms or ms[0]["start_date
-
+    if not ms or ms[0][start_date][:10]<. cutoff:
+        print(inactive: ,tname)
