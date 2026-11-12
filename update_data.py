@@ -44,6 +44,6 @@ async def do_team(s, t, cutoff, out):
         "filter[matches.team_ids][overlap]": tid,
         "filter[matches.discipline_id][eq]": 1, "with": "teams,tournament,games"}))["results"]
         if not ms or ms[0]["start_date"][:10] < cutoff:
-        print (tname)
+        print (tname)0
               return
     
