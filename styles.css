@@ -4,7 +4,7 @@ body{margin:0;background:var(--bg);color:#fff;font:15px/1.45 system-ui,-apple-sy
 a{color:var(--green);text-decoration:none}
 .wrap{max-width:1400px;margin:0 auto;padding:0 12px 110px}
 header{text-align:center;padding:10px 0 6px}
-header img{width:100%;max-width:320px;border-radius:16px}
+header img{width:100%;max-width:300px;border-radius:0}
 .x{display:inline-block;margin-top:6px;font-weight:800;letter-spacing:.08em}
 .tag{color:var(--muted);font-size:13px;margin:4px 0}
 .chips{display:flex;flex-wrap:wrap;gap:6px;justify-content:center;margin:8px 0;font-family:ui-monospace,Menlo,monospace;font-size:12px}
@@ -43,4 +43,31 @@ table{width:100%;border-collapse:collapse;font-size:13px}td,th{padding:7px 6px;b
 .warn{border-left:3px solid var(--amber);padding-left:10px;color:var(--silver);font-size:13px;margin:8px 0}
 .hide{display:none}
 @media(min-width:768px){.wrap{padding:0 24px 40px}.grid.c2{grid-template-columns:1fr 1fr}.grid.c3{grid-template-columns:repeat(3,1fr)}}
-@media(min-width:1024px){nav.bot{display:none}nav.top{display:flex;gap:8px;justify-content:center;margin:8px 0 16px;flex-wrap:wrap}nav.top button{background:var(--card);border:1px solid var(--line);color:var(--silver);padding:9px 16px;border-radius:99px;font:700 13px system-ui}nav.top button.on{border-color:var(--green);color:var(--green)}header img{max-width:460px}.toast{left:50%;right:auto;transform:translateX(-50%);bottom:24px;min-width:280px}}
+@media(min-width:1024px){nav.bot{display:none}nav.top{display:flex;gap:8px;justify-content:center;margin:8px 0 16px;flex-wrap:wrap}nav.top button{background:var(--card);border:1px solid var(--line);color:var(--silver);padding:9px 16px;border-radius:99px;font:700 13px system-ui}nav.top button.on{border-color:var(--green);color:var(--green)}header img{max-width:340px}.toast{left:50%;right:auto;transform:translateX(-50%);bottom:24px;min-width:280px}}
+
+/* ---- background: matrix code rain (canvas, see matrix.js) under a dark readability veil ---- */
+html{background:#030705}
+body{background:transparent;position:relative}
+#rain{position:fixed;left:0;top:0;z-index:-2;pointer-events:none;opacity:.85}
+body::before{content:"";position:fixed;left:0;top:0;right:0;bottom:0;z-index:-1;pointer-events:none;
+ background:radial-gradient(ellipse at 50% 20%,rgba(3,7,5,.55),rgba(3,7,5,.2) 60%,rgba(3,7,5,.55))}
+.card{background:rgba(8,12,10,.88);border:1px solid rgba(0,255,102,.22);box-shadow:0 0 0 1px rgba(0,0,0,.4),0 0 18px rgba(0,255,102,.06),0 8px 24px rgba(0,0,0,.5);backdrop-filter:blur(3px)}
+nav.bot{background:rgba(3,7,5,.95);border-top:1px solid rgba(0,255,102,.3)}
+/* ---- logo: only the crown, GP and handle swing (transparent PNG, no box) ---- */
+.swing{display:inline-block;transform-origin:50% 0;animation:gpswing 9s ease-in-out infinite;will-change:transform}
+header img{filter:drop-shadow(0 0 10px rgba(0,255,102,.35));animation:gpglow 3.5s ease-in-out infinite}
+@keyframes gpswing{
+ 0%{transform:rotate(-3deg)}20%{transform:rotate(3deg)}40%{transform:rotate(-3deg)}
+ 60%{transform:rotate(3deg)}80%{transform:rotate(-3deg) rotateY(0deg)}100%{transform:rotate(-3deg) rotateY(360deg)}}
+@keyframes gpglow{
+ 0%,100%{filter:drop-shadow(0 0 8px rgba(0,255,102,.25))}
+ 50%{filter:drop-shadow(0 0 22px rgba(0,255,102,.6))}}
+@media (prefers-reduced-motion:reduce){.swing,header img{animation:none}}
+
+/* ---- welcome screen ---- */
+#enter{position:fixed;left:0;top:0;right:0;bottom:0;z-index:100;display:flex;align-items:center;justify-content:center;background:rgba(3,7,5,.88);backdrop-filter:blur(4px);transition:opacity .5s}
+#enter.out{opacity:0;pointer-events:none}
+#enter .box{text-align:center;padding:24px}
+#enter .t{color:var(--green);font:800 18px/1.2 ui-monospace,monospace;letter-spacing:.18em;margin-bottom:22px;text-shadow:0 0 14px rgba(0,255,102,.6)}
+#enter button{background:var(--green);color:#000;border:0;border-radius:99px;padding:14px 44px;font:800 18px system-ui;letter-spacing:.12em;box-shadow:0 0 28px rgba(0,255,102,.5)}
+#enter .s{color:var(--muted);font-size:12px;margin-top:14px}
