@@ -53,6 +53,53 @@ def pick_offer(group, market):
     return best
 
 
+HISTORY_FILE = "lines_history.json"
+KEEP_DAYS = 90
+
+
+def parse_time(t):
+    try:
+        return datetime.datetime.fromisoformat(str(t).replace("Z", "+00:00"))
+    except Exception:
+        return None
+
+
+def update_history(lines, now_iso):
+    """Remember every line we saw, per book/player/stat/match. The line keeps updating until the match starts,
+    so the saved number is the closing line. first_line is the first number we ever saw."""
+    try:
+        old = json.load(open(HISTORY_FILE, encoding="utf-8")).get("entries", [])
+    except Exception:
+        old = []
+    now = parse_time(now_iso)
+    by = {(e["book"], e["player"], e["stat"], e["start"]): e for e in old}
+    for l in lines:
+        start = l.get("starts_at") or ""
+        if not start:
+            continue
+        k = (l["book"], l["player"], l["stat"], start)
+        t0 = parse_time(start)
+        e = by.get(k)
+        if e is None:
+            by[k] = {"book": l["book"], "player": l["player"], "team": l.get("team", ""),
+                     "opponent": l.get("opponent", ""), "stat": l["stat"], "start": start,
+                     "line": l["line"], "first_line": l["line"], "first_seen": now_iso, "last_seen": now_iso}
+        elif t0 is None or now is None or now < t0:
+            e["line"] = l["line"]
+            e["last_seen"] = now_iso
+    cutoff = (now - datetime.timedelta(days=KEEP_DAYS)) if now else None
+    keep = []
+    for e in by.values():
+        t0 = parse_time(e["start"])
+        if cutoff and t0 and t0 < cutoff:
+            continue
+        keep.append(e)
+    keep.sort(key=lambda e: e["start"])
+    json.dump({"updated": now_iso, "entries": keep}, open(HISTORY_FILE, "w", encoding="utf-8"),
+              separators=(",", ":"), ensure_ascii=False)
+    print("lines_history.json:", len(keep), "entries")
+
+
 def main():
     if not KEY:
         sys.exit("KASHROCK_API_KEY is not set, keeping the old lines.json")
@@ -103,6 +150,10 @@ def main():
     out = {"observed_at": fetched or now, "fetched_by_job_at": now, "source": "kashrock", "lines": lines}
     json.dump(out, open("lines.json", "w"), separators=(",", ":"), ensure_ascii=False)
     print("wrote lines.json:", len(lines), "lines")
+    try:
+        update_history(lines, now)
+    except Exception as e:
+        print("history update failed (lines.json is fine):", e)
 
 
 if __name__ == "__main__":
