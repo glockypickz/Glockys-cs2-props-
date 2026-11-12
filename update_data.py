@@ -6,9 +6,14 @@ H = {"accept": "application/json", "origin": "https://bo3.gg", "referer": "https
      "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/122.0.0.0 Safari/537.36"}
 
 MAX_TEAMS = 150          # ranked teams to consider
-MATCHES_PER_TEAM = 10
+MATCHES_PER_TEAM = 15   # last 15 needs 15 matches per team (run takes longer)
 ACTIVE_DAYS = 120        # skip teams with no match in this many days
 DELAY = 0.3
+# Optional per-map fields saved when bo3.gg returns them (names are guesses; the Actions log prints the real keys)
+EXTRA_KEYS = ["rating", "player_rating", "kast", "first_kills", "first_deaths", "clutches_won", "clutches",
+              "rounds_count", "rounds", "hits", "shots"]
+EVENT_TYPE = {}   # tournament id -> "lan" / "online" / None
+SAMPLE_PRINTED = False
 
 async def get(s, path, params=None):
     for attempt in range(5):
@@ -36,7 +41,34 @@ async def ranked_teams(s):
             break
     return out[:MAX_TEAMS]
 
+def mk_log(date, m, g, p, et):
+    log = {"date": date, "mid": m["id"], "n": g.get("number"),
+           "map": (g.get("map_name") or "").replace("de_", "").capitalize(),
+           "opp": p.get("enemy_clan_name", ""), "kills": p["kills"], "hs": p["headshots"],
+           "d": p.get("death"), "a": p.get("assists"), "adr": p.get("adr")}
+    if et:
+        log["ev"] = et
+    x = {k: p[k] for k in EXTRA_KEYS if isinstance(p.get(k), (int, float))}
+    if x:
+        log["x"] = x
+    return log
+
+async def event_type(s, m):
+    """LAN/online label only exists on the match detail, so fetch once per tournament."""
+    tid = (m.get("tournament") or {}).get("id")
+    if tid is None:
+        return None
+    if tid not in EVENT_TYPE:
+        try:
+            det = await get(s, f"/matches/{m['slug']}")
+            EVENT_TYPE[tid] = (det.get("tournament") or {}).get("event_type")
+        except Exception as e:
+            print("event type lookup failed:", tid, e)
+            EVENT_TYPE[tid] = None
+    return EVENT_TYPE[tid]
+
 async def do_team(s, t, cutoff, out):
+    global SAMPLE_PRINTED
     tid, tname = t["id"], t.get("name", t["slug"])
     ms = (await get(s, "/matches", {
         "scope": "widget-matches", "page[offset]": 0, "page[limit]": MATCHES_PER_TEAM,
@@ -49,18 +81,19 @@ async def do_team(s, t, cutoff, out):
     rows = []
     for m in ms:
         date = m["start_date"][:10]
+        et = await event_type(s, m)
         for g in m.get("games", []):
             if g.get("state") != "done":
                 continue
             stats = await get(s, f"/games/{g['id']}/players_stats")
+            if stats and not SAMPLE_PRINTED:
+                SAMPLE_PRINTED = True
+                print("players_stats keys:", sorted(stats[0].keys()))
             for p in stats:
                 if p["team_clan"]["team_id"] != tid:
                     continue
                 rows.append({"mid": m["id"], "name": p["steam_profile"]["nickname"],
-                             "log": {"date": date, "mid": m["id"], "n": g.get("number"),
-                                     "map": (g.get("map_name") or "").replace("de_", "").capitalize(),
-                                     "opp": p.get("enemy_clan_name", ""),
-                                     "kills": p["kills"], "hs": p["headshots"]}})
+                             "log": mk_log(date, m, g, p, et)})
     if not rows:
         print("no data:", tname)
         return
