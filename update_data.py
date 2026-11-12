@@ -43,7 +43,50 @@ async def do_team(s, t, cutoff, out):
         "sort": "-start_date", "filter[matches.status][in]": "finished",
         "filter[matches.team_ids][overlap]": tid,
         "filter[matches.discipline_id][eq]": 1, "with": "teams,tournament,games"}))["results"]
-        if not ms or ms[0]["start_date"][:10] < cutoff:
-        print (tname)
-              return
-    
+    if not ms or ms[0]["start_date"][:10] < cutoff:
+        print("inactive:", tname)
+        return
+    rows = []
+    for m in ms:
+        date = m["start_date"][:10]
+        for g in m.get("games", []):
+            if g.get("state") != "done":
+                continue
+            stats = await get(s, f"/games/{g['id']}/players_stats")
+            for p in stats:
+                if p["team_clan"]["team_id"] != tid:
+                    continue
+                rows.append({"mid": m["id"], "name": p["steam_profile"]["nickname"],
+                             "log": {"date": date, "mid": m["id"], "n": g.get("number"),
+                                     "map": (g.get("map_name") or "").replace("de_", "").capitalize(),
+                                     "opp": p.get("enemy_clan_name", ""),
+                                     "kills": p["kills"], "hs": p["headshots"]}})
+    if not rows:
+        print("no data:", tname)
+        return
+    roster = {r["name"] for r in rows if r["mid"] == rows[0]["mid"]}
+    for r in rows:
+        if r["name"] in roster:
+            e = out.setdefault(f"{tname}|{r['name']}", {"name": r["name"], "team": tname, "logs": []})
+            e["logs"].append(r["log"])
+    print("done:", tname, sorted(roster))
+
+async def main():
+    out = {}
+    cutoff = (datetime.date.today() - datetime.timedelta(days=ACTIVE_DAYS)).isoformat()
+    async with aiohttp.ClientSession(headers=H) as s:
+        teams = await ranked_teams(s)
+        print(len(teams), "ranked teams")
+        for t in teams:
+            try:
+                await do_team(s, t, cutoff, out)
+            except Exception as e:
+                print("skip", t.get("slug"), e)
+    if len(out) < 20:
+        raise SystemExit(f"Only {len(out)} players fetched, keeping the old players.json")
+    data = {"updated": datetime.date.today().isoformat(), "players": list(out.values())}
+    json.dump(data, open("players.json", "w"), separators=(",", ":"), ensure_ascii=False)
+    print("wrote players.json:", len(out), "players")
+
+if __name__ == "__main__":
+    asyncio.run(main())
