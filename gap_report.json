@@ -1,0 +1,237 @@
+{
+ "summary": {
+  "lines": 303,
+  "players_on_lines": 123,
+  "ok": 95,
+  "no_series": 0,
+  "near_miss": 12,
+  "team_has_player_missing": 16,
+  "team_missing": 0
+ },
+ "team_missing": [],
+ "team_has_player_missing": [
+  {
+   "player": "cerolzin",
+   "team": "Alka",
+   "opponent": "Low Cortisol BR",
+   "lines": 2,
+   "data_team": "ALKA"
+  },
+  {
+   "player": "puni",
+   "team": "Alka",
+   "opponent": "Low Cortisol BR",
+   "lines": 2,
+   "data_team": "ALKA"
+  },
+  {
+   "player": "Kurama",
+   "team": "Butterfly",
+   "opponent": "Leo Team",
+   "lines": 2,
+   "data_team": "Butterfly"
+  },
+  {
+   "player": "Mokuj1n",
+   "team": "ex-RUSTEC",
+   "opponent": "Nexus Gaming",
+   "lines": 2,
+   "data_team": "ex-RUSTEC"
+  },
+  {
+   "player": "youka",
+   "team": "ex-RUSTEC",
+   "opponent": "Nexus Gaming",
+   "lines": 2,
+   "data_team": "ex-RUSTEC"
+  },
+  {
+   "player": "kyousuke",
+   "team": "Falcons",
+   "opponent": "G2 Esports",
+   "lines": 4,
+   "data_team": "Falcons"
+  },
+  {
+   "player": "YumsaN",
+   "team": "FORZE Reload",
+   "opponent": "Walczaki",
+   "lines": 1,
+   "data_team": "FORZE Reload"
+  },
+  {
+   "player": "L1seYoung",
+   "team": "Inner Circle Academy",
+   "opponent": "Omega",
+   "lines": 1,
+   "data_team": "Inner Circle"
+  },
+  {
+   "player": "Drac",
+   "team": "Leo Team",
+   "opponent": "Butterfly",
+   "lines": 2,
+   "data_team": "Leo"
+  },
+  {
+   "player": "leen",
+   "team": "Leo Team",
+   "opponent": "Butterfly",
+   "lines": 2,
+   "data_team": "Leo"
+  },
+  {
+   "player": "fokiu",
+   "team": "Low Cortisol",
+   "opponent": "ALKA GAMING",
+   "lines": 3,
+   "data_team": "Low Cortisol BR"
+  },
+  {
+   "player": "zede",
+   "team": "Low Cortisol",
+   "opponent": "ALKA GAMING",
+   "lines": 4,
+   "data_team": "Low Cortisol BR"
+  },
+  {
+   "player": "xertioN + Spinx",
+   "team": "MOUZ",
+   "opponent": "Team Vitality",
+   "lines": 1,
+   "data_team": "MOUZ"
+  },
+  {
+   "player": "sanc",
+   "team": "RED Canids Academy",
+   "opponent": "Galorys",
+   "lines": 2,
+   "data_team": "RED Canids Academy"
+  },
+  {
+   "player": "m0NESY + kyousuke",
+   "team": "Team Falcons",
+   "opponent": "G2 Esports",
+   "lines": 1,
+   "data_team": "Falcons"
+  },
+  {
+   "player": "matios",
+   "team": "Turma do Pagode",
+   "opponent": "Rush",
+   "lines": 4,
+   "data_team": "Turma do Pagode"
+  }
+ ],
+ "near_miss": [
+  {
+   "player": "glowiing",
+   "team": "BakS eSports",
+   "opponent": "ex-Zero Tenacity",
+   "lines": 2,
+   "data_name": "CLglowiing",
+   "data_team": "BAKS",
+   "series": 14
+  },
+  {
+   "player": "bluewh1te",
+   "team": "BET-M 33",
+   "opponent": "Brute",
+   "lines": 2,
+   "data_name": "bluewhite",
+   "data_team": "33",
+   "series": 12
+  },
+  {
+   "player": "executor",
+   "team": "BET-M 33",
+   "opponent": "Brute",
+   "lines": 2,
+   "data_name": "SUN.executoR",
+   "data_team": "33",
+   "series": 12
+  },
+  {
+   "player": "Demho",
+   "team": "Betclic",
+   "opponent": "Leo Team",
+   "lines": 2,
+   "data_name": "PTDemho",
+   "data_team": "Betclic",
+   "series": 11
+  },
+  {
+   "player": "fl4sh",
+   "team": "BORRACHEIROS",
+   "opponent": "BARCA",
+   "lines": 2,
+   "data_name": "FLASH",
+   "data_team": "BORRACHEIROS",
+   "series": 12
+  },
+  {
+   "player": "m1QUSE",
+   "team": "ex-INOX",
+   "opponent": "BAKS",
+   "lines": 3,
+   "data_name": "-NF0-m1QUSE",
+   "data_team": "ex-INOX",
+   "series": 1
+  },
+  {
+   "player": "finW",
+   "team": "ex-INOX Division",
+   "opponent": "BakS eSports",
+   "lines": 4,
+   "data_name": "FInnw",
+   "data_team": "ex-INOX",
+   "series": 1
+  },
+  {
+   "player": "destiny",
+   "team": "Galorys",
+   "opponent": "RED Canids Academy",
+   "lines": 2,
+   "data_name": "★ ⑳ De$tiNy",
+   "data_team": "Galorys",
+   "series": 15
+  },
+  {
+   "player": "Tarkky",
+   "team": "Leo Team",
+   "opponent": "Butterfly",
+   "lines": 1,
+   "data_name": "Tarkky_BB",
+   "data_team": "Leo",
+   "series": 13
+  },
+  {
+   "player": "forsyy",
+   "team": "Metizport",
+   "opponent": "Nexus",
+   "lines": 2,
+   "data_name": "EP.-forsyy",
+   "data_team": "Metizport",
+   "series": 12
+  },
+  {
+   "player": "n1cks",
+   "team": "RED Canids Academy",
+   "opponent": "Galorys",
+   "lines": 1,
+   "data_name": "v1cks",
+   "data_team": "NIO",
+   "series": 2
+  },
+  {
+   "player": "naitte",
+   "team": "Turma do Pagode",
+   "opponent": "Rush",
+   "lines": 4,
+   "data_name": "★ ⑳ NAITTEXDD",
+   "data_team": "Turma do Pagode",
+   "series": 15
+  }
+ ],
+ "no_series": []
+}
