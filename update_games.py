@@ -9,7 +9,25 @@ import asyncio, json, datetime, aiohttp
 B = "https://api.bo3.gg/api/v1"
 H = {"accept": "application/json", "origin": "https://bo3.gg", "referer": "https://bo3.gg/",
      "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/122.0.0.0 Safari/537.36"}
-LIVE_MAX_AGE_H = 12
+LIVE_MAX_AGE_H = 12  # fallback when the series length is unknown
+
+
+def bo_num(bo):
+    try:
+        return int("".join(ch for ch in str(bo) if ch.isdigit()))
+    except Exception:
+        return None
+
+
+def is_finished_or_stale(bo, s1, s2, age_h):
+    """True when a match flagged 'current' is really over: a team already has the wins needed
+    (Bo3 needs 2, Bo5 needs 3), or it started longer ago than that series can last.
+    Bo1 scores may be rounds, so Bo1 is only judged by age."""
+    n = bo_num(bo)
+    if n and n >= 3 and s1 is not None and s2 is not None and max(s1, s2) >= n // 2 + 1:
+        return True
+    limit = {1: 3, 3: 8, 5: 12}.get(n, LIVE_MAX_AGE_H)
+    return age_h > limit
 printed_keys = False
 
 
@@ -86,8 +104,8 @@ async def main():
                     age_h = (now - datetime.datetime.fromisoformat(start.replace("Z", "+00:00"))).total_seconds() / 3600
                 except Exception:
                     continue
-                if label == "live" and age_h > LIVE_MAX_AGE_H:
-                    continue  # stale "current" flag
+                if label == "live" and is_finished_or_stale(m.get("bo_type"), score(m, 1), score(m, 2), age_h):
+                    continue  # finished or stale "current" flag
                 seen.add(m["id"])
                 games.append({"id": m["id"], "start": start, "team1": t1["name"], "team2": t2["name"],
                               "tournament": (m.get("tournament") or {}).get("name", ""), "bo": m.get("bo_type"),
