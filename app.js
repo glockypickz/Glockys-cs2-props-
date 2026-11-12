@@ -128,8 +128,20 @@ function img(kind,cb){var c=document.createElement('canvas');c.width=1080;c.heig
  var im=new Image();im.onload=function(){x.globalAlpha=.12;var w=760,h=w*im.height/im.width;x.drawImage(im,(1080-w)/2,(1350-h)/2,w,h);x.globalAlpha=1;draw();cb(c)};im.onerror=function(){draw();cb(c)};im.src='assets/logo.png';
  function draw(){x.textAlign='center';if(kind.g){var g=kind.g;x.fillStyle='#fff';x.font='700 54px sans-serif';x.fillText(g.player+' · '+sname(g.stat),540,200);x.fillText('LINE '+g.line+'  ·  PROJ '+g.proj,540,280);x.fillStyle=g.grade==='A+'||g.grade==='B'?'#00FF66':g.grade==='C'?'#ffc53d':'#ff4d6d';x.font='800 300px sans-serif';x.fillText(g.grade,540,640);x.font='800 60px sans-serif';x.fillText(g.label.toUpperCase(),540,760);x.fillStyle='#c8cdd2';x.font='400 36px sans-serif';x.fillText('Over '+g.over+'/'+g.of+' last '+g.of+(g.opp?'  ·  vs '+g.opp:''),540,840)}
   else{x.font='700 48px sans-serif';slip.slice(0,8).forEach(function(s,i){x.fillStyle='#fff';x.fillText(s.player+' '+sname(s.stat),540,230+i*120);x.fillStyle='#00FF66';x.fillText(s.pick+' '+s.line+(s.grade?'  ·  '+s.grade:''),540,282+i*120)})}}}
-function dl(c,name){var a=document.createElement('a');a.download=name;a.href=c.toDataURL('image/png');document.body.appendChild(a);a.click();a.remove()}
-function share(c,name){c.toBlob(function(b){var f=new File([b],name,{type:'image/png'});if(navigator.canShare&&navigator.canShare({files:[f]})){navigator.share({files:[f]}).then(function(){toast('Shared')}).catch(function(){toast('Share cancelled')})}else{dl(c,name);toast('Sharing not supported here. Image downloaded')}})}
+function showImg(url,blob,name){var old=document.getElementById('imgov');if(old)old.remove();
+ var ov=document.createElement('div');ov.id='imgov';ov.style.cssText='position:fixed;left:0;top:0;right:0;bottom:0;z-index:100;background:rgba(0,0,0,.96);overflow:auto;-webkit-overflow-scrolling:touch;padding:16px;text-align:center';
+ var im=document.createElement('img');im.src=url;im.alt=name;im.style.cssText='display:block;margin:0 auto 12px;max-width:100%;max-height:68vh;border-radius:12px;-webkit-touch-callout:default;-webkit-user-select:auto;user-select:auto';
+ var hint=document.createElement('div');hint.textContent='Press and hold the image, then tap Save to Photos';hint.style.cssText='color:#c8cdd2;font:600 14px system-ui;margin-bottom:12px';
+ var row=document.createElement('div');row.style.cssText='display:flex;gap:10px;justify-content:center;flex-wrap:wrap;padding-bottom:24px';
+ function btn(t,green){var b=document.createElement('button');b.textContent=t;b.style.cssText='font:800 15px system-ui;padding:13px 22px;border-radius:12px;border:1px solid #00FF66;cursor:pointer;'+(green?'background:#00FF66;color:#000':'background:#111;color:#00FF66');return b}
+ function close(){ov.remove();setTimeout(function(){URL.revokeObjectURL(url)},500)}
+ var f=null;try{f=new File([blob],name,{type:'image/png'})}catch(e){}
+ if(f&&navigator.canShare&&navigator.canShare({files:[f]})){var sb=btn('Share',true);sb.onclick=function(){navigator.share({files:[f]}).then(function(){toast('Shared')}).catch(function(){})};row.appendChild(sb)}
+ var db=btn('Download',!row.children.length);db.onclick=function(){var a=document.createElement('a');a.href=url;a.download=name;document.body.appendChild(a);a.click();a.remove();toast('If nothing saved, press and hold the image')};row.appendChild(db);
+ var cb=btn('Close',false);cb.onclick=close;row.appendChild(cb);
+ ov.appendChild(im);ov.appendChild(hint);ov.appendChild(row);document.body.appendChild(ov)}
+function dl(c,name){c.toBlob(function(b){if(!b){toast('Could not build the image');return}showImg(URL.createObjectURL(b),b,name)},'image/png')}
+function share(c,name){dl(c,name)}
 function curGrade(){var p=find(sel.player);return p?grade(p,sel.stat,parseFloat(sel.line),sel.opp):null}
 function addSlip(g){if(slip.some(function(s){return norm(s.player)===norm(g.player)&&s.stat===g.stat})){toast('Already on slip');return}slip.push({player:g.player,stat:g.stat,line:g.line,pick:g.pick,grade:g.grade});save('gp_slip',slip);toast('Added '+g.player+' '+g.pick+' '+g.line)}
 function openP(n){sel.pl=n;sel.v='all';sel.o='';var r=recents().filter(function(x){return x!==n});r.unshift(n);save('gp_recent',r.slice(0,8));tab='players';render();window.scrollTo(0,0);toast('Stats for '+n)}
@@ -149,7 +161,7 @@ document.addEventListener('click',function(e){var b=e.target.closest('[data-act]
  else if(a==='pg'){sel.player=b.dataset.p;var p=find(sel.player);sel.opp='';go('grader');toast('Loaded '+sel.player+'. Enter a line')}
  else if(a==='grade'){sel.player=$('gp').value;sel.stat=$('gs').value;sel.line=$('gl').value;sel.opp=$('go').value;render();toast('Graded')}
  else if(a==='gadd'){var g=curGrade();if(g)addSlip(g)}
- else if(a==='gimg'){var g2=curGrade();if(g2)img({g:g2},function(c){dl(c,'grade-1080x1350.png');toast('Image downloaded')})}
+ else if(a==='gimg'){var g2=curGrade();if(g2)img({g:g2},function(c){dl(c,'grade-1080x1350.png')})}
  else if(a==='gshare'){var g3=curGrade();if(g3)img({g:g3},function(c){share(c,'grade.png')})}
  else if(a==='madd'){var n=$('mp').value.trim(),l=parseFloat($('ml').value);if(!n||isNaN(l)){toast('Enter a player and a line');return}var p2=find(n);manual.push({player:p2?p2.name:n,team:p2?p2.team:'',stat:$('ms').value,line:l,opponent:$('mo').value,period:'Maps 1-2',src:'manual'});save('gp_manual',manual);render();toast('Line saved')}
  else if(a==='ldel'){manual.splice(i-LINES.length,1);save('gp_manual',manual);render();toast('Line removed')}
@@ -160,7 +172,7 @@ document.addEventListener('click',function(e){var b=e.target.closest('[data-act]
  else if(a==='sclear'){slip=[];save('gp_slip',slip);render();toast('Slip cleared')}
  else if(a==='scopy'){var t=slip.map(function(s){return s.player+' '+sname(s.stat)+' '+s.pick+' '+s.line}).join('\n');(navigator.clipboard?navigator.clipboard.writeText(t):Promise.reject()).then(function(){toast('Copied')}).catch(function(){toast('Copy not allowed here')})}
  else if(a==='spp'){window.open('https://app.prizepicks.com','_blank','noopener');toast('Opening PrizePicks. Enter your picks there')}
- else if(a==='simg'){if(!slip.length){toast('Slip is empty');return}img({},function(c){dl(c,'slip-1080x1350.png');toast('Image downloaded')})}
+ else if(a==='simg'){if(!slip.length){toast('Slip is empty');return}img({},function(c){dl(c,'slip-1080x1350.png')})}
  else if(a==='sshare'){if(!slip.length){toast('Slip is empty');return}img({},function(c){share(c,'slip.png')})}
 });
 document.addEventListener('input',function(e){if(e.target.id==='pq'){sel.q=e.target.value;var pos=e.target.selectionStart;render();var n=$('pq');n.focus();n.setSelectionRange(pos,pos)}});
