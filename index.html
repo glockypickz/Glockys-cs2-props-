@@ -44,6 +44,7 @@ pre{background:var(--bg);border:1px solid var(--bd);border-radius:8px;padding:10
    <div><label>Line</label><input id="line" type="number" step="0.5" value="17.5"></div></div>
   <div class="row"><div><label>Sample</label><select id="n"><option>5</option><option selected>10</option><option>20</option><option value="999">All</option></select></div>
    <div><label>Map filter</label><select id="map"></select></div></div>
+  <div class="row"><div><label>Scope</label><select id="scope"><option value="m12" selected>Maps 1-2 combined</option><option value="m1">Map 1 only</option><option value="all">Every map (single)</option></select></div><div></div></div>
  </div>
  <div class="card" id="res"></div>
 </div>
@@ -57,24 +58,6 @@ pre{background:var(--bg);border:1px solid var(--bd);border-radius:8px;padding:10
   <textarea id="json" placeholder='{"players":[{"name":"","team":"","logs":[{"date":"2026-10-01","map":"Mirage","opp":"","kills":18,"hs":8}]}]}'></textarea>
   <div class="row"><button class="p" id="load">Load JSON</button><button class="s" id="demo">Use demo data</button><button class="s" id="snap">Use bo3.gg data</button></div>
   <div class="sub" id="msg" style="margin-top:8px"></div>
- </div>
- <div class="card">
-  <h2>Helper script (Node)</h2>
-  <div class="warn">Starting point, untested against HLTV’s current layout. Uses the unofficial <code>hltv</code> npm package. If it’s blocked, swap in bo3.gg’s API or export from their site.</div>
-  <pre>npm i hltv
-// export.mjs
-import HLTV from 'hltv'
-import fs from 'fs'
-const rank = await HLTV.getTeamRanking()
-const players = []
-for (const r of rank.slice(0, 30)) {
-  const team = await HLTV.getTeam({ id: r.team.id })
-  for (const p of team.players) {
-    const logs = [] // fill from HLTV.getPlayerStats / match pages
-    players.push({ name: p.name, team: team.name, logs })
-  }
-}
-fs.writeFileSync('players.json', JSON.stringify({ players }))</pre>
  </div>
 </div>
 
@@ -95,9 +78,14 @@ function cur(){var n=$('player').value,t=$('team').value;return DB.filter(functi
 function fillMaps(){var p=cur();var m={};if(p)(p.logs||[]).forEach(function(l){if(l.map)m[l.map]=1});var old=$('map').value;$('map').innerHTML='<option value="">All maps</option>'+Object.keys(m).sort().map(function(x){return '<option>'+esc(x)+'</option>'}).join('');if(m[old])$('map').value=old;calc()}
 function esc(s){return String(s).replace(/[&<>"]/g,function(c){return{'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]})}
 function calc(){var r=$('res'),p=cur();if(!p){r.innerHTML='<div class="sub">No data loaded yet. Go to the Data tab.</div>';return}
- var st=$('stat').value,line=parseFloat($('line').value),n=parseInt($('n').value),mp=$('map').value;
+ var st=$('stat').value,line=parseFloat($('line').value),n=parseInt($('n').value),mp=$('map').value,sc=$('scope').value;
  var logs=(p.logs||[]).slice().sort(function(a,b){return (b.date||'')>(a.date||'')?1:-1});
- if(mp)logs=logs.filter(function(l){return l.map===mp});logs=logs.slice(0,n);
+ if(sc!=='all'&&!logs.some(function(l){return l.n!=null})){r.innerHTML='<div class="sub">This data has no map-number info yet. Run the "Update CS2 data" workflow in GitHub Actions to regenerate players.json, or set Scope to Every map.</div>';return}
+ if(sc==='m1'){logs=logs.filter(function(l){return l.n===1});if(mp)logs=logs.filter(function(l){return l.map===mp})}
+ else if(sc==='m12'){var by={};logs.forEach(function(l){if((l.n===1||l.n===2)&&l.mid!=null){var g=by[l.mid]=by[l.mid]||{date:l.date,opp:l.opp,maps:{},kills:0,hs:0,hsOk:true};g.maps[l.n]=l.map;g.kills+=Number(l.kills)||0;if(l.hs==null)g.hsOk=false;else g.hs+=Number(l.hs)||0}});
+  logs=Object.keys(by).map(function(k){return by[k]}).filter(function(g){return g.maps[1]&&g.maps[2]}).map(function(g){return{date:g.date,map:g.maps[1]+' + '+g.maps[2],opp:g.opp,kills:g.kills,hs:g.hsOk?g.hs:null}}).sort(function(a,b){return (b.date||'')>(a.date||'')?1:-1})}
+ else if(mp)logs=logs.filter(function(l){return l.map===mp});
+ logs=logs.slice(0,n);
  var v=logs.map(function(l){return Number(l[st])}).filter(function(x){return !isNaN(x)});
  if(!v.length||isNaN(line)){r.innerHTML='<div class="sub">Not enough data for this selection.</div>';return}
  var avg=v.reduce(function(a,b){return a+b},0)/v.length;var s=v.slice().sort(function(a,b){return a-b});var med=s.length%2?s[(s.length-1)/2]:(s[s.length/2-1]+s[s.length/2])/2;
@@ -112,9 +100,10 @@ function renderRoster(){var q=($('q').value||'').toLowerCase();var by={};DB.forE
 function tab(i){[1,2,3].forEach(function(k){$('v'+k).classList.toggle('hide',k!==i);$('t'+k).classList.toggle('on',k===i)})}
 [1,2,3].forEach(function(k){$('t'+k).onclick=function(){tab(k)}});
 $('team').onchange=fillPlayers;$('player').onchange=fillMaps;
-['stat','line','n','map'].forEach(function(i){$(i).oninput=calc});$('q').oninput=renderRoster;
+['stat','line','n','map','scope'].forEach(function(i){$(i).oninput=calc});$('q').oninput=renderRoster;
 $('load').onclick=function(){try{var d=JSON.parse($('json').value);var a=Array.isArray(d)?d:d.players;if(!a||!a.length)throw 0;DB=a.filter(function(p){return p&&p.name&&p.team});setSrc('custom');save();refresh();$('msg').textContent='Loaded '+DB.length+' players.';tab(1)}catch(e){$('msg').textContent='Couldn’t read that JSON. Check the format.'}};
 $('demo').onclick=function(){DB=demo();setSrc('custom');save();refresh();$('msg').textContent='Demo data loaded. It’s random placeholder data, not real stats.';tab(1)};
 $('snap').onclick=function(){setSrc('snap');try{localStorage.removeItem('cs2db')}catch(e){}loadRemote();$('msg').textContent='Loaded the bundled bo3.gg data.';tab(1)};
 init();
 </script></body></html>
+
