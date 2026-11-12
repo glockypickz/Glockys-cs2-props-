@@ -30,7 +30,10 @@ function addDays(ymd,n){var d=new Date(ymd+'T12:00:00Z');d.setUTCDate(d.getUTCDa
 function dayLabel(ymd){var t=cday();if(ymd===t)return 'Today';if(ymd===addDays(t,1))return 'Tomorrow';return new Intl.DateTimeFormat('en-US',{timeZone:'UTC',weekday:'short',month:'short',day:'numeric'}).format(new Date(ymd+'T12:00:00Z'))}
 function teq(a,b){a=norm(a).replace(/^team/,'');b=norm(b).replace(/^team/,'');return !!a&&a===b}
 function NOW(){return Date.now()}
-function isLive(g){return g.status==='live'&&(NOW()-new Date(g.start).getTime())<12*3600000}
+function boN(b){var n=parseInt(String(b==null?'':b).replace(/\D/g,''),10);return isNaN(n)?null:n}
+function isLive(g){if(g.status!=='live')return false;var n=boN(g.bo),age=(NOW()-new Date(g.start).getTime())/3600000;
+ if(n&&n>=3&&g.s1!=null&&g.s2!=null&&Math.max(g.s1,g.s2)>=Math.floor(n/2)+1)return false;
+ return age<({1:3,3:8,5:12}[n]||12)}
 function isUp(g){if(g.status==='live'||g.status==='finished')return false;return new Date(g.start).getTime()>NOW()-10*60000}
 function liveGames(){return GAMES.filter(isLive)}
 function upGames(){return GAMES.filter(isUp)}
