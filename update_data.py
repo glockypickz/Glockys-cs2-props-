@@ -1,11 +1,14 @@
 """Fetch recent per-map CS2 player stats for every active ranked team from bo3.gg -> players.json."""
-import asyncio, json, datetime, aiohttp
+import asyncio, json, datetime, time, aiohttp
 
 B = "https://api.bo3.gg/api/v1"
 H = {"accept": "application/json", "origin": "https://bo3.gg", "referer": "https://bo3.gg/",
      "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/122.0.0.0 Safari/537.36"}
 
 MAX_TEAMS = 150          # ranked teams to consider
+MAX_UNRANKED = 250       # extra active teams bo3.gg has no rank for (raise for more, run gets longer)
+DISCOVERY_PAGES = 60     # pages of 100 recent matches scanned to find active unranked teams
+TIME_LIMIT = 4.5 * 3600  # seconds; stop cleanly and save what we have
 MATCHES_PER_TEAM = 15   # last 15 needs 15 matches per team (run takes longer)
 ACTIVE_DAYS = 120        # skip teams with no match in this many days
 DELAY = 0.3
@@ -97,7 +100,17 @@ async def do_team(s, t, cutoff, out):
     if not rows:
         print("no data:", tname)
         return
-    roster = {r["name"] for r in rows if r["mid"] == rows[0]["mid"]}
+    # Roster = newest lineup plus anyone who played 2+ of the 3 latest series (keeps regulars who sat out once)
+    mids = []
+    for r in rows:
+        if r["mid"] not in mids:
+            mids.append(r["mid"])
+    recent = mids[:3]
+    seen = {}
+    for r in rows:
+        if r["mid"] in recent:
+            seen.setdefault(r["name"], set()).add(r["mid"])
+    roster = {r["name"] for r in rows if r["mid"] == rows[0]["mid"]} | {n for n, v in seen.items() if len(v) >= 2}
     for r in rows:
         if r["name"] in roster:
             e = out.setdefault(f"{tname}|{r['name']}", {"name": r["name"], "team": tname, "logs": []})
@@ -126,6 +139,38 @@ async def upcoming(s):
         print("schedule fetch failed:", e)
     return games
 
+async def unranked_teams(s, known_ids, cutoff):
+    """Teams that played a match since cutoff but have no ranked listing. Best tier first, then most active."""
+    found = {}
+    for page in range(DISCOVERY_PAGES):
+        try:
+            d = await get(s, "/matches", {
+                "scope": "widget-matches", "page[offset]": page * 100, "page[limit]": 100,
+                "sort": "-start_date", "filter[matches.status][in]": "finished",
+                "filter[matches.discipline_id][eq]": 1, "with": "teams,tournament"})
+        except Exception as e:
+            print("discovery stopped:", e)
+            break
+        res = d.get("results", [])
+        if not res:
+            break
+        for m in res:
+            if m["start_date"][:10] < cutoff:
+                res = None
+                break
+            tier = (m.get("tournament") or {}).get("tier_rank") or 99
+            for t in (m.get("team1"), m.get("team2")):
+                if t and t.get("id") and t["id"] not in known_ids:
+                    e = found.setdefault(t["id"], {"id": t["id"], "slug": t.get("slug", ""),
+                                                   "name": t.get("name") or t.get("slug", ""), "n": 0, "tier": 99})
+                    e["n"] += 1
+                    e["tier"] = min(e["tier"], tier)
+        if res is None:
+            break
+    out = sorted(found.values(), key=lambda e: (e["tier"], -e["n"]))
+    print("unranked active teams found:", len(out))
+    return out[:MAX_UNRANKED]
+
 async def main():
     out = {}
     cutoff = (datetime.date.today() - datetime.timedelta(days=ACTIVE_DAYS)).isoformat()
@@ -134,11 +179,17 @@ async def main():
         ranks = {t.get("name", t["slug"]): t["rank"] for t in teams if t.get("rank")}
         games = await upcoming(s)
         print(len(teams), "ranked teams")
-        for t in teams:
+        extra = await unranked_teams(s, {t["id"] for t in teams}, cutoff)
+        started = time.time()
+        for i, t in enumerate(teams + extra):
+            if time.time() - started > TIME_LIMIT:
+                print(f"time limit reached after {i} teams, saving what we have")
+                break
             try:
                 await do_team(s, t, cutoff, out)
             except Exception as e:
                 print("skip", t.get("slug"), e)
+        print("teams with players:", len({v["team"] for v in out.values()}), "| players:", len(out))
     if len(out) < 20:
         raise SystemExit(f"Only {len(out)} players fetched, keeping the old players.json")
     today = datetime.date.today().isoformat()
