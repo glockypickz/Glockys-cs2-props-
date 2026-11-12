@@ -1,0 +1,120 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>CS2 Props Research</title>
+<style>
+:root{box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px);--bg:#f6f7f9;--card:#fff;--tx:#14171c;--mu:#667085;--bd:#e2e5ea;--ac:#e8590c;--ov:#2f9e44;--un:#d6336c}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){color-scheme:dark;--bg:#0f1216;--card:#181c22;--tx:#eceff4;--mu:#98a1b0;--bd:#2a303a;--ac:#ff8a3d;--ov:#51cf66;--un:#f06595}}
+:root[data-theme="dark"]{color-scheme:dark;--bg:#0f1216;--card:#181c22;--tx:#eceff4;--mu:#98a1b0;--bd:#2a303a;--ac:#ff8a3d;--ov:#51cf66;--un:#f06595}
+html{scroll-padding-top:env(safe-area-inset-top,0px)}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--tx);font:15px/1.45 system-ui,-apple-system,Segoe UI,sans-serif;padding:14px;max-width:760px;margin-inline:auto}
+h1{font-size:20px;margin:4px 0 2px}h2{font-size:15px;margin:0 0 8px}
+.sub{color:var(--mu);font-size:13px;margin-bottom:12px}
+.tabs{display:flex;gap:6px;margin-bottom:12px}
+.tabs button{flex:1;padding:9px;border:1px solid var(--bd);background:var(--card);color:var(--tx);border-radius:10px;font-size:14px}
+.tabs button.on{background:var(--ac);color:#fff;border-color:var(--ac)}
+.card{background:var(--card);border:1px solid var(--bd);border-radius:12px;padding:12px;margin-bottom:12px}
+label{display:block;font-size:12px;color:var(--mu);margin:8px 0 3px}
+select,input,textarea{width:100%;padding:9px;border:1px solid var(--bd);border-radius:8px;background:var(--bg);color:var(--tx);font:inherit}
+textarea{min-height:140px;font:12px/1.4 ui-monospace,monospace}
+.row{display:flex;gap:8px}.row>*{flex:1}
+button.p{background:var(--ac);color:#fff;border:0;padding:10px 14px;border-radius:8px;font-size:14px;margin-top:10px}
+button.s{background:transparent;color:var(--tx);border:1px solid var(--bd);padding:9px 12px;border-radius:8px;font-size:13px;margin-top:10px}
+.stats{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin:10px 0}
+.st{border:1px solid var(--bd);border-radius:10px;padding:8px;text-align:center}
+.st b{display:block;font-size:18px}.st span{font-size:11px;color:var(--mu)}
+.bars{display:flex;align-items:flex-end;gap:3px;height:110px;border-bottom:1px solid var(--bd);position:relative;margin-top:8px}
+.bar{flex:1;border-radius:3px 3px 0 0;min-width:6px}
+.line{position:absolute;left:0;right:0;border-top:2px dashed var(--ac)}
+.wrap{overflow-x:auto}table{width:100%;border-collapse:collapse;font-size:13px}
+td,th{padding:6px 8px;border-bottom:1px solid var(--bd);text-align:left;white-space:nowrap}
+.warn{font-size:12px;color:var(--mu);border-left:3px solid var(--ac);padding-left:8px;margin:8px 0}
+pre{background:var(--bg);border:1px solid var(--bd);border-radius:8px;padding:10px;font-size:11.5px;overflow-x:auto}
+.hide{display:none}.pill{display:inline-block;padding:2px 8px;border-radius:99px;font-size:12px;color:#fff}
+</style></head><body>
+<h1>CS2 Props Research</h1>
+<div class="sub">Loading bo3.gg data...</div>
+<div class="tabs"><button id="t1" class="on">Props</button><button id="t2">Rosters</button><button id="t3">Data</button></div>
+
+<div id="v1">
+ <div class="card">
+  <div class="row"><div><label>Team</label><select id="team"></select></div><div><label>Player</label><select id="player"></select></div></div>
+  <div class="row"><div><label>Stat</label><select id="stat"><option value="kills">Kills</option><option value="hs">Headshots</option></select></div>
+   <div><label>Line</label><input id="line" type="number" step="0.5" value="17.5"></div></div>
+  <div class="row"><div><label>Sample</label><select id="n"><option>5</option><option selected>10</option><option>20</option><option value="999">All</option></select></div>
+   <div><label>Map filter</label><select id="map"></select></div></div>
+ </div>
+ <div class="card" id="res"></div>
+</div>
+
+<div id="v2" class="hide"><div class="card"><input id="q" placeholder="Search players or teams"><div class="wrap"><table id="roster"></table></div></div></div>
+
+<div id="v3" class="hide">
+ <div class="card">
+  <h2>Load data</h2>
+  <div class="warn">Published pages can’t call HLTV or bo3.gg directly (the browser blocks outside requests, and HLTV blocks scrapers). Run the helper script below on your computer to export real data, then paste the JSON here.</div>
+  <textarea id="json" placeholder='{"players":[{"name":"","team":"","logs":[{"date":"2026-10-01","map":"Mirage","opp":"","kills":18,"hs":8}]}]}'></textarea>
+  <div class="row"><button class="p" id="load">Load JSON</button><button class="s" id="demo">Use demo data</button><button class="s" id="snap">Use bo3.gg data</button></div>
+  <div class="sub" id="msg" style="margin-top:8px"></div>
+ </div>
+ <div class="card">
+  <h2>Helper script (Node)</h2>
+  <div class="warn">Starting point, untested against HLTV’s current layout. Uses the unofficial <code>hltv</code> npm package. If it’s blocked, swap in bo3.gg’s API or export from their site.</div>
+  <pre>npm i hltv
+// export.mjs
+import HLTV from 'hltv'
+import fs from 'fs'
+const rank = await HLTV.getTeamRanking()
+const players = []
+for (const r of rank.slice(0, 30)) {
+  const team = await HLTV.getTeam({ id: r.team.id })
+  for (const p of team.players) {
+    const logs = [] // fill from HLTV.getPlayerStats / match pages
+    players.push({ name: p.name, team: team.name, logs })
+  }
+}
+fs.writeFileSync('players.json', JSON.stringify({ players }))</pre>
+ </div>
+</div>
+
+<script>
+var SNAP={"players":[]};
+var DB=[];var META='';var $=function(i){return document.getElementById(i)};
+function save(){try{localStorage.setItem('cs2db',JSON.stringify(DB))}catch(e){}}
+function init(){var custom=false;try{custom=localStorage.getItem('cs2src')==='custom';var s=localStorage.getItem('cs2db');if(custom&&s)DB=JSON.parse(s)}catch(e){DB=[]}if(!DB.length){loadRemote();return}refresh()}
+function loadRemote(){fetch('players.json?'+Date.now()).then(function(r){return r.json()}).then(function(d){SNAP=d;DB=d.players;META=d.updated?(' · updated '+d.updated):'';var s=document.querySelector('.sub');if(s)s.textContent='bo3.gg data'+META+' ('+DB.length+' players)';refresh()}).catch(function(){$('res').innerHTML='<div class="sub">Could not load players.json. Open this page from the hosted site, not as a local file.</div>'})}
+function setSrc(v){try{localStorage.setItem('cs2src',v)}catch(e){}}
+function demo(){var maps=['Mirage','Inferno','Nuke','Ancient','Anubis','Dust2'],out=[];
+ for(var t=1;t<=2;t++){for(var p=1;p<=3;p++){var logs=[];for(var i=0;i<20;i++){var k=10+Math.floor(Math.random()*18);logs.push({date:'2026-10-'+String(28-i).padStart(2,'0'),map:maps[(i+p)%6],opp:'Demo Opp',kills:k,hs:Math.floor(k*(0.35+Math.random()*0.2))})}
+ out.push({name:'Demo Player '+t+String.fromCharCode(64+p),team:'Demo Team '+t,logs:logs})}}return out}
+function teams(){var s={};DB.forEach(function(p){s[p.team]=1});return Object.keys(s).sort()}
+function refresh(){var tm=$('team');var cur=tm.value;tm.innerHTML=teams().map(function(t){return '<option>'+esc(t)+'</option>'}).join('');if(cur&&teams().indexOf(cur)>-1)tm.value=cur;fillPlayers();renderRoster()}
+function fillPlayers(){var t=$('team').value;$('player').innerHTML=DB.filter(function(p){return p.team===t}).map(function(p){return '<option>'+esc(p.name)+'</option>'}).join('');fillMaps()}
+function cur(){var n=$('player').value,t=$('team').value;return DB.filter(function(p){return p.name===n&&p.team===t})[0]}
+function fillMaps(){var p=cur();var m={};if(p)(p.logs||[]).forEach(function(l){if(l.map)m[l.map]=1});var old=$('map').value;$('map').innerHTML='<option value="">All maps</option>'+Object.keys(m).sort().map(function(x){return '<option>'+esc(x)+'</option>'}).join('');if(m[old])$('map').value=old;calc()}
+function esc(s){return String(s).replace(/[&<>"]/g,function(c){return{'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]})}
+function calc(){var r=$('res'),p=cur();if(!p){r.innerHTML='<div class="sub">No data loaded yet. Go to the Data tab.</div>';return}
+ var st=$('stat').value,line=parseFloat($('line').value),n=parseInt($('n').value),mp=$('map').value;
+ var logs=(p.logs||[]).slice().sort(function(a,b){return (b.date||'')>(a.date||'')?1:-1});
+ if(mp)logs=logs.filter(function(l){return l.map===mp});logs=logs.slice(0,n);
+ var v=logs.map(function(l){return Number(l[st])}).filter(function(x){return !isNaN(x)});
+ if(!v.length||isNaN(line)){r.innerHTML='<div class="sub">Not enough data for this selection.</div>';return}
+ var avg=v.reduce(function(a,b){return a+b},0)/v.length;var s=v.slice().sort(function(a,b){return a-b});var med=s.length%2?s[(s.length-1)/2]:(s[s.length/2-1]+s[s.length/2])/2;
+ var sd=Math.sqrt(v.reduce(function(a,b){return a+(b-avg)*(b-avg)},0)/v.length);
+ var ov=v.filter(function(x){return x>line}).length,un=v.filter(function(x){return x<line}).length;
+ var mx=Math.max.apply(null,v.concat([line]))*1.1;
+ var bars=v.slice().reverse().map(function(x){return '<div class="bar" title="'+x+'" style="height:'+(x/mx*100)+'%;background:var(--'+(x>line?'ov':x<line?'un':'mu')+')"></div>'}).join('');
+ var rows=logs.slice(0,10).map(function(l){return '<tr><td>'+esc(l.date||'')+'</td><td>'+esc(l.map||'')+'</td><td>'+esc(l.opp||'')+'</td><td>'+(l[st]==null?'':l[st])+'</td></tr>'}).join('');
+ r.innerHTML='<h2>'+esc(p.name)+' · '+esc(p.team)+'</h2><div class="stats"><div class="st"><b>'+avg.toFixed(1)+'</b><span>Average</span></div><div class="st"><b>'+med+'</b><span>Median</span></div><div class="st"><b>'+sd.toFixed(1)+'</b><span>Std dev</span></div><div class="st"><b style="color:var(--ov)">'+ov+'/'+v.length+'</b><span>Over '+line+' ('+Math.round(ov/v.length*100)+'%)</span></div><div class="st"><b style="color:var(--un)">'+un+'/'+v.length+'</b><span>Under</span></div><div class="st"><b>'+(avg-line>=0?'+':'')+(avg-line).toFixed(1)+'</b><span>Avg vs line</span></div></div><div class="bars"><div class="line" style="bottom:'+(line/mx*100)+'%"></div>'+bars+'</div><div class="sub">Oldest to newest, green = over, pink = under</div><div class="wrap"><table><tr><th>Date</th><th>Map</th><th>Opp</th><th>'+st+'</th></tr>'+rows+'</table></div>'}
+function renderRoster(){var q=($('q').value||'').toLowerCase();var by={};DB.forEach(function(p){if((p.name+p.team).toLowerCase().indexOf(q)>-1){(by[p.team]=by[p.team]||[]).push(p)}});
+ var h='<tr><th>Team</th><th>Player</th><th>Maps logged</th></tr>';Object.keys(by).sort().forEach(function(t){by[t].forEach(function(p){h+='<tr><td>'+esc(t)+'</td><td>'+esc(p.name)+'</td><td>'+(p.logs||[]).length+'</td></tr>'})});$('roster').innerHTML=h}
+function tab(i){[1,2,3].forEach(function(k){$('v'+k).classList.toggle('hide',k!==i);$('t'+k).classList.toggle('on',k===i)})}
+[1,2,3].forEach(function(k){$('t'+k).onclick=function(){tab(k)}});
+$('team').onchange=fillPlayers;$('player').onchange=fillMaps;
+['stat','line','n','map'].forEach(function(i){$(i).oninput=calc});$('q').oninput=renderRoster;
+$('load').onclick=function(){try{var d=JSON.parse($('json').value);var a=Array.isArray(d)?d:d.players;if(!a||!a.length)throw 0;DB=a.filter(function(p){return p&&p.name&&p.team});setSrc('custom');save();refresh();$('msg').textContent='Loaded '+DB.length+' players.';tab(1)}catch(e){$('msg').textContent='Couldn’t read that JSON. Check the format.'}};
+$('demo').onclick=function(){DB=demo();setSrc('custom');save();refresh();$('msg').textContent='Demo data loaded. It’s random placeholder data, not real stats.';tab(1)};
+$('snap').onclick=function(){setSrc('snap');try{localStorage.removeItem('cs2db')}catch(e){}loadRemote();$('msg').textContent='Loaded the bundled bo3.gg data.';tab(1)};
+init();
+</script></body></html>
