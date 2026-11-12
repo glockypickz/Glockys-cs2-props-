@@ -1,4 +1,4 @@
-"""One-time test: ask KashRock for CS2 props WITHOUT a market filter and print what comes back.
+"""Test 2: print what is inside KashRock's `groups` list for CS2 props.
 
 Writes nothing. Never prints the API key.
 """
@@ -26,47 +26,58 @@ def fetch(path, params):
         return 0, str(e)
 
 
-def show(title, params):
+def walk(obj, path, found):
+    """Collect every string value whose key mentions market/stat/prop/period."""
+    if isinstance(obj, dict):
+        for k, v in obj.items():
+            if isinstance(v, (dict, list)):
+                walk(v, path + "." + k, found)
+            elif isinstance(v, str) and any(w in k.lower() for w in ("market", "stat", "prop", "period", "map")):
+                found[k].append(v)
+    elif isinstance(obj, list):
+        for v in obj[:50]:
+            walk(v, path + "[]", found)
+
+
+def show(title, params, samples=2):
     print("\n=== " + title + " " + json.dumps(params))
     code, d = fetch("/v7/cs2/props", params)
     print("HTTP", code)
     if not isinstance(d, dict):
         print(clean(str(d)))
         return
-    print("top-level keys:", list(d.keys()))
-    for k in ("available", "reason", "fetched_at", "count", "total"):
-        if k in d:
-            print(f"{k}:", d[k])
-    rows = d.get("props") or []
-    print("rows:", len(rows))
-    if rows:
-        print("fields in a row:", list(rows[0].keys()))
-        for field in ("market", "market_key", "stat", "stat_type", "prop_type", "book_name", "direction"):
-            if field in rows[0]:
-                print(f"distinct {field}:", dict(Counter(str(r.get(field)) for r in rows)))
-        print("sample rows:")
-        for r in rows[:3]:
-            print(clean(json.dumps(r)[:600]))
+    for k in ("view", "slim", "total", "total_groups", "returned", "has_more", "stale_books", "data_sources"):
+        print(f"{k}:", clean(json.dumps(d.get(k))[:300]))
+    groups = d.get("groups") or []
+    print("groups type:", type(groups).__name__, "len:", len(groups))
+    items = list(groups.values()) if isinstance(groups, dict) else groups
+    if not items:
+        return
+    first = items[0]
+    if isinstance(first, dict):
+        print("keys in a group:", list(first.keys()))
+        for k, v in first.items():
+            if isinstance(v, list) and v and isinstance(v[0], dict):
+                print(f"  group['{k}'] is a list of {len(v)}; keys inside:", list(v[0].keys()))
+    found = {}
+    from collections import defaultdict
+    found = defaultdict(list)
+    walk(items, "", found)
+    for k, vals in found.items():
+        print(f"distinct values for '{k}':", dict(Counter(vals).most_common(12)))
+    for g in items[:samples]:
+        print("--- sample group:")
+        print(clean(json.dumps(g)[:2500]))
 
 
 def main():
     if not KEY:
         sys.exit("KASHROCK_API_KEY is not set")
-    code, meta = fetch("/v7/meta", {})
-    print("meta HTTP", code)
-    print(clean(json.dumps(meta)[:3500]))
-
-    show("prizepicks, no market", {"board": "dfs", "book": "prizepicks", "limit": 100})
-    show("underdog, no market", {"board": "dfs", "book": "underdog", "limit": 100})
-    show("no book, no market", {"board": "dfs", "limit": 100})
-    show("nothing but limit", {"limit": 100})
-    show("prizepicks, kills market", {"board": "dfs", "book": "prizepicks", "market": "CS2_KILLS_MAPS_1_2", "limit": 20})
-    show("prizepicks, plain kills", {"board": "dfs", "book": "prizepicks", "market": "CS2_KILLS", "limit": 20})
-
-    for path in ("/v7/markets", "/v7/cs2/markets", "/v7/sports", "/v7/cs2"):
-        c, d = fetch(path, {})
-        print(f"\n=== {path} -> HTTP {c}")
-        print(clean(json.dumps(d)[:1500]))
+    show("prizepicks Maps 1-2 kills", {"board": "dfs", "book": "prizepicks", "market": "CS2_KILLS_MAPS_1_2", "limit": 5})
+    show("prizepicks Maps 1-2 headshots", {"board": "dfs", "book": "prizepicks", "market": "CS2_HEADSHOTS_MAPS_1_2", "limit": 3}, samples=1)
+    show("underdog Maps 1-2 kills", {"board": "dfs", "book": "underdog", "market": "CS2_KILLS_MAPS_1_2", "limit": 3}, samples=1)
+    show("prizepicks everything (market names)", {"board": "dfs", "book": "prizepicks", "limit": 100}, samples=0)
+    show("prizepicks, slim off", {"board": "dfs", "book": "prizepicks", "market": "CS2_KILLS_MAPS_1_2", "limit": 2, "slim": "false"}, samples=1)
 
 
 if __name__ == "__main__":
