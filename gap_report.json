@@ -1,127 +1,89 @@
 {
  "summary": {
-  "lines": 188,
-  "players_on_lines": 62,
-  "ok": 48,
-  "no_series": 1,
-  "near_miss": 5,
-  "team_has_player_missing": 8,
+  "lines": 195,
+  "names": 79,
+  "ok": 73,
+  "no_series": 2,
+  "not_found": 4,
   "team_missing": 0
  },
- "team_missing": [],
- "team_has_player_missing": [
+ "no_series": [
+  {
+   "player": "molodoy",
+   "team": "FURIA",
+   "opponent": "Falcons",
+   "lines": 3,
+   "series": 0,
+   "data_name": "molodoy",
+   "data_team": "FURIA"
+  },
+  {
+   "player": "molodoy",
+   "team": "FURIA Esports",
+   "opponent": "Team Falcons",
+   "lines": 2,
+   "series": 0,
+   "data_name": "molodoy",
+   "data_team": "FURIA"
+  }
+ ],
+ "not_found": [
   {
    "player": "kyousuke",
    "team": "Falcons",
    "opponent": "FURIA",
-   "lines": 3,
-   "data_team": "Falcons"
+   "lines": 2,
+   "data_team": "Falcons",
+   "data_roster": [
+    "CEMEN_BAKIN",
+    "NiKo",
+    "TeSeS",
+    "karrigan",
+    "m0NESY"
+   ]
   },
   {
-   "player": "YumsaN",
-   "team": "FORZE Reload",
-   "opponent": "Iberian Soul",
-   "lines": 3,
-   "data_team": "FORZE Reload"
+   "player": "Tresh",
+   "team": "Spirit Academy",
+   "opponent": "ex-UPGRADE",
+   "lines": 2,
+   "data_team": "Spirit Academy",
+   "data_roster": [
+    "255",
+    "Kiryasoo",
+    "Netrix",
+    "YNT.VILBy",
+    "s1nside"
+   ]
   },
   {
-   "player": "molodoy + YEKINDAR + FalleN",
-   "team": "FURIA",
-   "opponent": "Team Falcons",
-   "lines": 1,
-   "data_team": "FURIA"
-  },
-  {
-   "player": "xertioN + torzsi + Spinx",
-   "team": "MOUZ",
-   "opponent": "Team Spirit",
-   "lines": 1,
-   "data_team": "MOUZ"
-  },
-  {
-   "player": "m0NESY + kyousuke + NiKo",
+   "player": "kyousuke",
    "team": "Team Falcons",
    "opponent": "FURIA",
-   "lines": 1,
-   "data_team": "Falcons"
-  },
-  {
-   "player": "donk + sh1ro",
-   "team": "Team Spirit",
-   "opponent": "MOUZ",
-   "lines": 1,
-   "data_team": "HYPERSPIRIT"
+   "lines": 2,
+   "data_team": "Falcons",
+   "data_roster": [
+    "CEMEN_BAKIN",
+    "NiKo",
+    "TeSeS",
+    "karrigan",
+    "m0NESY"
+   ]
   },
   {
    "player": "tO0RO",
    "team": "Virtus.Pro",
    "opponent": "BakS eSports",
    "lines": 4,
-   "data_team": "Virtus.pro"
-  },
-  {
-   "player": "kelieN",
-   "team": "WW Team",
-   "opponent": "ex-Zero Tenacity",
-   "lines": 2,
-   "data_team": "WW"
+   "data_team": "Virtus.pro",
+   "data_roster": [
+    "AquaRS",
+    "F0R3VER-",
+    "Mir",
+    "anon",
+    "b1st"
+   ]
   }
  ],
- "near_miss": [
-  {
-   "player": "glowiing",
-   "team": "BakS eSports",
-   "opponent": "Virtus.Pro",
-   "lines": 2,
-   "data_name": "CLglowiing",
-   "data_team": "BAKS",
-   "series": 15
-  },
-  {
-   "player": "fl4sh",
-   "team": "BORRACHEIROS",
-   "opponent": "BARCA",
-   "lines": 1,
-   "data_name": "FLASH",
-   "data_team": "BORRACHEIROS",
-   "series": 12
-  },
-  {
-   "player": "Ag1l",
-   "team": "Iberian Soul",
-   "opponent": "FORZE Reload",
-   "lines": 4,
-   "data_name": "agl",
-   "data_team": "Iberian Soul",
-   "series": 12
-  },
-  {
-   "player": "sh1ro",
-   "team": "Team Spirit",
-   "opponent": "MOUZ",
-   "lines": 4,
-   "data_name": "SH1R0",
-   "data_team": "Spirit",
-   "series": 15
-  },
-  {
-   "player": "zont1x",
-   "team": "Team Spirit",
-   "opponent": "MOUZ",
-   "lines": 4,
-   "data_name": "zontix",
-   "data_team": "Spirit",
-   "series": 15
-  }
- ],
- "no_series": [
-  {
-   "player": "molodoy",
-   "team": "FURIA",
-   "opponent": "Falcons",
-   "lines": 4,
-   "series": 0,
-   "data_team": "FURIA"
-  }
- ]
+ "team_missing": []
 }
