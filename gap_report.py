@@ -1,103 +1,73 @@
 """Gap report: which players on today's lines have no usable stats on the site, and why.
 
-Reads lines.json + players.json from the repo (no network, no key). Prints a short report to the
-Actions log and writes gap_report.json. Uses the same name rule as the site (letters and numbers only,
-lower case), plus a looser pass to find near-misses.
+Uses the SAME matching rules as the site (grader.py), so what it lists as missing is what the site shows as "no stats".
+Combo lines ("A + B + C") are split into their players. Reads lines.json + players.json (no network, no key).
+Prints a short report to the Actions log and writes gap_report.json.
 """
-import json, re, difflib
+import json
 from collections import defaultdict
-
-STOP = {"team", "esports", "esport", "gaming", "club"}
-
-
-def norm(s):
-    return re.sub(r"[^a-z0-9]", "", str(s or "").lower())
-
-
-def tnorm(s):
-    words = [w for w in re.split(r"[^a-z0-9]+", str(s or "").lower()) if w and w not in STOP]
-    return "".join(words)
-
-
-def team_like(a, b):
-    a, b = tnorm(a), tnorm(b)
-    if not a or not b:
-        return False
-    return a == b or (len(a) >= 4 and len(b) >= 4 and (a in b or b in a))
-
-
-def series_count(p):
-    """Series where both Map 1 and Map 2 were logged (what the grader needs)."""
-    seen = defaultdict(set)
-    for l in p.get("logs", []):
-        if l.get("n") in (1, 2) and l.get("mid") is not None:
-            seen[l["mid"]].add(l["n"])
-    return sum(1 for v in seen.values() if v >= {1, 2})
+from grader import Grader, teq
 
 
 def main():
     lines = json.load(open("lines.json", encoding="utf-8")).get("lines", [])
-    players = json.load(open("players.json", encoding="utf-8")).get("players", [])
-    by_name = defaultdict(list)
-    for p in players:
-        by_name[norm(p["name"])].append(p)
+    pj = json.load(open("players.json", encoding="utf-8"))
+    players = pj.get("players", [])
+    gr = Grader(players, pj.get("ranks") or {})
     teams = sorted({p["team"] for p in players if p.get("team")})
 
-    # one row per player on the lines (a player has many lines: kills, HS, two books)
-    rows = {}
+    rows = {}   # one row per player name on the lines (combos split)
+    combos = 0
     for l in lines:
-        k = norm(l["player"])
-        r = rows.setdefault(k, {"player": l["player"], "team": l.get("team", ""), "opponent": l.get("opponent", ""), "lines": 0})
-        r["lines"] += 1
-    ok, nodata, near, teamhas, teammissing = [], [], [], [], []
+        parts = [x.strip() for x in str(l["player"]).split("+") if x.strip()]
+        if len(parts) > 1:
+            combos += 1
+        for n in parts:
+            r = rows.setdefault((n.lower(), l.get("team", "")), {"player": n, "team": l.get("team", ""),
+                                                                  "opponent": l.get("opponent", ""), "lines": 0})
+            r["lines"] += 1
+
+    ok, noseries, missing, noteam = [], [], [], []
     for k, r in sorted(rows.items(), key=lambda kv: (kv[1]["team"].lower(), kv[1]["player"].lower())):
-        hit = by_name.get(k)
-        if hit:
-            best = max(series_count(p) for p in hit)
-            (ok if best >= 1 else nodata).append({**r, "series": best, "data_team": hit[0].get("team")})
+        p = gr.find(r["player"], r["team"])
+        if p:
+            n = len(gr.combos(p))
+            (ok if n else noseries).append({**r, "series": n, "data_name": p["name"], "data_team": p.get("team")})
             continue
-        cands = difflib.get_close_matches(k, list(by_name.keys()), n=3, cutoff=0.8)
-        if cands:
-            c = by_name[cands[0]][0]
-            near.append({**r, "data_name": c["name"], "data_team": c.get("team"), "series": series_count(c)})
-            continue
-        match = [t for t in teams if team_like(t, r["team"])]
-        if match:
-            teamhas.append({**r, "data_team": match[0]})
+        tm = [t for t in teams if teq(t, r["team"])]
+        if tm:
+            roster = sorted({p2["name"] for p2 in players if p2.get("team") in tm})
+            missing.append({**r, "data_team": tm[0], "data_roster": roster})
         else:
-            teammissing.append(r)
+            noteam.append(r)
 
-    n_lines = lambda xs: sum(x["lines"] for x in xs)
-    print("=== GAP REPORT ===")
-    print(f"lines: {len(lines)} | players on lines: {len(rows)} | players in data: {len(players)}")
-    print(f"OK (usable stats): {len(ok)} players / {n_lines(ok)} lines")
-    print(f"IN DATA but no Map 1+2 series: {len(nodata)} players / {n_lines(nodata)} lines")
-    print(f"NAME NEAR-MISS (spelling): {len(near)} players / {n_lines(near)} lines")
-    print(f"TEAM IN DATA, PLAYER MISSING: {len(teamhas)} players / {n_lines(teamhas)} lines")
-    print(f"TEAM NOT IN DATA: {len(teammissing)} players / {n_lines(teammissing)} lines")
+    nl = lambda xs: sum(x["lines"] for x in xs)
+    print("=== GAP REPORT (same matching as the site) ===")
+    print(f"lines: {len(lines)} ({combos} combo lines) | player names on lines: {len(rows)} | players in data: {len(players)}")
+    print(f"OK (usable stats): {len(ok)} names / {nl(ok)} line slots")
+    print(f"IN DATA but no Map 1+2 series: {len(noseries)}")
+    print(f"TEAM IN DATA, PLAYER NOT FOUND: {len(missing)}")
+    print(f"TEAM NOT IN DATA: {len(noteam)}")
 
-    def group(title, xs, extra=lambda x: ""):
-        if not xs:
-            return
-        print(f"\n--- {title} ---")
-        g = defaultdict(list)
-        for x in xs:
-            g[x["team"]].append(x["player"] + extra(x))
-        for t, ps in g.items():
-            print(f"{t}: " + ", ".join(ps))
+    if noseries:
+        print("\n--- IN DATA, NO MAP 1+2 SERIES (joined recently or only played single maps) ---")
+        for x in noseries:
+            print(f"{x['player']} ({x['team']}) -> {x['data_name']} [{x['data_team']}]")
+    if missing:
+        print("\n--- PLAYER NOT FOUND (the data team's roster is shown; a different nickname there may be the same person) ---")
+        for x in missing:
+            print(f"{x['player']} ({x['team']} vs {x['opponent']}) | data team {x['data_team']} roster: {', '.join(x['data_roster'])}")
+    if noteam:
+        print("\n--- TEAM NOT IN DATA ---")
+        for x in noteam:
+            print(f"{x['player']} ({x['team']})")
 
-    group("TEAM NOT IN DATA (needs a new fetch)", teammissing)
-    group("TEAM IN DATA, PLAYER MISSING (roster out of date)", teamhas, lambda x: f" [data team: {x['data_team']}]")
-    group("NAME NEAR-MISS (line name -> data name)", near, lambda x: f" -> {x['data_name']} ({x['data_team']}, {x['series']} series)")
-    group("IN DATA, NO MAP 1+2 SERIES", nodata, lambda x: f" [{x['data_team']}]")
-
-    json.dump({"summary": {"lines": len(lines), "players_on_lines": len(rows), "ok": len(ok), "no_series": len(nodata),
-                           "near_miss": len(near), "team_has_player_missing": len(teamhas), "team_missing": len(teammissing)},
-               "team_missing": teammissing, "team_has_player_missing": teamhas, "near_miss": near, "no_series": nodata},
+    json.dump({"summary": {"lines": len(lines), "names": len(rows), "ok": len(ok), "no_series": len(noseries),
+                           "not_found": len(missing), "team_missing": len(noteam)},
+               "no_series": noseries, "not_found": missing, "team_missing": noteam},
               open("gap_report.json", "w", encoding="utf-8"), indent=1, ensure_ascii=False)
     print("\nwrote gap_report.json")
 
 
 if __name__ == "__main__":
     main()
-

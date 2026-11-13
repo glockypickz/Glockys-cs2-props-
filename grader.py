@@ -2,7 +2,7 @@
 Keep this in step with app.js. Only uses players.json (stats + ranks). No network."""
 import re, math
 
-ALIASES = {"4Z": "EP.-4Z"}
+ALIASES = {"4Z": "EP.-4Z", "Ag1l": "agl"}
 
 
 def norm(s):
@@ -16,9 +16,15 @@ def canon(s):
     return re.sub(r"(.)\1+", r"\1", k)
 
 
+_SKIP = {"team", "esports", "esport", "gaming", "club"}
+
+
+def tn(s):
+    return "".join(w for w in re.split(r"[^a-z0-9]+", str(s or "").lower()) if w and w not in _SKIP)
+
+
 def teq(a, b):
-    a = re.sub(r"^team", "", norm(a))
-    b = re.sub(r"^team", "", norm(b))
+    a, b = tn(a), tn(b)
     return bool(a) and a == b
 
 
