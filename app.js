@@ -15,11 +15,11 @@ function fmt(iso){if(!iso)return '';var d=new Date(iso);if(isNaN(d))return '';
 function ftime(iso){var d=iso?new Date(iso):new Date();return new Intl.DateTimeFormat('en-US',{timeZone:'America/Chicago',hour:'numeric',minute:'2-digit',hour12:true}).format(d)}
 function toast(m){var t=$('toast');t.textContent=m;t.classList.remove('hide');clearTimeout(toast.t);toast.t=setTimeout(function(){t.classList.add('hide')},2600)}
 // ---- stats
-function combos(p){var by={};(p.logs||[]).forEach(function(l){if((l.n===1||l.n===2)&&l.mid!=null){var g=by[l.mid]=by[l.mid]||{date:l.date,opp:l.opp,m:{},kills:0,hs:0,hsOk:true,d:0,dOk:true,a:0,aOk:true,adr:[],ev:{},x:{}};g.m[l.n]=l.map;g.kills+=Number(l.kills)||0;
+function combos(p){var by={};(p.logs||[]).forEach(function(l){if((l.n===1||l.n===2)&&l.mid!=null){var g=by[l.mid]=by[l.mid]||{mid:l.mid,date:l.date,opp:l.opp,m:{},kills:0,hs:0,hsOk:true,d:0,dOk:true,a:0,aOk:true,adr:[],ev:{},x:{}};g.m[l.n]=l.map;g.kills+=Number(l.kills)||0;
  if(l.hs==null)g.hsOk=false;else g.hs+=Number(l.hs)||0;if(l.d==null)g.dOk=false;else g.d+=Number(l.d)||0;if(l.a==null)g.aOk=false;else g.a+=Number(l.a)||0;if(l.adr!=null)g.adr.push(Number(l.adr));if(l.ev)g.ev[l.ev]=1;
  if(l.x)for(var k in l.x){(g.x[k]=g.x[k]||[]).push(l.x[k])}}});
  return Object.keys(by).map(function(k){return by[k]}).filter(function(g){return g.m[1]&&g.m[2]}).map(function(g){var evs=Object.keys(g.ev),x={};for(var k in g.x)x[k]=g.x[k].reduce(function(a,b){return a+b},0);
-  return{date:g.date,opp:g.opp,maps:g.m[1]+' + '+g.m[2],kills:g.kills,hs:g.hsOk?g.hs:null,deaths:g.dOk?g.d:null,assists:g.aOk?g.a:null,adr:g.adr.length?g.adr.reduce(function(a,b){return a+b},0)/g.adr.length:null,ev:evs.length===1?evs[0]:null,x:x}}).sort(function(a,b){return a.date<b.date?1:-1})}
+  return{mid:g.mid,date:g.date,opp:g.opp,maps:g.m[1]+' + '+g.m[2],kills:g.kills,hs:g.hsOk?g.hs:null,deaths:g.dOk?g.d:null,assists:g.aOk?g.a:null,adr:g.adr.length?g.adr.reduce(function(a,b){return a+b},0)/g.adr.length:null,ev:evs.length===1?evs[0]:null,x:x}}).sort(function(a,b){return a.date<b.date?1:a.date>b.date?-1:(String(a.mid)<String(b.mid)?1:String(a.mid)>String(b.mid)?-1:0)})}
 function mean(a){return a.length?a.reduce(function(x,y){return x+y},0)/a.length:null}
 function sd(a){var m=mean(a);return a.length?Math.sqrt(mean(a.map(function(x){return (x-m)*(x-m)}))):0}
 function nums(cs,st){return cs.map(function(c){return c[st]}).filter(function(x){return x!=null})}
@@ -133,10 +133,11 @@ function recordData(){var rows=[],pending=0,nodata=0,seen={};
   var best=null;combos(p).forEach(function(c){if(!c.date||!teq(c.opp,e.opponent))return;var dd=Math.abs((new Date(c.date+'T12:00:00Z')-new Date(d0+'T12:00:00Z'))/864e5);if(dd<=1&&(!best||dd<best.dd))best={c:c,dd:dd}});
   if(!best||best.c[st]==null){nodata++;return}
   var past={name:p.name,team:p.team,logs:(p.logs||[]).filter(function(l){return l.date&&l.date<best.c.date})};
-  var line=+e.line,g=grade(past,st,line,e.opponent);if(!g){nodata++;return}
+  var lk=e.lock&&e.lock.grade?e.lock:null; // locked in when the line was first seen: the exact grade, projection and pick the app gave then
+  var line=lk?+lk.line:+e.line,g=lk?{grade:lk.grade,proj:lk.proj,pick:lk.pick}:grade(past,st,line,e.opponent);if(!g){nodata++;return}
   var act=best.c[st];if(act===line)return;seen[key]=1;
-  var pick=(g.grade==='D'||g.grade==='F')?'UNDER':'OVER';
-  rows.push({player:e.player,stat:st,line:line,act:act,pick:pick,grade:g.grade,proj:g.proj,hit:pick==='OVER'?act>line:act<line,start:e.start})});
+  var pick=lk?lk.pick:((g.grade==='D'||g.grade==='F')?'UNDER':'OVER');
+  rows.push({player:e.player,stat:st,line:line,act:act,pick:pick,grade:g.grade,proj:g.proj,locked:!!lk,hit:pick==='OVER'?act>line:act<line,start:e.start})});
  rows.sort(function(a,b){return a.start<b.start?1:-1});return{rows:rows,pending:pending,nodata:nodata,total:(HIST||[]).length}}
 function recordCard(){var h='<div class="card" style="margin-top:12px"><h2>Track record</h2>';
  if(HIST==null)return h+'<div class="warn">No line history yet. It starts saving after the next "Update CS2 lines" run with the new script.</div></div>';
@@ -145,8 +146,8 @@ function recordCard(){var h='<div class="card" style="margin-top:12px"><h2>Track
  var hits=rows.filter(function(r){return r.hit}).length,err=rows.map(function(r){return r.proj-r.act});
  h+='<div class="stats"><div class="st"><b>'+hits+'-'+(rows.length-hits)+'</b><span>Record ('+Math.round(hits/rows.length*100)+'%)</span></div><div class="st"><b>'+rows.length+'</b><span>Graded picks</span></div><div class="st"><b>'+fv(mean(err.map(Math.abs)))+'</b><span>Avg miss (kills/HS)</span></div><div class="st"><b>'+(mean(err)>=0?'+':'')+fv(mean(err))+'</b><span>Projection bias</span></div></div>';
  h+='<div class="scroll"><table><tr><th>Grade</th><th>Picks</th><th>Hit rate</th></tr>'+['A+','B','C','D','F'].map(function(G){var r=rows.filter(function(x){return x.grade===G}),hh=r.filter(function(x){return x.hit}).length;return '<tr><td>'+G+'</td><td>'+r.length+'</td><td>'+(r.length?Math.round(hh/r.length*100)+'% ('+hh+'-'+(r.length-hh)+')':'–')+'</td></tr>'}).join('')+'</table></div>';
- h+='<h2 style="margin-top:12px">Latest results</h2>'+rows.slice(0,15).map(function(r){return '<div class="item"><div><b>'+esc(r.player)+'</b> <span class="muted">'+sname(r.stat)+' · '+r.pick+' '+r.line+' · got '+r.act+' · proj '+r.proj+'</span></div><div><span class="pill '+(r.hit?'':'u')+'">'+(r.hit?'HIT':'MISS')+' · '+r.grade+'</span></div></div>'}).join('');
- return h+'<div class="muted" style="margin-top:8px">Each line is graded with only the stats from before that match, using the last line seen before it started. Pushes are skipped. '+R.pending+' pending, '+R.nodata+' not matched yet. Small samples mean little: wait for a few hundred picks before changing any weights.</div></div>'}
+ h+='<h2 style="margin-top:12px">Latest results</h2>'+rows.slice(0,15).map(function(r){return '<div class="item"><div><b>'+esc(r.player)+'</b> <span class="muted">'+sname(r.stat)+' · '+r.pick+' '+r.line+' · got '+r.act+' · proj '+r.proj+(r.locked?' · locked':'')+'</span></div><div><span class="pill '+(r.hit?'':'u')+'">'+(r.hit?'HIT':'MISS')+' · '+r.grade+'</span></div></div>'}).join('');
+ return h+'<div class="muted" style="margin-top:8px">'+rows.filter(function(r){return r.locked}).length+' of '+rows.length+' picks are locked in: the exact line, grade, projection and pick the app gave when the line first appeared. Older ones were re-graded afterwards with stats from before their match. Pushes are skipped. '+R.pending+' pending, '+R.nodata+' not matched yet. Small samples mean little: wait for a few hundred picks before changing any weights.</div></div>'}
 function opts(){var t={};DB.forEach(function(p){t[p.team]=1});return '<datalist id="plist">'+DB.map(function(p){return '<option value="'+esc(p.name)+'">'+esc(p.team)}).join('')+'</datalist><datalist id="tlist">'+Object.keys(t).sort().map(function(x){return '<option value="'+esc(x)+'">'}).join('')+'</datalist>'}
 function viewGrader(){var p=find(sel.player),line=parseFloat(sel.line),g=p&&!isNaN(line)?grade(p,sel.stat,line,sel.opp):null;
  var h='<div class="grid c2"><div class="card"><h2>Prop grader</h2><label>Player</label><input id="gp" list="plist" value="'+esc(sel.player)+'" placeholder="Start typing a player"><div class="row"><div><label>Stat</label><select id="gs"><option value="kills"'+(sel.stat==='kills'?' selected':'')+'>Kills Maps 1-2</option><option value="hs"'+(sel.stat==='hs'?' selected':'')+'>Headshots Maps 1-2</option></select></div><div><label>Line</label><input id="gl" type="number" step="0.5" value="'+esc(sel.line)+'"></div></div><label>Opponent</label><input id="go" list="tlist" value="'+esc(sel.opp)+'" placeholder="Team name"><div class="btns"><button class="b" data-act="grade">Grade it</button></div></div>';
