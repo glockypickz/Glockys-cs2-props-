@@ -28,7 +28,8 @@ function tier(r){return r<=5?'Top 5':r<=15?'Top 6-15':r<=30?'Top 16-30':'Top 31+
 function cday(iso){var d=iso?new Date(iso):new Date();if(isNaN(d))return '';var o={};new Intl.DateTimeFormat('en-US',{timeZone:'America/Chicago',year:'numeric',month:'2-digit',day:'2-digit'}).formatToParts(d).forEach(function(p){o[p.type]=p.value});return o.year+'-'+o.month+'-'+o.day}
 function addDays(ymd,n){var d=new Date(ymd+'T12:00:00Z');d.setUTCDate(d.getUTCDate()+n);return d.toISOString().slice(0,10)}
 function dayLabel(ymd){var t=cday();if(ymd===t)return 'Today';if(ymd===addDays(t,1))return 'Tomorrow';return new Intl.DateTimeFormat('en-US',{timeZone:'UTC',weekday:'short',month:'short',day:'numeric'}).format(new Date(ymd+'T12:00:00Z'))}
-function teq(a,b){a=norm(a).replace(/^team/,'');b=norm(b).replace(/^team/,'');return !!a&&a===b}
+function tn(s){var skip={team:1,esports:1,esport:1,gaming:1,club:1};return String(s||'').toLowerCase().split(/[^a-z0-9]+/).filter(function(w){return w&&!skip[w]}).join('')}
+function teq(a,b){a=tn(a);b=tn(b);return !!a&&a===b}
 function NOW(){return Date.now()}
 function boN(b){var n=parseInt(String(b==null?'':b).replace(/\D/g,''),10);return isNaN(n)?null:n}
 function isLive(g){if(g.status!=='live')return false;var n=boN(g.bo),age=(NOW()-new Date(g.start).getTime())/3600000;
@@ -42,7 +43,7 @@ function gamesAge(){var u=META.games_iso;if(!u||u.indexOf('T')<0)return null;var
 function rankOf(name){var k=norm(name);for(var t in RANK)if(norm(t)===k)return RANK[t];return null}
 // ---- player matching: exact name first, then safe fallbacks (so spelling differences between the lines feed and the stats still match)
 // ALIASES: add "name on the lines" : "name in the stats" for any player the automatic rules can't or shouldn't match.
-var ALIASES={"4Z":"EP.-4Z"};
+var ALIASES={"4Z":"EP.-4Z","Ag1l":"agl"};
 function canon(s){var k=norm(s).replace(/0/g,'o').replace(/1/g,'i').replace(/3/g,'e').replace(/4/g,'a').replace(/5/g,'s').replace(/7/g,'t');return k.replace(/(.)\1+/g,'$1')}
 var IDX=null,IDXN=-1,FM={};
 function pIndex(){if(IDX&&IDXN===DB.length)return IDX;IDX={exact:{},canon:{}};IDXN=DB.length;FM={};
@@ -107,7 +108,7 @@ function allLines(){var out=[];LINES.concat(manual).forEach(function(l,i){var st
 function chips(){var c=[];c.push('<span class="chip g">'+DB.length+' players</span>');c.push('<span class="chip">Stats updated '+esc(META.updated||'—')+'</span>');
  c.push('<span class="chip'+(liveGames().length?' g':'')+'">Games: '+(GAMES.length?liveGames().length+' live · '+upGames().length+' upcoming':'none loaded')+'</span>');c.push('<span class="chip">Lines: '+(LINES.length?LINES.length+' feed':'manual')+'</span>');c.push('<span class="chip">Opened '+ftime()+'</span>');$('chips').innerHTML=c.join('')}
 function nav(){var h=TABS.map(function(t){return '<button data-t="'+t[0]+'" class="'+(tab===t[0]?'on':'')+'"><i>'+t[1]+'</i>'+t[2]+'</button>'}).join('');$('navBot').innerHTML=h;$('navTop').innerHTML=TABS.map(function(t){return '<button data-t="'+t[0]+'" class="'+(tab===t[0]?'on':'')+'">'+t[2]+'</button>'}).join('')}
-function roster(team){var k=norm(team);return DB.filter(function(p){return norm(p.team)===k}).map(function(p){return p.name})}
+function roster(team){return DB.filter(function(p){return teq(p.team,team)}).map(function(p){return p.name})}
 function gameCard(g,full){var a=roster(g.team1),b=roster(g.team2);return '<div class="card"><div class="muted">'+esc(g.tournament||'')+' · '+esc(fmt(g.start))+(g.bo?' · Bo'+esc(g.bo):'')+'</div><div class="big">'+esc(g.team1)+' <span class="vs">vs</span> '+esc(g.team2)+'</div>'+
  (full?'<div class="muted">'+esc(g.team1)+(rankOf(g.team1)?' #'+rankOf(g.team1):'')+': '+(a.join(', ')||'no roster data')+'</div><div class="muted">'+esc(g.team2)+(rankOf(g.team2)?' #'+rankOf(g.team2):'')+': '+(b.join(', ')||'no roster data')+'</div>':'')+'<div class="btns"><button class="g" data-act="gamegrade" data-i="'+g.id+'">See props</button></div></div>'}
 function recents(){return load('gp_recent',[])}
@@ -139,7 +140,7 @@ function viewLines(){var ls=allLines(),days=lineDays(ls),cnt={},t0=cday();
  var vis=[];ls.forEach(function(l,i){var k=l.start?cday(l.start):t0;if(d==='all'||k===d)vis.push([l,i])});
  vis.sort(function(a,b){var x=a[0].start||'9',y=b[0].start||'9';if(x!==y)return x<y?-1:1;var ea=a[0].g?Math.abs(a[0].g.edge/a[0].line):0,eb=b[0].g?Math.abs(b[0].g.edge/b[0].line):0;return eb-ea});
  h+='<div class="grid c2"><div class="card"><h2>'+(d==='all'?'All lines':esc(dayLabel(d))+' lines')+' · PrizePicks + Underdog · Maps 1-2</h2>'+(LINES.length?'<div class="muted">Feed observed '+esc(META.lines_at||'')+'. Refreshes about every hour. Times are Central.</div>':'<div class="warn">No lines feed is connected yet, so lines are manual. PrizePicks is the source of truth: type the line you see in the app.</div>')+
- (vis.length?vis.map(function(a){var l=a[0],i=a[1],g=l.g,live=l.team&&liveFor(l.team),started=l.start&&new Date(l.start).getTime()<NOW();return '<div class="item"><div><b>'+esc(l.player)+'</b> <span class="muted">'+esc(l.team)+(l.opp?' vs '+esc(l.opp):'')+'</span>'+(live?' <span class="pill">LIVE</span>':(started?' <span class="muted">· started</span>':''))+'<br><span class="muted">'+(l.book?esc(l.book)+' · ':'')+sname(l.stat)+(l.start?' · '+esc(fmt(l.start)):'')+' · </span><b>'+l.line+'</b>'+(g?'<span class="muted"> · proj '+g.proj+' · over '+g.over+'/'+g.of+'</span>':'<span class="muted"> · no stats for '+(l.miss?esc(l.miss):'this player')+'</span>')+'</div><div style="text-align:right">'+(g?'<span class="pill '+(g.pick==='UNDER'?'u':'')+'">'+g.grade+' '+g.pick+'</span><br>':'')+'<button class="g" data-act="lg" data-i="'+i+'">Grade</button> <button class="g" data-act="ladd" data-i="'+i+'">+ Slip</button>'+(l.src==='manual'?' <button class="g" data-act="ldel" data-i="'+l.idx+'">✕</button>':'')+'</div></div>'}).join(''):'<div class="muted">No lines for this day yet. New lines appear as the books post them.</div>')+'</div>';
+ (vis.length?vis.map(function(a){var l=a[0],i=a[1],g=l.g,live=l.team&&liveFor(l.team),started=l.start&&new Date(l.start).getTime()<NOW();return '<div class="item"><div><b>'+esc(l.player)+'</b> <span class="muted">'+esc(l.team)+(l.opp?' vs '+esc(l.opp):'')+'</span>'+(live?' <span class="pill">LIVE</span>':(started?' <span class="muted">· started</span>':''))+'<br><span class="muted">'+(l.book?esc(l.book)+' · ':'')+sname(l.stat)+(l.start?' · '+esc(fmt(l.start)):'')+' · </span><b>'+l.line+'</b>'+(g?'<span class="muted"> · proj '+g.proj+' · over '+g.over+'/'+g.of+'</span>':'<span class="muted"> · Can\'t grade this one. '+(rp(l)?'Research the player in the Players tab':'Research needed')+'</span>')+'</div><div style="text-align:right">'+(g?'<span class="pill '+(g.pick==='UNDER'?'u':'')+'">'+g.grade+' '+g.pick+'</span><br>':'')+(g||!rp(l)?'<button class="g" data-act="lg" data-i="'+i+'">Grade</button> <button class="g" data-act="ladd" data-i="'+i+'">+ Slip</button>':'<button class="g" data-act="plview" data-p="'+esc(rp(l))+'">Research</button>')+(l.src==='manual'?' <button class="g" data-act="ldel" data-i="'+l.idx+'">✕</button>':'')+'</div></div>'}).join(''):'<div class="muted">No lines for this day yet. New lines appear as the books post them.</div>')+'</div>';
  h+='<div class="card"><h2>Add / edit a line</h2><label>Player</label><input id="mp" list="plist" placeholder="Start typing a player"><label>Stat</label><select id="ms"><option value="kills">Kills Maps 1-2</option><option value="hs">Headshots Maps 1-2</option></select><label>Opponent (optional)</label><input id="mo" list="tlist" placeholder="Team name"><label>Line</label><input id="ml" type="number" step="0.5" placeholder="e.g. 34.5"><button class="b" data-act="madd">Save line</button></div></div>';return h}
 // ---- track record: every saved line is graded with stats from BEFORE its match date, then checked against the real result
 function recordData(){var rows=[],pending=0,nodata=0,seen={};
@@ -289,6 +290,7 @@ function dl(c,name){c.toBlob(function(b){if(!b){toast('Could not build the image
 function share(c,name){dl(c,name)}
 function curGrade(){var g=gradeFor(sel.player,sel.team||'',sel.stat,parseFloat(sel.line),sel.opp);return g&&!g.missing?g:null}
 function addSlip(g){if(slip.some(function(s){return norm(s.player)===norm(g.player)&&s.stat===g.stat})){toast('Already on slip');return}slip.push({player:g.player,stat:g.stat,line:g.line,pick:g.pick,grade:g.grade});save('gp_slip',slip);toast('Added '+g.player+' '+g.pick+' '+g.line)}
+function rp(l){if(l.g||String(l.player||'').indexOf('+')>=0)return '';var p=find(l.player,l.team);return p?p.name:''}
 function openP(n){sel.pl=n;sel.v='all';sel.o='';var r=recents().filter(function(x){return x!==n});r.unshift(n);save('gp_recent',r.slice(0,8));tab='players';render();window.scrollTo(0,0);toast('Stats for '+n)}
 // ---- actions
 document.addEventListener('click',function(e){var b=e.target.closest('[data-act],[data-t]');if(!b)return;
@@ -313,7 +315,7 @@ document.addEventListener('click',function(e){var b=e.target.closest('[data-act]
  else if(a==='madd'){var n=$('mp').value.trim(),l=parseFloat($('ml').value);if(!n||isNaN(l)){toast('Enter a player and a line');return}var p2=find(n);manual.push({player:p2?p2.name:n,team:p2?p2.team:'',stat:$('ms').value,line:l,opponent:$('mo').value,period:'Maps 1-2',src:'manual'});save('gp_manual',manual);render();toast('Line saved')}
  else if(a==='ldel'){manual.splice(i-LINES.length,1);save('gp_manual',manual);render();toast('Line removed')}
  else if(a==='lg'){var l2=allLines()[i];sel={player:l2.player,stat:l2.stat,line:String(l2.line),opp:l2.opp,team:l2.team};go('grader');toast('Loaded '+l2.player)}
- else if(a==='ladd'){var l3=allLines()[i];if(!l3.g){toast('No stats for '+l3.player);return}addSlip(l3.g);render()}
+ else if(a==='ladd'){var l3=allLines()[i];if(!l3.g){toast('Can\'t grade this one. Research the player in the Players tab');return}addSlip(l3.g);render()}
  else if(a==='auto'){var r=buildSlip(+b.dataset.n,b.dataset.m||'bal');if(!r.out.length){toast('No graded lines yet. Add lines first');return}slip=r.out;save('gp_slip',slip);render();toast(r.msg)}
  else if(a==='sdel'){slip.splice(i,1);save('gp_slip',slip);render();toast('Removed')}
  else if(a==='sclear'){slip=[];save('gp_slip',slip);render();toast('Slip cleared')}
@@ -336,5 +338,42 @@ function boot(){Promise.all([getJSON('players.json'),feeds()]).then(function(r){
  }).catch(function(){$('main').innerHTML='<div class="card"><div class="warn">Could not load players.json. Open this from the hosted site.</div></div>';nav()})}
 setInterval(function(){if(document.hidden||!DB.length)return;var ae=document.activeElement;if(ae&&/INPUT|SELECT|TEXTAREA/.test(ae.tagName))return;if(['games','lines','dash'].indexOf(tab)<0)return;
  feeds().then(function(r){applyFeeds(r[0],r[1],r[2]);if(!document.getElementById('imgov'))render()})},60000);
-nav();boot();
+// ---- AI chat: answers only from the app's own numbers. The page builds a small facts sheet; the Cloudflare Worker adds the key.
+var chatLog=[],chatBusy=false;
+function f1(x,d){return x==null||isNaN(x)?'n/a':x.toFixed(d==null?1:d)}
+function aiPlayerFacts(p){var all=combos(p),l10=all.slice(0,10),S=summ(l10),A=summ(all);
+ var t=p.name+' ('+p.team+(rankOf(p.team)?', team rank #'+rankOf(p.team):'')+'): '+all.length+' series logged with both Map 1 and Map 2.\n';
+ t+='Last '+l10.length+' series, Maps 1-2: avg kills '+f1(S.kills)+', avg headshots '+f1(S.hs)+', kills per map '+f1(S.kpm)+', headshot % '+f1(S.hsp,0)+', K/D '+f1(S.kd,2)+', assists per map '+f1(S.apm)+', ADR '+f1(S.adr,0)+'.\n';
+ t+='All logged ('+all.length+' series): avg kills '+f1(A.kills)+', avg headshots '+f1(A.hs)+', kills per map '+f1(A.kpm)+', headshot % '+f1(A.hsp,0)+', K/D '+f1(A.kd,2)+', ADR '+f1(A.adr,0)+'.\n';
+ t+='Last 10 series (date, opponent, kills, headshots): '+l10.map(function(c){return c.date+' vs '+c.opp+' '+c.kills+'k '+(c.hs==null?'?':c.hs)+'hs'}).join('; ')+'\n';
+ var ls=allLines().filter(function(l){return l.g&&!isCombo(l.player)&&find(l.player,l.team)===p});
+ if(ls.length)t+='Current lines: '+ls.map(function(l){return sname(l.stat)+' '+(l.book?l.book+' ':'')+l.line+' vs '+(l.opp||'?')+' -> projection '+l.g.proj+', grade '+l.g.grade+', pick '+l.g.pick+', over '+l.g.over+'/'+l.g.of+' recently'}).join('; ')+'\n';
+ return t}
+function aiFacts(q){var seen={},picks=[],toks=String(q).split(/[^A-Za-z0-9_.\-]+/).filter(Boolean);
+ toks.forEach(function(w){var n=norm(w);if(n.length<2||seen[n])return;seen[n]=1;var p=find(w,'');if(p&&picks.indexOf(p)<0)picks.push(p)});
+ if(!picks.length){var cur=tab==='players'&&sel.pl?find(sel.pl):tab==='grader'&&sel.player?find(sel.player,sel.team):null;if(cur)picks.push(cur)}
+ picks=picks.slice(0,3);
+ var t='';if(!picks.length)t+='No player in the question matched the data.\n';
+ picks.forEach(function(p){t+=aiPlayerFacts(p)+'\n'});
+ t+='Grader method: projection = 35% last 10 series, 20% all logged, 20% head-to-head vs the opponent, 15% vs teams of a similar rank tier, 10% last 3 series, then a small form adjustment from ADR (capped at 5%). Grade A+ = projection 15%+ above the line, B = 5-15% above, C = within about 2% below to 5% above, D = 2-10% below, F = more than 10% below.\n';
+ return t}
+function chatUI(){if($('aibtn'))return;
+ var b=document.createElement('button');b.id='aibtn';b.type='button';b.textContent='Ask AI';document.body.appendChild(b);
+ var p=document.createElement('div');p.id='aipanel';p.className='hide';
+ p.innerHTML='<div class="aih"><b>Ask the AI</b><button type="button" id="aix" aria-label="Close">✕</button></div><div id="aimsgs"></div><div class="aif"><input id="aiq" placeholder="e.g. What is donk\'s headshot %?" maxlength="300"><button type="button" id="ais">Send</button></div>';
+ document.body.appendChild(p);
+ function show(){p.classList.toggle('hide');if(!p.classList.contains('hide')){if(!chatLog.length)addMsg('a','Ask me about any player in the app: headshot %, K/D, last 10 kills against a line, or what a grade means. I only answer from the app\'s own data.');$('aiq').focus()}}
+ b.onclick=show;$('aix').onclick=show;
+ $('ais').onclick=send;$('aiq').addEventListener('keydown',function(e){if(e.key==='Enter')send()})}
+function addMsg(who,text){var d=document.createElement('div');d.className='aim '+who;d.textContent=text;var m=$('aimsgs');m.appendChild(d);m.scrollTop=m.scrollHeight;return d}
+function send(){if(chatBusy)return;var inp=$('aiq'),q=(inp.value||'').trim();if(!q)return;inp.value='';addMsg('u',q);
+ var url=window.GP_AI_URL||'';if(!url){addMsg('a','The AI is not connected yet. Add the server address to config.js.');return}
+ chatBusy=true;var wait=addMsg('a','Thinking...');
+ var hist=chatLog.slice(-6);
+ fetch(url,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({question:q,facts:aiFacts(q),history:hist})})
+  .then(function(r){return r.json().catch(function(){return{}}).then(function(d){return{ok:r.ok,d:d}})})
+  .then(function(x){var a=x.ok&&x.d.answer?x.d.answer:(x.d.error||'Something went wrong. Try again.');wait.textContent=a;if(x.ok&&x.d.answer){chatLog.push({role:'user',content:q},{role:'assistant',content:a})}})
+  .catch(function(){wait.textContent='Could not reach the AI. Check your connection and try again.'})
+  .then(function(){chatBusy=false;var m=$('aimsgs');m.scrollTop=m.scrollHeight})}
+nav();boot();chatUI();
 })();
