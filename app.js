@@ -80,12 +80,29 @@ function grade(p,st,line,opp){var cs=combos(p);var v=nums(cs,st);if(!v.length||i
  var last=nums(cs.slice(0,10),st),over=last.filter(function(x){return x>line}).length;
  var label={'A+':'Excellent Over','B':'Lean Over','C':'Risk Lean Over','D':'Lean Under','F':'Terrible Take Under'}[g];
  return{player:p.name,team:p.team,stat:st,line:line,opp:opp||'',proj:+proj.toFixed(1),edge:+edge.toFixed(1),grade:g,label:label,pick:edge>=0?'OVER':'UNDER',comp:comp,over:over,of:last.length,sd:+sd(last).toFixed(1),cs:cs,adj:adjNote}}
+// ---- combo props ("A + B + C"): sum of each player's own projection vs the combined line
+function isCombo(n){return String(n||'').indexOf('+')>-1}
+function gradeCombo(name,team,st,line,opp){
+ var names=String(name).split('+').map(function(x){return x.trim()}).filter(Boolean);if(names.length<2||isNaN(line))return null;
+ var parts=[],proj=0,series=[];
+ for(var i=0;i<names.length;i++){var p=find(names[i],team);if(!p)return{missing:names[i]};var g=grade(p,st,1,opp);if(!g)return{missing:names[i]};
+  parts.push({name:p.name,proj:g.proj,n:g.cs.length});proj+=g.proj;series.push(g.cs)}
+ var joint=[];if(series.length){series[0].forEach(function(c0){var rows=[c0],ok=true;for(var j=1;j<series.length;j++){var m=series[j].filter(function(c){return String(c.mid)===String(c0.mid)})[0];if(!m){ok=false;break}rows.push(m)}
+  if(!ok||rows.some(function(r){return r[st]==null}))return;joint.push({mid:c0.mid,date:c0.date,opp:c0.opp,maps:c0.maps,kills:rows.reduce(function(a,r){return a+r.kills},0),hs:rows.every(function(r){return r.hs!=null})?rows.reduce(function(a,r){return a+r.hs},0):null})})}
+ proj=+proj.toFixed(1);var edge=proj-line,pct=edge/line;
+ var gr=pct>=.15?'A+':pct>=.05?'B':pct>=-.02?'C':pct>=-.10?'D':'F';
+ var label={'A+':'Excellent Over','B':'Lean Over','C':'Risk Lean Over','D':'Lean Under','F':'Terrible Take Under'}[gr];
+ var last=nums(joint.slice(0,10),st),over=last.filter(function(x){return x>line}).length;
+ return{player:name,team:team||'',stat:st,line:line,opp:opp||'',proj:proj,edge:+edge.toFixed(1),grade:gr,label:label,pick:edge>=0?'OVER':'UNDER',
+  comp:parts.map(function(x){return{k:x.name+' projection',w:null,v:x.proj,n:x.n}}),over:over,of:last.length,sd:+sd(last).toFixed(1),cs:joint,
+  adj:'Combo: the sum of each player\'s own projection ('+parts.map(function(x){return x.name+' '+x.proj}).join(' + ')+'). Chart and over count use only series where all '+names.length+' played together'+(joint.length?' ('+joint.length+' found)':' (none found yet)')}}
+function gradeFor(name,team,st,line,opp){if(isCombo(name))return gradeCombo(name,team,st,line,opp);var p=find(name,team);return p?grade(p,st,line,opp):null}
 function gclass(g){return g==='A+'||g==='B'?'':g==='C'?' mid':' low'}
 function sname(s){return s==='hs'?'Headshots Maps 1-2':'Kills Maps 1-2'}
 function normStat(s){s=String(s||'').toLowerCase();return s.indexOf('head')>-1||s==='hs'?'hs':s.indexOf('kill')>-1?'kills':null}
 // ---- all lines = feed + manual
 function allLines(){var out=[];LINES.concat(manual).forEach(function(l,i){var st=normStat(l.stat);if(!st)return;var per=String(l.period||'Maps 1-2');if(per.replace(/\s/g,'').toLowerCase().indexOf('maps1-2')<0&&per.indexOf('1-2')<0&&l.src!=='manual')return;
- var p=find(l.player,l.team);var o={player:l.player,team:l.team||(p&&p.team)||'',stat:st,line:+l.line,opp:l.opponent||'',src:l.src||'feed',idx:i,book:l.book||'',start:l.starts_at||''};o.g=p?grade(p,st,o.line,o.opp):null;out.push(o)});return out}
+ var combo=isCombo(l.player),p=combo?null:find(l.player,l.team);var o={player:l.player,team:l.team||(p&&p.team)||'',stat:st,line:+l.line,opp:l.opponent||'',src:l.src||'feed',idx:i,book:l.book||'',start:l.starts_at||''};var G=gradeFor(l.player,l.team,st,o.line,o.opp);o.g=G&&!G.missing?G:null;o.miss=G&&G.missing?G.missing:'';out.push(o)});return out}
 // ---- views
 function chips(){var c=[];c.push('<span class="chip g">'+DB.length+' players</span>');c.push('<span class="chip">Stats updated '+esc(META.updated||'—')+'</span>');
  c.push('<span class="chip'+(liveGames().length?' g':'')+'">Games: '+(GAMES.length?liveGames().length+' live · '+upGames().length+' upcoming':'none loaded')+'</span>');c.push('<span class="chip">Lines: '+(LINES.length?LINES.length+' feed':'manual')+'</span>');c.push('<span class="chip">Opened '+ftime()+'</span>');$('chips').innerHTML=c.join('')}
@@ -122,12 +139,21 @@ function viewLines(){var ls=allLines(),days=lineDays(ls),cnt={},t0=cday();
  var vis=[];ls.forEach(function(l,i){var k=l.start?cday(l.start):t0;if(d==='all'||k===d)vis.push([l,i])});
  vis.sort(function(a,b){var x=a[0].start||'9',y=b[0].start||'9';if(x!==y)return x<y?-1:1;var ea=a[0].g?Math.abs(a[0].g.edge/a[0].line):0,eb=b[0].g?Math.abs(b[0].g.edge/b[0].line):0;return eb-ea});
  h+='<div class="grid c2"><div class="card"><h2>'+(d==='all'?'All lines':esc(dayLabel(d))+' lines')+' · PrizePicks + Underdog · Maps 1-2</h2>'+(LINES.length?'<div class="muted">Feed observed '+esc(META.lines_at||'')+'. Refreshes about every hour. Times are Central.</div>':'<div class="warn">No lines feed is connected yet, so lines are manual. PrizePicks is the source of truth: type the line you see in the app.</div>')+
- (vis.length?vis.map(function(a){var l=a[0],i=a[1],g=l.g,live=l.team&&liveFor(l.team),started=l.start&&new Date(l.start).getTime()<NOW();return '<div class="item"><div><b>'+esc(l.player)+'</b> <span class="muted">'+esc(l.team)+(l.opp?' vs '+esc(l.opp):'')+'</span>'+(live?' <span class="pill">LIVE</span>':(started?' <span class="muted">· started</span>':''))+'<br><span class="muted">'+(l.book?esc(l.book)+' · ':'')+sname(l.stat)+(l.start?' · '+esc(fmt(l.start)):'')+' · </span><b>'+l.line+'</b>'+(g?'<span class="muted"> · proj '+g.proj+' · over '+g.over+'/'+g.of+'</span>':'<span class="muted"> · no stats for this player</span>')+'</div><div style="text-align:right">'+(g?'<span class="pill '+(g.pick==='UNDER'?'u':'')+'">'+g.grade+' '+g.pick+'</span><br>':'')+'<button class="g" data-act="lg" data-i="'+i+'">Grade</button> <button class="g" data-act="ladd" data-i="'+i+'">+ Slip</button>'+(l.src==='manual'?' <button class="g" data-act="ldel" data-i="'+l.idx+'">✕</button>':'')+'</div></div>'}).join(''):'<div class="muted">No lines for this day yet. New lines appear as the books post them.</div>')+'</div>';
+ (vis.length?vis.map(function(a){var l=a[0],i=a[1],g=l.g,live=l.team&&liveFor(l.team),started=l.start&&new Date(l.start).getTime()<NOW();return '<div class="item"><div><b>'+esc(l.player)+'</b> <span class="muted">'+esc(l.team)+(l.opp?' vs '+esc(l.opp):'')+'</span>'+(live?' <span class="pill">LIVE</span>':(started?' <span class="muted">· started</span>':''))+'<br><span class="muted">'+(l.book?esc(l.book)+' · ':'')+sname(l.stat)+(l.start?' · '+esc(fmt(l.start)):'')+' · </span><b>'+l.line+'</b>'+(g?'<span class="muted"> · proj '+g.proj+' · over '+g.over+'/'+g.of+'</span>':'<span class="muted"> · no stats for '+(l.miss?esc(l.miss):'this player')+'</span>')+'</div><div style="text-align:right">'+(g?'<span class="pill '+(g.pick==='UNDER'?'u':'')+'">'+g.grade+' '+g.pick+'</span><br>':'')+'<button class="g" data-act="lg" data-i="'+i+'">Grade</button> <button class="g" data-act="ladd" data-i="'+i+'">+ Slip</button>'+(l.src==='manual'?' <button class="g" data-act="ldel" data-i="'+l.idx+'">✕</button>':'')+'</div></div>'}).join(''):'<div class="muted">No lines for this day yet. New lines appear as the books post them.</div>')+'</div>';
  h+='<div class="card"><h2>Add / edit a line</h2><label>Player</label><input id="mp" list="plist" placeholder="Start typing a player"><label>Stat</label><select id="ms"><option value="kills">Kills Maps 1-2</option><option value="hs">Headshots Maps 1-2</option></select><label>Opponent (optional)</label><input id="mo" list="tlist" placeholder="Team name"><label>Line</label><input id="ml" type="number" step="0.5" placeholder="e.g. 34.5"><button class="b" data-act="madd">Save line</button></div></div>';return h}
 // ---- track record: every saved line is graded with stats from BEFORE its match date, then checked against the real result
 function recordData(){var rows=[],pending=0,nodata=0,seen={};
  (HIST||[]).forEach(function(e){var st=normStat(e.stat);if(!st||!e.start)return;var t=new Date(e.start).getTime();if(isNaN(t))return;
   if(t>NOW()-5*3600000){pending++;return}
+  if(isCombo(e.player)){ // combo: needs the locked pick, and every player's result for that match added up
+   if(!(e.lock&&e.lock.grade)){nodata++;return}
+   var d1=cday(e.start),k1=norm(e.player)+st+d1;if(seen[k1])return;var tot=0,okc=true;
+   e.player.split('+').forEach(function(n){var pc=find(n.trim(),e.team),bc=null;if(!pc){okc=false;return}
+    combos(pc).forEach(function(c){if(!c.date||!teq(c.opp,e.opponent))return;var dd=Math.abs((new Date(c.date+'T12:00:00Z')-new Date(d1+'T12:00:00Z'))/864e5);if(dd<=1&&(!bc||dd<bc.dd))bc={c:c,dd:dd}});
+    if(!bc||bc.c[st]==null)okc=false;else tot+=bc.c[st]});
+   if(!okc){nodata++;return}
+   var lc=+e.lock.line;if(tot===lc)return;seen[k1]=1;
+   rows.push({player:e.player,stat:st,line:lc,act:tot,pick:e.lock.pick,grade:e.lock.grade,proj:e.lock.proj,locked:true,hit:e.lock.pick==='OVER'?tot>lc:tot<lc,start:e.start});return}
   var p=find(e.player,e.team);if(!p){nodata++;return}
   var d0=cday(e.start),key=norm(e.player)+st+d0;if(seen[key])return;
   var best=null;combos(p).forEach(function(c){if(!c.date||!teq(c.opp,e.opponent))return;var dd=Math.abs((new Date(c.date+'T12:00:00Z')-new Date(d0+'T12:00:00Z'))/864e5);if(dd<=1&&(!best||dd<best.dd))best={c:c,dd:dd}});
@@ -149,10 +175,11 @@ function recordCard(){var h='<div class="card" style="margin-top:12px"><h2>Track
  h+='<h2 style="margin-top:12px">Latest results</h2>'+rows.slice(0,15).map(function(r){return '<div class="item"><div><b>'+esc(r.player)+'</b> <span class="muted">'+sname(r.stat)+' · '+r.pick+' '+r.line+' · got '+r.act+' · proj '+r.proj+(r.locked?' · locked':'')+'</span></div><div><span class="pill '+(r.hit?'':'u')+'">'+(r.hit?'HIT':'MISS')+' · '+r.grade+'</span></div></div>'}).join('');
  return h+'<div class="muted" style="margin-top:8px">'+rows.filter(function(r){return r.locked}).length+' of '+rows.length+' picks are locked in: the exact line, grade, projection and pick the app gave when the line first appeared. Older ones were re-graded afterwards with stats from before their match. Pushes are skipped. '+R.pending+' pending, '+R.nodata+' not matched yet. Small samples mean little: wait for a few hundred picks before changing any weights.</div></div>'}
 function opts(){var t={};DB.forEach(function(p){t[p.team]=1});return '<datalist id="plist">'+DB.map(function(p){return '<option value="'+esc(p.name)+'">'+esc(p.team)}).join('')+'</datalist><datalist id="tlist">'+Object.keys(t).sort().map(function(x){return '<option value="'+esc(x)+'">'}).join('')+'</datalist>'}
-function viewGrader(){var p=find(sel.player),line=parseFloat(sel.line),g=p&&!isNaN(line)?grade(p,sel.stat,line,sel.opp):null;
+function viewGrader(){var combo=isCombo(sel.player),p=combo?{name:sel.player}:find(sel.player,sel.team),line=parseFloat(sel.line),g=p&&!isNaN(line)?gradeFor(sel.player,sel.team||'',sel.stat,line,sel.opp):null,miss='';if(g&&g.missing){miss=g.missing;g=null}
  var h='<div class="grid c2"><div class="card"><h2>Prop grader</h2><label>Player</label><input id="gp" list="plist" value="'+esc(sel.player)+'" placeholder="Start typing a player"><div class="row"><div><label>Stat</label><select id="gs"><option value="kills"'+(sel.stat==='kills'?' selected':'')+'>Kills Maps 1-2</option><option value="hs"'+(sel.stat==='hs'?' selected':'')+'>Headshots Maps 1-2</option></select></div><div><label>Line</label><input id="gl" type="number" step="0.5" value="'+esc(sel.line)+'"></div></div><label>Opponent</label><input id="go" list="tlist" value="'+esc(sel.opp)+'" placeholder="Team name"><div class="btns"><button class="b" data-act="grade">Grade it</button></div></div>';
  if(!sel.player)h+='<div class="card"><div class="warn">Pick a player and a line to grade.</div></div>';
  else if(!p)h+='<div class="card"><div class="warn">No player named "'+esc(sel.player)+'" in the data.</div></div>';
+ else if(!g&&miss)h+='<div class="card"><div class="warn">Cannot grade this combo: no usable Maps 1-2 stats for '+esc(miss)+'. Every player in a combo needs stats.</div></div>';
  else if(!g)h+='<div class="card"><div class="warn">Not enough Maps 1-2 data for '+esc(p.name)+' yet (needs matches where both Map 1 and Map 2 were played) or the line is empty.</div></div>';
  else h+=gradeCard(g);return h+'</div>'+opts()}
 // ---- bar chart: real number on every bar, dashed line = the prop line, green over / red under
@@ -164,13 +191,13 @@ function chart(cs,st,line){var rows=cs.slice(0,10).filter(function(c){return c[s
 function gradeCard(g){return '<div class="card"><div class="muted">'+esc(g.player)+' · '+esc(g.team)+(g.opp?' vs '+esc(g.opp):'')+' · '+sname(g.stat)+' · line '+g.line+'</div><div class="grade'+gclass(g.grade)+'">'+g.grade+'</div><div><span class="pill '+(g.pick==='UNDER'?'u':'')+'">'+esc(g.label)+'</span></div>'+
  '<div class="stats"><div class="st"><b>'+g.proj+'</b><span>Projection</span></div><div class="st"><b>'+(g.edge>=0?'+':'')+g.edge+'</b><span>Edge vs line</span></div><div class="st"><b>'+g.over+'/'+g.of+'</b><span>Over, last '+g.of+'</span></div></div>'+
  '<h2 style="margin-top:12px">Last 10 '+(g.stat==='hs'?'headshots':'kills')+' (Maps 1-2)</h2>'+chart(g.cs,g.stat,g.line)+'<div class="muted">Oldest to newest, with the date under each bar. Dashed line = '+g.line+'. Green = over, red = under.</div>'+
- '<h2 style="margin-top:12px">Breakdown</h2><div class="scroll"><table><tr><th>Part</th><th>Weight</th><th>Avg</th><th>Sample</th></tr>'+g.comp.map(function(c){return '<tr><td>'+esc(c.k)+'</td><td>'+Math.round(c.w*100)+'%</td><td>'+(c.v==null?'no data':c.v.toFixed(1))+'</td><td>'+c.n+'</td></tr>'}).join('')+'</table></div>'+
+ '<h2 style="margin-top:12px">Breakdown</h2><div class="scroll"><table><tr><th>Part</th><th>Weight</th><th>Avg</th><th>Sample</th></tr>'+g.comp.map(function(c){return '<tr><td>'+esc(c.k)+'</td><td>'+(c.w==null?'sum':Math.round(c.w*100)+'%')+'</td><td>'+(c.v==null?'no data':c.v.toFixed(1))+'</td><td>'+c.n+'</td></tr>'}).join('')+'</table></div>'+
  '<div class="muted" style="margin-top:6px">'+esc(g.adj)+'. Parts with no data are left out and the other weights are scaled up. Blowout and role are not in the data.</div>'+
  '<div class="btns"><button class="b" data-act="gadd">Add to slip</button><button class="g" data-act="gimg">Download image</button><button class="g" data-act="gshare">Share</button></div>'+
  '<h2 style="margin-top:12px">Last 10 (Maps 1-2)</h2><div class="scroll"><table><tr><th>Date</th><th>Opp</th><th>Maps</th><th>'+(g.stat==='hs'?'HS':'Kills')+'</th></tr>'+g.cs.slice(0,10).map(function(c){return '<tr><td>'+esc(c.date)+'</td><td>'+esc(c.opp)+'</td><td>'+esc(c.maps)+'</td><td>'+(c[g.stat]==null?'':c[g.stat])+'</td></tr>'}).join('')+'</table></div></div>'}
 // ---- auto slips: strong overs and strong unders, mixed
 function buildSlip(n,mode){
- var best={};allLines().forEach(function(l){if(!l.g||!l.line)return;var k=norm(l.player),e=Math.abs(l.g.edge/l.line);if(!best[k]||e>best[k].e)best[k]={l:l,e:e}});
+ var best={};allLines().forEach(function(l){if(!l.g||!l.line||isCombo(l.player))return;var k=norm(l.player),e=Math.abs(l.g.edge/l.line);if(!best[k]||e>best[k].e)best[k]={l:l,e:e}});
  var all=Object.keys(best).map(function(k){var l=best[k].l;return{l:l,pct:l.g.edge/l.line}});
  var ov=all.filter(function(x){return (x.l.g.grade==='A+'||x.l.g.grade==='B')&&x.pct>0}).sort(function(a,b){return b.pct-a.pct});
  var un=all.filter(function(x){return (x.l.g.grade==='D'||x.l.g.grade==='F')&&x.pct<=-.05}).sort(function(a,b){return a.pct-b.pct});
@@ -260,7 +287,7 @@ function showImg(url,blob,name){var old=document.getElementById('imgov');if(old)
  ov.appendChild(im);ov.appendChild(hint);ov.appendChild(row);document.body.appendChild(ov)}
 function dl(c,name){c.toBlob(function(b){if(!b){toast('Could not build the image');return}showImg(URL.createObjectURL(b),b,name)},'image/png')}
 function share(c,name){dl(c,name)}
-function curGrade(){var p=find(sel.player);return p?grade(p,sel.stat,parseFloat(sel.line),sel.opp):null}
+function curGrade(){var g=gradeFor(sel.player,sel.team||'',sel.stat,parseFloat(sel.line),sel.opp);return g&&!g.missing?g:null}
 function addSlip(g){if(slip.some(function(s){return norm(s.player)===norm(g.player)&&s.stat===g.stat})){toast('Already on slip');return}slip.push({player:g.player,stat:g.stat,line:g.line,pick:g.pick,grade:g.grade});save('gp_slip',slip);toast('Added '+g.player+' '+g.pick+' '+g.line)}
 function openP(n){sel.pl=n;sel.v='all';sel.o='';var r=recents().filter(function(x){return x!==n});r.unshift(n);save('gp_recent',r.slice(0,8));tab='players';render();window.scrollTo(0,0);toast('Stats for '+n)}
 // ---- actions
@@ -279,13 +306,13 @@ document.addEventListener('click',function(e){var b=e.target.closest('[data-act]
  else if(a==='pclose'){sel.pl='';render();toast('Back to list')}
  else if(a==='pgrade'){var pp2=find(sel.pl);sel.player=pp2.name;sel.line=sel.stat==='hs'?(sel.l2||''):(sel.l1||'');sel.opp=sel.o||'';go('grader');toast('Loaded '+pp2.name+' in the grader')}
  else if(a==='pg'){sel.player=b.dataset.p;var p=find(sel.player);sel.opp='';go('grader');toast('Loaded '+sel.player+'. Enter a line')}
- else if(a==='grade'){sel.player=$('gp').value;sel.stat=$('gs').value;sel.line=$('gl').value;sel.opp=$('go').value;render();toast('Graded')}
+ else if(a==='grade'){var np=$('gp').value;if(np!==sel.player)sel.team='';sel.player=np;sel.stat=$('gs').value;sel.line=$('gl').value;sel.opp=$('go').value;render();toast('Graded')}
  else if(a==='gadd'){var g=curGrade();if(g)addSlip(g)}
  else if(a==='gimg'){var g2=curGrade();if(g2)img({g:g2},function(c){dl(c,'grade-1080x1350.png')})}
  else if(a==='gshare'){var g3=curGrade();if(g3)img({g:g3},function(c){share(c,'grade.png')})}
  else if(a==='madd'){var n=$('mp').value.trim(),l=parseFloat($('ml').value);if(!n||isNaN(l)){toast('Enter a player and a line');return}var p2=find(n);manual.push({player:p2?p2.name:n,team:p2?p2.team:'',stat:$('ms').value,line:l,opponent:$('mo').value,period:'Maps 1-2',src:'manual'});save('gp_manual',manual);render();toast('Line saved')}
  else if(a==='ldel'){manual.splice(i-LINES.length,1);save('gp_manual',manual);render();toast('Line removed')}
- else if(a==='lg'){var l2=allLines()[i];sel={player:l2.player,stat:l2.stat,line:String(l2.line),opp:l2.opp};go('grader');toast('Loaded '+l2.player)}
+ else if(a==='lg'){var l2=allLines()[i];sel={player:l2.player,stat:l2.stat,line:String(l2.line),opp:l2.opp,team:l2.team};go('grader');toast('Loaded '+l2.player)}
  else if(a==='ladd'){var l3=allLines()[i];if(!l3.g){toast('No stats for '+l3.player);return}addSlip(l3.g);render()}
  else if(a==='auto'){var r=buildSlip(+b.dataset.n,b.dataset.m||'bal');if(!r.out.length){toast('No graded lines yet. Add lines first');return}slip=r.out;save('gp_slip',slip);render();toast(r.msg)}
  else if(a==='sdel'){slip.splice(i,1);save('gp_slip',slip);render();toast('Removed')}

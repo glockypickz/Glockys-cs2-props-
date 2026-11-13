@@ -139,3 +139,23 @@ class Grader:
         pct = edge / line
         g = "A+" if pct >= .15 else "B" if pct >= .05 else "C" if pct >= -.02 else "D" if pct >= -.10 else "F"
         return {"proj": round(proj, 1), "edge": round(edge, 1), "grade": g, "pick": "OVER" if edge >= 0 else "UNDER"}
+
+    def grade_combo(self, name, team, st, line, opp):
+        """Combo prop "A + B + C": sum of each player's own projection vs the combined line (same as app.js)."""
+        names = [n.strip() for n in str(name).split("+") if n.strip()]
+        if len(names) < 2:
+            return None
+        proj = 0.0
+        for n in names:
+            p = self.find(n, team)
+            if not p:
+                return None
+            g = self.grade(p, st, 1.0, opp)
+            if not g:
+                return None
+            proj += g["proj"]
+        proj = round(proj, 1)
+        edge = proj - line
+        pct = edge / line
+        gr = "A+" if pct >= .15 else "B" if pct >= .05 else "C" if pct >= -.02 else "D" if pct >= -.10 else "F"
+        return {"proj": proj, "edge": round(edge, 1), "grade": gr, "pick": "OVER" if edge >= 0 else "UNDER"}
