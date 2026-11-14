@@ -1,0 +1,15 @@
+<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Lock check</title>
+<style>body{font:16px -apple-system,sans-serif;background:#0b0b0b;color:#e8e8e8;padding:16px}pre{background:#161616;padding:12px;border-radius:8px;white-space:pre-wrap;word-break:break-word}button{font-size:18px;padding:12px 18px}</style></head><body>
+<h2>Lock check</h2><button id="go">Run check</button><pre id="out">Tap Run check</pre>
+<script>
+var out=document.getElementById('out');function log(t){out.textContent+='\n'+t}
+document.getElementById('go').onclick=async function(){
+out.textContent='';var key='';try{key=localStorage.getItem('gp_admin')||''}catch(e){}
+log('1. Key saved in this browser: '+(key?'YES ('+key.length+' characters)':'NO  -> open the site once with /#admin=YOURKEY in a normal tab'));
+async function t(label,h){try{var r=await fetch('/lines_history.json?'+Date.now(),{headers:h,cache:'no-store'});var x=await r.text();var n='';try{var j=JSON.parse(x);n=' | valid JSON, entries: '+((j.entries||[]).length)}catch(e){n=' | not JSON: '+x.slice(0,60)}log(label+': HTTP '+r.status+n)}catch(e){log(label+': failed '+e)}}
+await t('2. Without key (customers)',{});
+await t('3. With your key',key?{'X-Admin-Key':key}:{});
+try{var a=await (await fetch('/app.js?'+Date.now(),{cache:'no-store'})).text();log('4. app.js on this site has the lock code: '+(a.indexOf('adminKey')>-1?'YES':'NO (old app.js is live)')+' | size '+a.length)}catch(e){log('4. app.js: '+e)}
+log('\nGOOD = line 2 says 404, line 3 says 200 with entries.');
+};
+</script></body></html>
