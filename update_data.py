@@ -26,6 +26,13 @@ def wanted_names():
 
 WANTED = wanted_names()
 
+SKIP_WORDS = {"team", "esports", "esport", "gaming", "club"}
+def _tn(s):
+    return "".join(w for w in re.split(r"[^a-z0-9]+", str(s or "").lower()) if w and w not in SKIP_WORDS)
+
+# Players we are chasing: every time one shows up in any match we scan, the log says which team bo3.gg gave them
+WATCH = {_canon(n) for n in ("kyousuke", "molodoy", "tO0RO", "kelieN", "YumsaN")}
+
 
 B = "https://api.bo3.gg/api/v1"
 H = {"accept": "application/json", "origin": "https://bo3.gg", "referer": "https://bo3.gg/",
@@ -77,6 +84,14 @@ def mk_log(date, m, g, p, et):
            "d": p.get("death"), "a": p.get("assists"), "adr": p.get("adr")}
     if et:
         log["ev"] = et
+    # round counts: bo3.gg gives the final round score of every map on the match list (no extra calls)
+    ws, ls = g.get("winner_clan_score"), g.get("loser_clan_score")
+    if isinstance(ws, (int, float)) and isinstance(ls, (int, float)):
+        log["rd"] = int(ws + ls)  # total rounds played on the map
+        wt = (g.get("winner_team_clan") or {}).get("team_id")
+        pt = (p.get("team_clan") or {}).get("team_id")
+        if wt is not None and pt is not None:
+            log["rw"] = int(ws if wt == pt else ls)  # rounds this player's team won
     x = {k: p[k] for k in EXTRA_KEYS if isinstance(p.get(k), (int, float))}
     if x:
         log["x"] = x
@@ -119,7 +134,16 @@ async def do_team(s, t, cutoff, out):
                 SAMPLE_PRINTED = True
                 print("players_stats keys:", sorted(stats[0].keys()))
             for p in stats:
-                if p["team_clan"]["team_id"] != tid:
+                tc = p.get("team_clan") or {}
+                nick = (p.get("steam_profile") or {}).get("nickname", "")
+                if _canon(nick) in WATCH:
+                    print("WATCH", nick, "| scanning", tname, tid, "| team_clan:", {k: v for k, v in tc.items() if not isinstance(v, (dict, list))})
+                same = tc.get("team_id") == tid
+                if not same:
+                    # bo3.gg sometimes lists a stand-in/new signing under another clan id: accept if the clan name is this team
+                    cn = tc.get("name") or tc.get("clan_name") or tc.get("team_name") or ""
+                    same = bool(cn) and _tn(cn) == _tn(tname)
+                if not same:
                     continue
                 rows.append({"mid": m["id"], "name": p["steam_profile"]["nickname"],
                              "log": mk_log(date, m, g, p, et)})
@@ -144,6 +168,8 @@ async def do_team(s, t, cutoff, out):
             e["logs"].append(r["log"])
     print("done:", tname, sorted(roster))
 
+UP_TEAMS = []   # every team in the next scheduled matches (they are scanned first, so anyone with a line today gets stats)
+
 async def upcoming(s):
     """Scheduled / running matches -> games.json entries (no scores, no odds)."""
     games = []
@@ -156,6 +182,9 @@ async def upcoming(s):
             t1, t2 = m.get("team1") or {}, m.get("team2") or {}
             if not t1.get("name") or not t2.get("name") or not m.get("start_date"):
                 continue
+            for t in (t1, t2):
+                if t.get("id") and t["id"] not in {x["id"] for x in UP_TEAMS}:
+                    UP_TEAMS.append({"id": t["id"], "slug": t.get("slug", ""), "name": t.get("name") or t.get("slug", "")})
             start = m["start_date"]
             if not start.endswith("Z") and "+" not in start[10:]:
                 start += "Z"
@@ -208,7 +237,10 @@ async def main():
         print(len(teams), "ranked teams")
         extra = await unranked_teams(s, {t["id"] for t in teams}, cutoff)
         started = time.time()
-        for i, t in enumerate(teams + extra):
+        front_ids = {t["id"] for t in UP_TEAMS}
+        queue = UP_TEAMS + [t for t in teams + extra if t["id"] not in front_ids]
+        print("teams with upcoming matches (scanned first):", len(UP_TEAMS), "| total queue:", len(queue))
+        for i, t in enumerate(queue):
             if time.time() - started > TIME_LIMIT:
                 print(f"time limit reached after {i} teams, saving what we have")
                 break
