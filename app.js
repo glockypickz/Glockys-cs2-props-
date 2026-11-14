@@ -1,6 +1,11 @@
 (function(){
 'use strict';
 var $=function(i){return document.getElementById(i)};
+// GRADER_MODE: 'shadow' = new grades (projection pulled 60% back to the line, +4% bias shift). Change to 'live' to go back to the old grades. Locked picks never change.
+var GRADER_MODE='shadow',SH_K=0.4,SH_B=0.04;
+function shGrade(pct){ // returns [grade,pick]
+ if(GRADER_MODE!=='shadow'){return [pct>=.15?'A+':pct>=.05?'B':pct>=-.02?'C':pct>=-.10?'D':'F',null]}
+ var pc=SH_K*pct+SH_B;return [pc>=.08?'A+':pc>=.05?'B':pc>=0?'C':pc>=-.04?'D':'F',pc>=0?'OVER':'UNDER']}
 var DB=[],RANK={},GAMES=[],LINES=[],HIST=null,META={updated:'',lines_at:'',games_at:'',games_iso:''};
 var TABS=[['dash','⌂','Dashboard'],['games','▦','Games'],['lines','↗','Lines'],['grader','⚡','Grader'],['slip','◎','Slip'],['players','☰','Players']];
 var tab='dash',slip=[],manual=[],sel={player:'',stat:'kills',line:'',opp:''};
@@ -77,10 +82,10 @@ function grade(p,st,line,opp){var cs=combos(p);var v=nums(cs,st);if(!v.length||i
  if(ar!=null&&ac){ff=Math.max(.95,Math.min(1.05,1+0.5*(ar/ac-1)));proj*=ff}
  var adjNote=ar!=null&&ac?'Form factor from ADR (last 5 '+ar.toFixed(0)+' vs career '+ac.toFixed(0)+'): x'+ff.toFixed(3)+', capped at +/-5%':'No ADR in the data yet, so no form factor applied';
  var edge=proj-line,pct=edge/line;
- var g=pct>=.15?'A+':pct>=.05?'B':pct>=-.02?'C':pct>=-.10?'D':'F';
+ var sg=shGrade(pct),g=sg[0];
  var last=nums(cs.slice(0,10),st),over=last.filter(function(x){return x>line}).length;
  var label={'A+':'Excellent Over','B':'Lean Over','C':'Risk Lean Over','D':'Lean Under','F':'Terrible Take Under'}[g];
- return{player:p.name,team:p.team,stat:st,line:line,opp:opp||'',proj:+proj.toFixed(1),edge:+edge.toFixed(1),grade:g,label:label,pick:edge>=0?'OVER':'UNDER',comp:comp,over:over,of:last.length,sd:+sd(last).toFixed(1),cs:cs,adj:adjNote}}
+ return{player:p.name,team:p.team,stat:st,line:line,opp:opp||'',proj:+proj.toFixed(1),edge:+edge.toFixed(1),grade:g,label:label,pick:sg[1]||(edge>=0?'OVER':'UNDER'),comp:comp,over:over,of:last.length,sd:+sd(last).toFixed(1),cs:cs,adj:adjNote}}
 // ---- combo props ("A + B + C"): sum of each player's own projection vs the combined line
 function isCombo(n){return String(n||'').indexOf('+')>-1}
 function gradeCombo(name,team,st,line,opp){
@@ -91,10 +96,10 @@ function gradeCombo(name,team,st,line,opp){
  var joint=[];if(series.length){series[0].forEach(function(c0){var rows=[c0],ok=true;for(var j=1;j<series.length;j++){var m=series[j].filter(function(c){return String(c.mid)===String(c0.mid)})[0];if(!m){ok=false;break}rows.push(m)}
   if(!ok||rows.some(function(r){return r[st]==null}))return;joint.push({mid:c0.mid,date:c0.date,opp:c0.opp,maps:c0.maps,kills:rows.reduce(function(a,r){return a+r.kills},0),hs:rows.every(function(r){return r.hs!=null})?rows.reduce(function(a,r){return a+r.hs},0):null})})}
  proj=+proj.toFixed(1);var edge=proj-line,pct=edge/line;
- var gr=pct>=.15?'A+':pct>=.05?'B':pct>=-.02?'C':pct>=-.10?'D':'F';
+ var sg=shGrade(pct),gr=sg[0];
  var label={'A+':'Excellent Over','B':'Lean Over','C':'Risk Lean Over','D':'Lean Under','F':'Terrible Take Under'}[gr];
  var last=nums(joint.slice(0,10),st),over=last.filter(function(x){return x>line}).length;
- return{player:name,team:team||'',stat:st,line:line,opp:opp||'',proj:proj,edge:+edge.toFixed(1),grade:gr,label:label,pick:edge>=0?'OVER':'UNDER',
+ return{player:name,team:team||'',stat:st,line:line,opp:opp||'',proj:proj,edge:+edge.toFixed(1),grade:gr,label:label,pick:sg[1]||(edge>=0?'OVER':'UNDER'),
   comp:parts.map(function(x){return{k:x.name+' projection',w:null,v:x.proj,n:x.n}}),over:over,of:last.length,sd:+sd(last).toFixed(1),cs:joint,
   adj:'Combo: the sum of each player\'s own projection ('+parts.map(function(x){return x.name+' '+x.proj}).join(' + ')+'). Chart and over count use only series where all '+names.length+' played together'+(joint.length?' ('+joint.length+' found)':' (none found yet)')}}
 function gradeFor(name,team,st,line,opp){if(isCombo(name))return gradeCombo(name,team,st,line,opp);var p=find(name,team);return p?grade(p,st,line,opp):null}
@@ -168,7 +173,7 @@ function recordData(){TS_CACHE={};var rows=[],pending=0,nodata=0,seen={};
   var lk=e.lock&&e.lock.grade?e.lock:null; // locked in when the line was first seen: the exact grade, projection and pick the app gave then
   var line=lk?+lk.line:+e.line,g=lk?{grade:lk.grade,proj:lk.proj,pick:lk.pick}:grade(past,st,line,e.opponent);if(!g){nodata++;return}
   var act=best.c[st];if(act===line)return;seen[key]=1;
-  var pick=lk?lk.pick:((g.grade==='D'||g.grade==='F')?'UNDER':'OVER');
+  var pick=lk?lk.pick:(g.pick||((g.grade==='D'||g.grade==='F')?'UNDER':'OVER'));
   rows.push({team:e.team,opp:e.opponent,player:e.player,stat:st,line:line,act:act,rproj:roundsProj(past,st,e.opponent,p.team,best.c.date),pick:pick,grade:g.grade,proj:g.proj,locked:!!lk,hit:pick==='OVER'?act>line:act<line,start:e.start})});
  rows.forEach(function(r){r.day=cday(r.start)});rows.sort(function(a,b){return a.start<b.start?1:-1});return{rows:rows,pending:pending,nodata:nodata,total:(HIST||[]).length}}
 function recordCard(){if(HIST==null)return '';var h='<div class="card" style="margin-top:12px"><h2>Track record</h2>';

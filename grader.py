@@ -32,6 +32,20 @@ def mean(a):
     return sum(a) / len(a) if a else None
 
 
+GRADER_MODE = "shadow"  # "live" = old grades. Must match GRADER_MODE in app.js.
+SH_K, SH_B = 0.4, 0.04
+
+
+def shade(pct, edge):
+    """(grade, pick) from the raw edge percent. Raw projection and edge are always kept as they are."""
+    if GRADER_MODE != "shadow":
+        g = "A+" if pct >= .15 else "B" if pct >= .05 else "C" if pct >= -.02 else "D" if pct >= -.10 else "F"
+        return g, "OVER" if edge >= 0 else "UNDER"
+    pc = SH_K * pct + SH_B
+    g = "A+" if pc >= .08 else "B" if pc >= .05 else "C" if pc >= 0 else "D" if pc >= -.04 else "F"
+    return g, "OVER" if pc >= 0 else "UNDER"
+
+
 class Grader:
     def __init__(self, players, ranks=None):
         self.players = players
@@ -143,8 +157,8 @@ class Grader:
             proj *= max(0.95, min(1.05, 1 + 0.5 * (adr5 / adrc - 1)))
         edge = proj - line
         pct = edge / line
-        g = "A+" if pct >= .15 else "B" if pct >= .05 else "C" if pct >= -.02 else "D" if pct >= -.10 else "F"
-        return {"proj": round(proj, 1), "edge": round(edge, 1), "grade": g, "pick": "OVER" if edge >= 0 else "UNDER"}
+        g, pk = shade(pct, edge)
+        return {"proj": round(proj, 1), "edge": round(edge, 1), "grade": g, "pick": pk}
 
     def grade_combo(self, name, team, st, line, opp):
         """Combo prop "A + B + C": sum of each player's own projection vs the combined line (same as app.js)."""
@@ -163,5 +177,5 @@ class Grader:
         proj = round(proj, 1)
         edge = proj - line
         pct = edge / line
-        gr = "A+" if pct >= .15 else "B" if pct >= .05 else "C" if pct >= -.02 else "D" if pct >= -.10 else "F"
-        return {"proj": proj, "edge": round(edge, 1), "grade": gr, "pick": "OVER" if edge >= 0 else "UNDER"}
+        gr, pk = shade(pct, edge)
+        return {"proj": proj, "edge": round(edge, 1), "grade": gr, "pick": pk}
