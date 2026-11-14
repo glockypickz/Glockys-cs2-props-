@@ -200,21 +200,25 @@ function gradeCard(g){return '<div class="card"><div class="muted">'+esc(g.playe
  '<div class="btns"><button class="b" data-act="gadd">Add to slip</button><button class="g" data-act="gimg">Download image</button><button class="g" data-act="gshare">Share</button></div>'+
  '<h2 style="margin-top:12px">Last 10 (Maps 1-2)</h2><div class="scroll"><table><tr><th>Date</th><th>Opp</th><th>Maps</th><th>'+(g.stat==='hs'?'HS':'Kills')+'</th></tr>'+g.cs.slice(0,10).map(function(c){return '<tr><td>'+esc(c.date)+'</td><td>'+esc(c.opp)+'</td><td>'+esc(c.maps)+'</td><td>'+(c[g.stat]==null?'':c[g.stat])+'</td></tr>'}).join('')+'</table></div></div>'}
 // ---- auto slips: strong overs and strong unders, mixed
+var svar='var',excl={};
+function shuf(arr){if(svar!=='var')return arr;var t=arr.slice(0,10),r=arr.slice(10);for(var i=t.length-1;i>0;i--){var j=Math.floor(Math.random()*(i+1)),x=t[i];t[i]=t[j];t[j]=x}return t.concat(r)}
 function buildSlip(n,mode){
  var best={};allLines().forEach(function(l){if(!l.g||!l.line||isCombo(l.player))return;var k=norm(l.player),e=Math.abs(l.g.edge/l.line);if(!best[k]||e>best[k].e)best[k]={l:l,e:e}});
- var all=Object.keys(best).map(function(k){var l=best[k].l;return{l:l,pct:l.g.edge/l.line}});
+ var all=Object.keys(best).map(function(k){var l=best[k].l;return{l:l,pct:l.g.edge/l.line}}),skipNote='';
+ var fresh=all.filter(function(x){return !excl[norm(x.l.player)]});if(Object.keys(excl).length){if(fresh.length>=n)all=fresh;else skipNote=' Not enough new players left, so skipped ones were allowed back.'}
  var ov=all.filter(function(x){return (x.l.g.grade==='A+'||x.l.g.grade==='B')&&x.pct>0}).sort(function(a,b){return b.pct-a.pct});
  var un=all.filter(function(x){return (x.l.g.grade==='D'||x.l.g.grade==='F')&&x.pct<=-.05}).sort(function(a,b){return a.pct-b.pct});
+ var upFirst=un.length&&(!ov.length||Math.abs(un[0].pct)>ov[0].pct);ov=shuf(ov);un=shuf(un);
  var used={},out=[];
  function take(arr,cnt){var t=0;for(var i=0;i<arr.length&&t<cnt;i++){var k=norm(arr[i].l.player);if(used[k])continue;used[k]=1;out.push(arr[i]);t++}return t}
- var both=ov.concat(un).sort(function(a,b){return Math.abs(b.pct)-Math.abs(a.pct)});
+ var both=shuf(ov.concat(un).sort(function(a,b){return Math.abs(b.pct)-Math.abs(a.pct)}));
  if(mode==='safe'){take(both,n)}
  else if(mode==='deg'){ // biggest edges overall, but force at least one of each side when both exist
   if(ov.length&&un.length){var bo=ov[0],bu=un[0];used[norm(bo.l.player)]=1;used[norm(bu.l.player)]=1;out.push(bo,bu)}
   take(both,n-out.length)}
  else{ // balanced: 2 of the side with the bigger top edge + the rest from the other (3 legs), or 2 and 2 (4 legs)
   var a1=ov,a2=un,n1=Math.ceil(n/2),n2=n-n1;
-  if(un.length&&(!ov.length||Math.abs(un[0].pct)>ov[0].pct)){a1=un;a2=ov}
+  if(upFirst){a1=un;a2=ov}
   take(a1,n1);take(a2,n2)}
  var short=n-out.length;
  if(short>0)take(both,short);
@@ -224,8 +228,8 @@ function buildSlip(n,mode){
  var no=res.filter(function(x){return x.pick==='OVER'}).length,nu=res.length-no,weak=out.filter(function(x){return !((x.l.g.grade==='A+'||x.l.g.grade==='B')&&x.pct>0)&&!((x.l.g.grade==='D'||x.l.g.grade==='F')&&x.pct<=-.05)}).length;
  var msg='Built '+res.length+'-leg slip: '+no+' Over'+(no===1?'':'s')+', '+nu+' Under'+(nu===1?'':'s')+(res.length<n?' (only '+res.length+' lines available)':'');
  if(res.length&&(!(no&&nu)||weak)&&mode!=='safe')msg+=weak?'. Not enough strong picks, so '+weak+' weaker leg'+(weak===1?' was':'s were')+' added':'. Only one side had strong picks';
- return{out:res,msg:msg}}
-function viewSlip(){var h='<div class="grid c2"><div class="card"><h2>Slip builder</h2><div class="btns"><button class="g" data-act="auto" data-n="2" data-m="safe">Safe 2-Leg</button><button class="g" data-act="auto" data-n="3" data-m="bal">Balanced 3-Leg</button><button class="g" data-act="auto" data-n="4" data-m="bal">Balanced 4-Leg</button><button class="g" data-act="auto" data-n="4" data-m="deg">Degenerate 4-Leg</button></div><div class="muted" style="margin-top:6px">Auto slips mix strong Overs (grade A+ or B) with strong Unders (D or F, projection at least 5% below the line), one leg per player. Safe 2-Leg takes the two biggest edges on either side. Balanced 3-Leg is 2 of one side and 1 of the other. Balanced 4-Leg is 2 Overs and 2 Unders. Degenerate 4-Leg takes the four biggest edges with at least one of each side. If a side runs short, the slip fills from the other side and says so.</div></div>';
+ return{out:res,msg:msg+skipNote}}
+function viewSlip(){var h='<div class="grid c2"><div class="card"><h2>Slip builder</h2><div class="btns"><button class="g" data-act="auto" data-n="2" data-m="safe">Safe 2-Leg</button><button class="g" data-act="auto" data-n="3" data-m="bal">Balanced 3-Leg</button><button class="g" data-act="auto" data-n="4" data-m="bal">Balanced 4-Leg</button><button class="g" data-act="auto" data-n="4" data-m="deg">Degenerate 4-Leg</button></div><div class="btns" style="margin-top:8px"><button class="'+(svar==='var'?'b':'g')+'" data-act="svar" data-v="var">Variety</button><button class="'+(svar==='best'?'b':'g')+'" data-act="svar" data-v="best">Best edges</button><button class="g" data-act="sskip">Skip these players</button>'+(Object.keys(excl).length?'<button class="g" data-act="sskipclr">Reset skips ('+Object.keys(excl).length+')</button>':'')+'</div><div class="muted" style="margin-top:6px">Variety picks from the top 10 strong picks on each side, so every tap gives a new mix. Best edges always takes the biggest edges. Skip these players leaves the players on your current slip out of the next builds.</div><div class="muted" style="margin-top:6px">Auto slips mix strong Overs (grade A+ or B) with strong Unders (D or F, projection at least 5% below the line), one leg per player. Safe 2-Leg takes the two biggest edges on either side. Balanced 3-Leg is 2 of one side and 1 of the other. Balanced 4-Leg is 2 Overs and 2 Unders. Degenerate 4-Leg takes the four biggest edges with at least one of each side. If a side runs short, the slip fills from the other side and says so.</div></div>';
  h+='<div class="card"><h2>Your slip · '+slip.length+' legs</h2>'+(slip.length?slip.map(function(s,i){return '<div class="item"><div><b>'+esc(s.player)+'</b> <span class="pill '+(s.pick==='UNDER'?'u':'')+'">'+s.pick+' '+s.line+'</span><br><span class="muted">'+sname(s.stat)+(s.grade?' · grade '+esc(s.grade):'')+'</span></div><button class="g" data-act="sdel" data-i="'+i+'">✕</button></div>'}).join('')+'<div class="btns"><button class="b" data-act="scopy">Copy</button><button class="g" data-act="spp">Open PrizePicks</button><button class="g" data-act="simg">Download image</button><button class="g" data-act="sshare">Share</button><button class="g" data-act="sclear">Clear</button></div>':'<div class="muted">Empty. Add legs from Lines or Grader.</div>')+'</div></div>';return h}
 function fv(x,d){return x==null||isNaN(x)?'–':x.toFixed(d==null?1:d)}
 function pct(a,b){return b?(a/b*100):null}
@@ -321,6 +325,9 @@ document.addEventListener('click',function(e){var b=e.target.closest('[data-act]
  else if(a==='lg'){var l2=allLines()[i];sel={player:l2.player,stat:l2.stat,line:String(l2.line),opp:l2.opp,team:l2.team};go('grader');toast('Loaded '+l2.player)}
  else if(a==='ladd'){var l3=allLines()[i];if(!l3.g){toast('Can\'t grade this one. Research the player in the Players tab');return}addSlip(l3.g);render()}
  else if(a==='auto'){var r=buildSlip(+b.dataset.n,b.dataset.m||'bal');if(!r.out.length){toast('No graded lines yet. Add lines first');return}slip=r.out;save('gp_slip',slip);render();toast(r.msg)}
+ else if(a==='svar'){svar=b.dataset.v;render();toast(svar==='var'?'Variety on: each build is a new mix':'Best edges: always the biggest edges')}
+ else if(a==='sskip'){if(!slip.length){toast('Build a slip first');return}slip.forEach(function(x){excl[norm(x.player)]=1});slip=[];save('gp_slip',slip);render();toast('Skipping those players. Build again')}
+ else if(a==='sskipclr'){excl={};render();toast('Skips cleared')}
  else if(a==='sdel'){slip.splice(i,1);save('gp_slip',slip);render();toast('Removed')}
  else if(a==='sclear'){slip=[];save('gp_slip',slip);render();toast('Slip cleared')}
  else if(a==='scopy'){var t=slip.map(function(s){return s.player+' '+sname(s.stat)+' '+s.pick+' '+s.line}).join('\n');(navigator.clipboard?navigator.clipboard.writeText(t):Promise.reject()).then(function(){toast('Copied')}).catch(function(){toast('Copy not allowed here')})}
