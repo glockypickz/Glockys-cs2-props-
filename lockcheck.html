@@ -10,6 +10,7 @@ async function t(label,h){try{var r=await fetch('/lines_history.json?'+Date.now(
 await t('2. Without key (customers)',{});
 await t('3. With your key',key?{'X-Admin-Key':key}:{});
 try{var a=await (await fetch('/app.js?'+Date.now(),{cache:'no-store'})).text();log('4. app.js on this site has the lock code: '+(a.indexOf('adminKey')>-1?'YES':'NO (old app.js is live)')+' | size '+a.length)}catch(e){log('4. app.js: '+e)}
+try{var d=await fetch('/lines_history.json?debug=1&'+Date.now(),{headers:key?{'X-Admin-Key':key}:{},cache:'no-store'});log('5. What the Worker sees: HTTP '+d.status+'\n'+(await d.text()))}catch(e){log('5. debug: '+e)}
 log('\nGOOD = line 2 says 404, line 3 says 200 with entries.');
 };
 </script></body></html>
