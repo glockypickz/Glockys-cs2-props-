@@ -1,0 +1,11 @@
+.github
+.git
+ai-worker
+node_modules
+*.py
+*.yml
+*.yaml
+*.md
+wrangler.jsonc
+.assetsignore
+debug*
