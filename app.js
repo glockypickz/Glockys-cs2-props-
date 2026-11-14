@@ -171,7 +171,7 @@ function recordData(){TS_CACHE={};var rows=[],pending=0,nodata=0,seen={};
   var pick=lk?lk.pick:((g.grade==='D'||g.grade==='F')?'UNDER':'OVER');
   rows.push({team:e.team,opp:e.opponent,player:e.player,stat:st,line:line,act:act,rproj:roundsProj(past,st,e.opponent,p.team,best.c.date),pick:pick,grade:g.grade,proj:g.proj,locked:!!lk,hit:pick==='OVER'?act>line:act<line,start:e.start})});
  rows.forEach(function(r){r.day=cday(r.start)});rows.sort(function(a,b){return a.start<b.start?1:-1});return{rows:rows,pending:pending,nodata:nodata,total:(HIST||[]).length}}
-function recordCard(){var h='<div class="card" style="margin-top:12px"><h2>Track record</h2>';
+function recordCard(){if(HIST==null)return '';var h='<div class="card" style="margin-top:12px"><h2>Track record</h2>';
  if(HIST==null)return h+'<div class="warn">No line history yet. It starts saving after the next "Update CS2 lines" run with the new script.</div></div>';
  var R=recordData(),rows=R.rows;
  if(!rows.length)return h+'<div class="muted">'+R.total+' lines saved so far. '+R.pending+' waiting for their matches to finish, '+R.nodata+' finished but not matched to results yet (player stats refresh once a day). The record fills in by itself.</div></div>';
@@ -381,7 +381,10 @@ document.addEventListener('click',function(e){var b=e.target.closest('[data-act]
 document.addEventListener('input',function(e){if(e.target.id==='pq'){sel.q=e.target.value;var pos=e.target.selectionStart;render();var n=$('pq');n.focus();n.setSelectionRange(pos,pos)}});
 document.addEventListener('change',function(e){var i=e.target.id,m={pt:'tm',pn:'n',pv:'v',po:'o',pl1:'l1',pl2:'l2'};if(m[i]){sel[m[i]]=e.target.value;render();toast('Updated')}});
 // ---- data
-function getJSON(u){return fetch(u+'?'+Date.now()).then(function(r){if(!r.ok)throw 0;return r.json()})}
+// admin key: open the site once as  /#admin=YOURKEY  to unlock the Track record on this device ( #admin=off removes it )
+(function(){try{var m=/admin=([^&]*)/.exec(location.hash||'');if(m){var k=decodeURIComponent(m[1]);if(k==='off')localStorage.removeItem('gp_admin');else localStorage.setItem('gp_admin',k);history.replaceState(null,'',location.pathname+location.search)}}catch(e){}})();
+function adminKey(){try{return localStorage.getItem('gp_admin')||''}catch(e){return ''}}
+function getJSON(u){var o={};if(u==='lines_history.json'&&adminKey())o={headers:{'X-Admin-Key':adminKey()}};return fetch(u+'?'+Date.now(),o).then(function(r){if(!r.ok)throw 0;return r.json()})}
 function applyFeeds(g,l,h){
  if(g){GAMES=(g.games||[]).filter(function(x){return x.start}).sort(function(a,b){return a.start<b.start?-1:1});META.games_iso=g.updated||'';META.games_at=(g.updated&&g.updated.indexOf('T')>-1)?fmt(g.updated):(g.updated||'')}
  if(l){LINES=l.lines||[];META.lines_at=l.observed_at?fmt(l.observed_at):''}
