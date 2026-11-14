@@ -1,7 +1,10 @@
 {
   "name": "glockys-cs2-props",
+  "main": "worker.js",
   "compatibility_date": "2025-01-01",
   "assets": {
-    "directory": "./"
+    "directory": "./",
+    "binding": "ASSETS",
+    "run_worker_first": ["/lines_history.json"]
   }
 }
