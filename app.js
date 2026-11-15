@@ -357,18 +357,20 @@ function addSlip(g){if(slip.some(function(s){return norm(s.player)===norm(g.play
 function rp(l){if(l.g||String(l.player||'').indexOf('+')>=0)return '';var p=find(l.player,l.team);return p?p.name:''}
 function openP(n){gpClose();sel.pl=n;sel.v='all';sel.o='';var r=recents().filter(function(x){return x!==n});r.unshift(n);save('gp_recent',r.slice(0,8));tab='players';render();window.scrollTo(0,0);toast('Stats for '+n)}
 // ---- game props side panel: tap See props on a game and that match's lines slide in on the right
-function gpClose(){var p=document.getElementById('gp');if(p){p.classList.remove('open');setTimeout(function(){var q=document.getElementById('gp');if(q&&!q.classList.contains('open'))q.remove()},250)}}
+function gpClose(){var p=document.getElementById('gpanel');if(p){p.classList.remove('open');setTimeout(function(){var q=document.getElementById('gpanel');if(q&&!q.classList.contains('open'))q.remove()},250)}}
 function gpItem(a){var l=a[0],i=a[1],g=l.g,started=l.start&&new Date(l.start).getTime()<NOW();
  return '<div class="item"><div><b>'+esc(l.player)+'</b> <span class="muted">'+esc(sname(l.stat))+(l.book?' · '+esc(l.book):'')+(started?' · started':'')+'</span><br><span class="muted">line </span><b>'+l.line+'</b>'+(g?'<span class="muted"> · proj '+g.proj+' · over '+g.over+'/'+g.of+'</span>':'<span class="muted"> · can\'t grade this one'+(rp(l)?', research him in the Players tab':'')+'</span>')+'</div><div style="text-align:right">'+(g?'<span class="pill '+(g.pick==='UNDER'?'u':'')+'">'+g.grade+' '+g.pick+'</span><br><button class="g" data-act="lg" data-i="'+i+'">Grade</button> <button class="g" data-act="ladd" data-i="'+i+'">+ Slip</button>':(rp(l)?'<button class="g" data-act="plview" data-p="'+esc(rp(l))+'">Research</button>':'<button class="g" data-act="lg" data-i="'+i+'">Grade</button>'))+'</div></div>'}
 function openGP(id){var g=null;GAMES.forEach(function(x){if(String(x.id)===String(id))g=x});if(!g){toast('Game not found');return}
  var all=allLines(),mine=[];all.forEach(function(l,i){if(teq(l.team,g.team1)||teq(l.team,g.team2))mine.push([l,i])});
  function side(t){return mine.filter(function(a){return teq(a[0].team,t)}).sort(function(a,b){return a[0].player.toLowerCase()<b[0].player.toLowerCase()?-1:a[0].player.toLowerCase()>b[0].player.toLowerCase()?1:(a[0].stat<b[0].stat?-1:1)})}
  var s1=side(g.team1),s2=side(g.team2),gr=mine.filter(function(a){return a[0].g}).length;
- var body='<div class="muted">'+esc(g.tournament||'')+' · '+esc(fmt(g.start))+(g.bo?' · Bo'+esc(g.bo):'')+'</div><div class="big" style="margin:4px 0 2px">'+esc(g.team1)+' <span class="vs">vs</span> '+esc(g.team2)+'</div><div class="muted" style="margin-bottom:8px">'+mine.length+' props · '+gr+' graded · Maps 1-2</div>';
- if(!mine.length)body+='<div class="warn">No props posted for this match yet. PrizePicks and Underdog usually post a few hours before the start, and this list updates about every hour.</div>';
+ var body='<div class="muted">'+esc(g.tournament||'')+' · '+esc(fmt(g.start))+(g.bo?' · Bo'+esc(g.bo):'')+'</div><div class="big" style="margin:4px 0 2px">'+esc(g.team1)+' <span class="vs">vs</span> '+esc(g.team2)+'</div><div class="muted" style="margin-bottom:8px">'+(isUp(g)?mine.length+' props · '+gr+' graded · Maps 1-2':'')+'</div>';
+ var started=!isUp(g);
+ if(started){body+='<div class="warn" style="margin-top:10px">'+(g.status==='finished'?'This game is finished, so props are closed.':'This game is already live, so props are closed.')+'</div>'}
+ else if(!mine.length)body+='<div class="warn">No props posted for this match yet. PrizePicks and Underdog usually post a few hours before the start, and this list updates about every hour.</div>';
  else body+=[[g.team1,s1],[g.team2,s2]].map(function(t){return '<h2 style="margin-top:12px">'+esc(t[0])+(rankOf(t[0])?' #'+rankOf(t[0]):'')+' · '+t[1].length+'</h2>'+(t[1].length?t[1].map(gpItem).join(''):'<div class="muted">No props for this team yet.</div>')}).join('');
- var old=document.getElementById('gp');if(old)old.remove();
- var el=document.createElement('div');el.id='gp';el.innerHTML='<div class="gp-bg" data-act="gpclose"></div><aside class="gp-panel" role="dialog" aria-label="Props for this game"><div class="gp-head"><b>Props</b><button class="g gp-x" data-act="gpclose" aria-label="Close">✕</button></div><div class="gp-body">'+body+'</div></aside>';
+ var old=document.getElementById('gpanel');if(old)old.remove();
+ var el=document.createElement('div');el.id='gpanel';el.innerHTML='<div class="gp-bg" data-act="gpclose"></div><aside class="gp-panel" role="dialog" aria-label="Props for this game"><div class="gp-head"><b>Props</b><button class="g gp-x" data-act="gpclose" aria-label="Close">✕</button></div><div class="gp-body">'+body+'</div></aside>';
  document.body.appendChild(el);void el.offsetWidth;el.classList.add('open')}
 document.addEventListener('keydown',function(e){if(e.key==='Escape')gpClose()});
 // ---- actions
