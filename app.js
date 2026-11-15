@@ -119,13 +119,13 @@ function gameCard(g,full){var a=roster(g.team1),b=roster(g.team2);return '<div c
 function recents(){return load('gp_recent',[])}
 function viewDash(){var ls=allLines().filter(function(l){return l.g}).sort(function(a,b){return Math.abs(b.g.edge/b.line)-Math.abs(a.g.edge/a.line)}).slice(0,5),rc=recents(),dg=liveGames().concat(upGames());
  var h='<div class="card"><h2>Player search</h2><div class="row"><input id="ds" list="plist" placeholder="Search a player, e.g. donk"><button class="b" style="flex:0 0 auto;margin:0" data-act="dsearch">Stats</button></div>'+(rc.length?'<div class="btns" style="margin-top:6px"><span class="muted" style="align-self:center">Recent:</span>'+rc.map(function(n){return '<button class="g" data-act="plview" data-p="'+esc(n)+'">'+esc(n)+'</button>'}).join('')+'<button class="g" data-act="rclear">Clear</button></div>':'')+'</div>';
- h+='<div class="grid c2"><div class="card"><h2>Live + upcoming games · '+dg.length+'</h2>'+(dg.length?'<div class="scroll" style="max-height:560px;overflow-y:auto">'+dg.map(function(g){return '<div class="item"><div><b>'+esc(g.team1)+' <span class="vs">vs</span> '+esc(g.team2)+'</b>'+(g.status==='live'?' <span class="pill">LIVE</span>':'')+'<br><span class="muted">'+esc(g.tournament||'')+' · '+esc(fmt(g.start))+'</span></div><button class="g" style="margin:0" data-act="gameopen">Rosters</button></div>'}).join('')+'</div>':'<div class="warn">No schedule loaded yet. Run the "Update CS2 games" workflow.</div>')+'</div>';
+ h+='<div class="grid c2"><div class="card"><h2>Live + upcoming games · '+dg.length+'</h2>'+(dg.length?'<div class="scroll" style="max-height:560px;overflow-y:auto">'+dg.map(function(g){return '<div class="item"><div><b>'+esc(g.team1)+' <span class="vs">vs</span> '+esc(g.team2)+'</b>'+(g.status==='live'?' <span class="pill">LIVE</span>':'')+'<br><span class="muted">'+esc(g.tournament||'')+' · '+esc(fmt(g.start))+'</span></div><button class="g" style="margin:0" data-act="gamegrade" data-i="'+g.id+'">Props</button></div>'}).join('')+'</div>':'<div class="warn">No schedule loaded yet. Run the "Update CS2 games" workflow.</div>')+'</div>';
  h+='<div><div class="card"><h2>Top graded lines</h2>'+(ls.length?ls.map(function(l){return '<div class="item"><div><b>'+esc(l.player)+'</b> <span class="muted">'+esc(l.team)+'</span><br><span class="muted">'+sname(l.stat)+' · line '+l.line+' · proj '+l.g.proj+'</span></div><div><span class="pill '+(l.g.pick==='UNDER'?'u':'')+'">'+l.g.grade+' '+l.g.pick+'</span></div></div>'}).join(''):'<div class="warn">No lines yet. Add a PrizePicks line in the Lines tab.</div>')+'</div>';
  h+='<div class="card"><h2>Quick actions</h2><div class="btns"><button class="b" data-act="go" data-t="grader">Grade a prop</button><button class="g" data-act="go" data-t="lines">Lines</button><button class="g" data-act="go" data-t="slip">Slip ('+slip.length+')</button><button class="g" data-act="reload">Reload data</button></div></div></div></div>';return h+recordCard()+opts()}
 function liveCard(g){var sc=(g.s1!=null&&g.s2!=null)?' <span style="color:var(--green);margin-left:8px">'+g.s1+' – '+g.s2+'</span>':'';
  var ws=(g.streams||[]).filter(function(u){return /^https:\/\//.test(u)});
  var w=ws.map(function(u,k){return '<a href="'+esc(u)+'" target="_blank" rel="noopener" style="display:inline-block;margin-top:6px;padding:9px 12px;border:1px solid var(--green);border-radius:10px;color:var(--green);font-weight:700;text-decoration:none">Watch'+(ws.length>1?' '+(k+1):'')+'</a>'}).join('');
- return '<div class="card"><div class="muted"><span class="pill">LIVE</span> '+esc(g.tournament||'')+' · started '+esc(ftime(g.start))+(g.bo?' · Bo'+esc(g.bo):'')+'</div><div class="big">'+esc(g.team1)+' <span class="vs">vs</span> '+esc(g.team2)+sc+'</div><div class="btns"><button class="g" data-act="gamegrade">See props</button>'+w+'</div></div>'}
+ return '<div class="card"><div class="muted"><span class="pill">LIVE</span> '+esc(g.tournament||'')+' · started '+esc(ftime(g.start))+(g.bo?' · Bo'+esc(g.bo):'')+'</div><div class="big">'+esc(g.team1)+' <span class="vs">vs</span> '+esc(g.team2)+sc+'</div><div class="btns"><button class="g" data-act="gamegrade" data-i="'+g.id+'">See props</button>'+w+'</div></div>'}
 function viewGames(){if(!GAMES.length)return '<div class="card"><h2>Games</h2><div class="warn">No schedule loaded yet. Run the "Update CS2 games" workflow once to create games.json.</div></div>';
  var lv=liveGames(),up=upGames(),v=sel.gv||(lv.length?'live':'up'),age=gamesAge();
  var h='<div class="btns" style="margin-bottom:10px"><button class="'+(v==='live'?'b':'g')+'" data-act="gsub" data-v="live">Live · '+lv.length+'</button><button class="'+(v==='up'?'b':'g')+'" data-act="gsub" data-v="up">Upcoming · '+up.length+'</button></div>';
@@ -164,7 +164,7 @@ function recordData(){TS_CACHE={};var rows=[],pending=0,nodata=0,seen={};
     if(!bc||bc.c[st]==null)okc=false;else tot+=bc.c[st]});
    if(!okc){nodata++;return}
    var lc=+e.lock.line;if(tot===lc)return;seen[k1]=1;
-   rows.push({team:e.team,opp:e.opponent,player:e.player,stat:st,line:lc,act:tot,pick:e.lock.pick,grade:e.lock.grade,proj:e.lock.proj,locked:true,hit:e.lock.pick==='OVER'?tot>lc:tot<lc,start:e.start});return}
+   rows.push({team:e.team,opp:e.opponent,player:e.player,stat:st,line:lc,act:tot,pick:e.lock.pick,grade:e.lock.grade,proj:e.lock.proj,locked:true,lat:e.lock.at||'',hit:e.lock.pick==='OVER'?tot>lc:tot<lc,start:e.start});return}
   var p=find(e.player,e.team);if(!p){nodata++;return}
   var d0=cday(e.start),key=norm(e.player)+st+d0;if(seen[key])return;
   var best=null;combos(p).forEach(function(c){if(!c.date||!teq(c.opp,e.opponent))return;var dd=Math.abs((new Date(c.date+'T12:00:00Z')-new Date(d0+'T12:00:00Z'))/864e5);if(dd<=1&&(!best||dd<best.dd))best={c:c,dd:dd}});
@@ -174,7 +174,7 @@ function recordData(){TS_CACHE={};var rows=[],pending=0,nodata=0,seen={};
   var line=lk?+lk.line:+e.line,g=lk?{grade:lk.grade,proj:lk.proj,pick:lk.pick}:grade(past,st,line,e.opponent);if(!g){nodata++;return}
   var act=best.c[st];if(act===line)return;seen[key]=1;
   var pick=lk?lk.pick:(g.pick||((g.grade==='D'||g.grade==='F')?'UNDER':'OVER'));
-  rows.push({team:e.team,opp:e.opponent,player:e.player,stat:st,line:line,act:act,rproj:roundsProj(past,st,e.opponent,p.team,best.c.date),pick:pick,grade:g.grade,proj:g.proj,locked:!!lk,hit:pick==='OVER'?act>line:act<line,start:e.start})});
+  rows.push({team:e.team,opp:e.opponent,player:e.player,stat:st,line:line,act:act,rproj:roundsProj(past,st,e.opponent,p.team,best.c.date),pick:pick,grade:g.grade,proj:g.proj,locked:!!lk,lat:lk?(lk.at||''):'',hit:pick==='OVER'?act>line:act<line,start:e.start})});
  rows.forEach(function(r){r.day=cday(r.start)});rows.sort(function(a,b){return a.start<b.start?1:-1});return{rows:rows,pending:pending,nodata:nodata,total:(HIST||[]).length}}
 function recordCard(){if(HIST==null)return '';var h='<div class="card" style="margin-top:12px"><h2>Track record</h2>';
  if(HIST==null)return h+'<div class="warn">No line history yet. It starts saving after the next "Update CS2 lines" run with the new script.</div></div>';
@@ -219,6 +219,15 @@ function recordCard(){if(HIST==null)return '';var h='<div class="card" style="ma
  var obRows=[['All picks',rows],['Kills',rows.filter(function(x){return x.stat==='kills'})],['Headshots',rows.filter(function(x){return x.stat==='hs'})],['Locked picks only',rows.filter(function(x){return x.locked})],['Line under 15',rows.filter(function(x){return x.line<15})],['Line 15-25',rows.filter(function(x){return x.line>=15&&x.line<25})],['Line 25 and up',rows.filter(function(x){return x.line>=25})]];
  dl.slice(0,10).forEach(function(d){obRows.push([dayLabel(d),dm[d]])});
  h+='<h2 style="margin-top:12px">Over bias test</h2><div class="muted" style="margin-bottom:6px">What if you had taken the Over on every graded line, ignoring the grader? Pushes are skipped. The number in brackets is the 95% margin of error: a result is only convincing if the whole range stays above the break-even rate of your slip type (usually about 54-58%). Picks from one match move together, so the true margin is wider than shown.</div><div class="scroll"><table><tr><th>Group</th><th>Lines</th><th>Overs hit</th><th>Over hit rate</th></tr>'+obRows.map(function(x){var q=ob(x[1]);return '<tr><td>'+esc(x[0])+'</td><td>'+q[0]+'</td><td>'+q[1]+'</td><td>'+q[2]+'</td></tr>'}).join('')+'</table></div>';
+ // ---- by stat: does our projection carry real information for kills? for headshots? (slope 1 = all of our edge is real, 0 = none)
+ var NEWG='2026-11-15T02:00:00';
+ function bs(r){var n=r.length;if(!n)return['–','–','–','–','–','–'];var w=r.filter(function(x){return x.hit}).length,o=r.filter(function(x){return x.act>x.line}).length,pd=r.map(function(x){return x.proj-x.line}),ad=r.map(function(x){return x.act-x.line}),mp=pd.reduce(function(a,b){return a+b},0)/n,ma=ad.reduce(function(a,b){return a+b},0)/n,sx=0,sy=0;for(var i=0;i<n;i++){sx+=(pd[i]-mp)*(ad[i]-ma);sy+=(pd[i]-mp)*(pd[i]-mp)}
+  return[n,w+'-'+(n-w)+' ('+Math.round(w/n*100)+'%)',Math.round(o/n*100)+'%',(mp>=0?'+':'')+mp.toFixed(1),(ma>=0?'+':'')+ma.toFixed(1),n>=15&&sy>0?(sx/sy).toFixed(2):'–']}
+ var kR=rows.filter(function(x){return x.stat==='kills'&&x.proj!=null}),hR=rows.filter(function(x){return x.stat==='hs'&&x.proj!=null});
+ function big(a){return a.filter(function(x){return (x.proj-x.line)/x.line>=.05})}
+ function nw(a){return a.filter(function(x){return x.locked&&x.lat&&x.lat>=NEWG})}
+ var bsRows=[['Kills, all',kR],['Kills, projected 5%+ over the line',big(kR)],['Kills, new grader picks only',nw(kR)],['Headshots, all',hR],['Headshots, projected 5%+ over the line',big(hR)],['Headshots, new grader picks only',nw(hR)]];
+ h+='<h2 style="margin-top:12px">By stat: is our projection real?</h2><div class="muted" style="margin-bottom:6px">Hit rate is for the pick as graded. Over rate is how often the real result beat the line. Proj and Actual are the average distance from the line. Edge real is 1.00 if all of our projected edge shows up in real results and 0 or less if none of it does (needs 15+ picks). New grader picks are the ones locked since the shadow grader went live.</div><div class="scroll"><table><tr><th>Group</th><th>Picks</th><th>Hit rate</th><th>Over rate</th><th>Proj vs line</th><th>Actual vs line</th><th>Edge real</th></tr>'+bsRows.map(function(x){var q=bs(x[1]);return '<tr><td>'+esc(x[0])+'</td><td>'+q[0]+'</td><td>'+q[1]+'</td><td>'+q[2]+'</td><td>'+q[3]+'</td><td>'+q[4]+'</td><td>'+q[5]+'</td></tr>'}).join('')+'</table></div>';
  function av(a){return a.length?(mean(a)>=0?'+':'')+mean(a).toFixed(1):'–'}
  h+='<h2 style="margin-top:12px">Projection vs reality</h2><div class="scroll"><table><tr><th>Grade</th><th>Picks</th><th>Proj minus line</th><th>Actual minus line</th></tr>'+['A+','B','C','D','F'].map(function(G){var r=sp(function(x){return x.grade===G});return '<tr><td>'+G+'</td><td>'+r.length+'</td><td>'+av(r.map(function(x){return x.proj-x.line}))+'</td><td>'+av(r.map(function(x){return x.act-x.line}))+'</td></tr>'}).join('')+'</table></div><div class="muted" style="margin-top:6px">If a grade\'s projection sits above the line but the actual result sits below it (or the reverse), the projection is pointing the wrong way for that grade.</div>';
  var mm={},ml=[];vis.forEach(function(r){var k=[tn(r.team),tn(r.opp)].sort().join('|');if(!mm[k]){mm[k]={n:(r.team||'?')+' vs '+(r.opp||'?'),r:[]};ml.push(mm[k])}mm[k].r.push(r)});
@@ -314,7 +323,7 @@ function viewPlayers(){if(sel.pl)return pcard()+opts();var q=(sel.q||'').toLower
  var list=DB.filter(function(p){return(!tm||p.team===tm)&&(p.name+p.team).toLowerCase().indexOf(q)>-1}).slice(0,200);
  return '<div class="card"><h2>Players · '+DB.length+' active</h2><div class="row"><input id="pq" placeholder="Search players or teams" value="'+esc(sel.q||'')+'"><select id="pt"><option value="">All teams</option>'+Object.keys(teams).sort().map(function(t){return '<option'+(t===tm?' selected':'')+'>'+esc(t)+'</option>'}).join('')+'</select></div><div class="scroll"><table><tr><th>Player</th><th>Team</th><th>Kills M1-2</th><th>HS M1-2</th><th></th></tr>'+list.map(function(p){var cs=combos(p).slice(0,10);return '<tr><td>'+esc(p.name)+'</td><td>'+esc(p.team)+'</td><td>'+(cs.length?mean(nums(cs,'kills')).toFixed(1):'–')+'</td><td>'+(nums(cs,'hs').length?mean(nums(cs,'hs')).toFixed(1):'–')+'</td><td><button class="g" style="margin:0" data-act="plview" data-p="'+esc(p.name)+'">Stats</button></td></tr>'}).join('')+'</table></div><div class="muted">Averages are the last 10 series with both Map 1 and Map 2 played.</div></div>'}
 function render(){nav();chips();var v={dash:viewDash,games:viewGames,lines:viewLines,grader:viewGrader,slip:viewSlip,players:viewPlayers}[tab]();$('main').innerHTML=v+(tab==='lines'?opts():'')}
-function go(t){tab=t;render();window.scrollTo(0,0)}
+function go(t){gpClose();tab=t;render();window.scrollTo(0,0)}
 // ---- images (grade + translucent logo only). Font: Russo One (bold, sporty), loaded from Google Fonts; falls back to Impact.
 var IMGFONT='"Russo One",Impact,"Arial Black",sans-serif';
 (function(){try{var l=document.createElement('link');l.rel='stylesheet';l.href='https://fonts.googleapis.com/css2?family=Russo+One&display=swap';document.head.appendChild(l)}catch(e){}})();
@@ -346,7 +355,22 @@ function share(c,name){dl(c,name)}
 function curGrade(){var g=gradeFor(sel.player,sel.team||'',sel.stat,parseFloat(sel.line),sel.opp);return g&&!g.missing?g:null}
 function addSlip(g){if(slip.some(function(s){return norm(s.player)===norm(g.player)&&s.stat===g.stat})){toast('Already on slip');return}slip.push({player:g.player,stat:g.stat,line:g.line,pick:g.pick,grade:g.grade});save('gp_slip',slip);toast('Added '+g.player+' '+g.pick+' '+g.line)}
 function rp(l){if(l.g||String(l.player||'').indexOf('+')>=0)return '';var p=find(l.player,l.team);return p?p.name:''}
-function openP(n){sel.pl=n;sel.v='all';sel.o='';var r=recents().filter(function(x){return x!==n});r.unshift(n);save('gp_recent',r.slice(0,8));tab='players';render();window.scrollTo(0,0);toast('Stats for '+n)}
+function openP(n){gpClose();sel.pl=n;sel.v='all';sel.o='';var r=recents().filter(function(x){return x!==n});r.unshift(n);save('gp_recent',r.slice(0,8));tab='players';render();window.scrollTo(0,0);toast('Stats for '+n)}
+// ---- game props side panel: tap See props on a game and that match's lines slide in on the right
+function gpClose(){var p=document.getElementById('gp');if(p){p.classList.remove('open');setTimeout(function(){var q=document.getElementById('gp');if(q&&!q.classList.contains('open'))q.remove()},250)}}
+function gpItem(a){var l=a[0],i=a[1],g=l.g,started=l.start&&new Date(l.start).getTime()<NOW();
+ return '<div class="item"><div><b>'+esc(l.player)+'</b> <span class="muted">'+esc(sname(l.stat))+(l.book?' · '+esc(l.book):'')+(started?' · started':'')+'</span><br><span class="muted">line </span><b>'+l.line+'</b>'+(g?'<span class="muted"> · proj '+g.proj+' · over '+g.over+'/'+g.of+'</span>':'<span class="muted"> · can\'t grade this one'+(rp(l)?', research him in the Players tab':'')+'</span>')+'</div><div style="text-align:right">'+(g?'<span class="pill '+(g.pick==='UNDER'?'u':'')+'">'+g.grade+' '+g.pick+'</span><br><button class="g" data-act="lg" data-i="'+i+'">Grade</button> <button class="g" data-act="ladd" data-i="'+i+'">+ Slip</button>':(rp(l)?'<button class="g" data-act="plview" data-p="'+esc(rp(l))+'">Research</button>':'<button class="g" data-act="lg" data-i="'+i+'">Grade</button>'))+'</div></div>'}
+function openGP(id){var g=null;GAMES.forEach(function(x){if(String(x.id)===String(id))g=x});if(!g){toast('Game not found');return}
+ var all=allLines(),mine=[];all.forEach(function(l,i){if(teq(l.team,g.team1)||teq(l.team,g.team2))mine.push([l,i])});
+ function side(t){return mine.filter(function(a){return teq(a[0].team,t)}).sort(function(a,b){return a[0].player.toLowerCase()<b[0].player.toLowerCase()?-1:a[0].player.toLowerCase()>b[0].player.toLowerCase()?1:(a[0].stat<b[0].stat?-1:1)})}
+ var s1=side(g.team1),s2=side(g.team2),gr=mine.filter(function(a){return a[0].g}).length;
+ var body='<div class="muted">'+esc(g.tournament||'')+' · '+esc(fmt(g.start))+(g.bo?' · Bo'+esc(g.bo):'')+'</div><div class="big" style="margin:4px 0 2px">'+esc(g.team1)+' <span class="vs">vs</span> '+esc(g.team2)+'</div><div class="muted" style="margin-bottom:8px">'+mine.length+' props · '+gr+' graded · Maps 1-2</div>';
+ if(!mine.length)body+='<div class="warn">No props posted for this match yet. PrizePicks and Underdog usually post a few hours before the start, and this list updates about every hour.</div>';
+ else body+=[[g.team1,s1],[g.team2,s2]].map(function(t){return '<h2 style="margin-top:12px">'+esc(t[0])+(rankOf(t[0])?' #'+rankOf(t[0]):'')+' · '+t[1].length+'</h2>'+(t[1].length?t[1].map(gpItem).join(''):'<div class="muted">No props for this team yet.</div>')}).join('');
+ var old=document.getElementById('gp');if(old)old.remove();
+ var el=document.createElement('div');el.id='gp';el.innerHTML='<div class="gp-bg" data-act="gpclose"></div><aside class="gp-panel" role="dialog" aria-label="Props for this game"><div class="gp-head"><b>Props</b><button class="g gp-x" data-act="gpclose" aria-label="Close">✕</button></div><div class="gp-body">'+body+'</div></aside>';
+ document.body.appendChild(el);void el.offsetWidth;el.classList.add('open')}
+document.addEventListener('keydown',function(e){if(e.key==='Escape')gpClose()});
 // ---- actions
 document.addEventListener('click',function(e){var b=e.target.closest('[data-act],[data-t]');if(!b)return;
  if(b.dataset.t&&!b.dataset.act){go(b.dataset.t);return}
@@ -356,7 +380,8 @@ document.addEventListener('click',function(e){var b=e.target.closest('[data-act]
  else if(a==='gsub'){sel.gv=b.dataset.v;render()}
  else if(a==='lday'){sel.ld=b.dataset.d;render()}
  else if(a==='rday'){sel.rd=b.dataset.d;render()}
- else if(a==='gamegrade'){go('players');toast('Pick a player from the team to grade')}
+ else if(a==='gamegrade'){openGP(b.dataset.i)}
+ else if(a==='gpclose'){gpClose()}
  else if(a==='dsearch'){var nm=($('ds').value||'').trim(),pp=find(nm);if(!pp){toast('No player named "'+nm+'"');return}openP(pp.name)}
  else if(a==='plview'){openP(b.dataset.p)}
  else if(a==='rclear'){save('gp_recent',[]);render();toast('Search history cleared')}
