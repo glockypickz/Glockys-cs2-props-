@@ -232,8 +232,10 @@ function teamSeries(team){var k=tn(team);if(TS_CACHE[k])return TS_CACHE[k];var b
 function avgRounds(team,before){var a=teamSeries(team).filter(function(x){return x.date<before}).slice(0,10);return a.length>=4?mean(a.map(function(x){return x.rounds})):null}
 // rounds model: the player's kills (or headshots) per round over his last 10 Map 1+2 series x expected rounds for this matchup (average of both teams' recent Map 1+2 round totals)
 function roundsProj(past,st,opp,team,date){var cs=combos(past).filter(function(c){return c.rounds&&c[st]!=null}).slice(0,10);if(cs.length<4)return null;var k=0,r=0;cs.forEach(function(c){k+=c[st];r+=c.rounds});var e1=avgRounds(team,date),e2=opp?avgRounds(opp,date):null;if(e1==null&&e2==null)return null;var E=e1==null?e2:e2==null?e1:(e1+e2)/2;return Math.round(k/r*E*10)/10}
+// one pick per player/stat/day: a locked entry wins over an unlocked one (e.g. a second entry made when a book moved the start time); otherwise file order
+function lockFirst(h){return h.map(function(e,i){return[e,i]}).sort(function(a,b){var la=a[0].lock&&a[0].lock.grade?0:1,lb=b[0].lock&&b[0].lock.grade?0:1;return la-lb||a[1]-b[1]}).map(function(x){return x[0]})}
 function recordData(){TS_CACHE={};var rows=[],pending=0,nodata=0,seen={},pushes=0,voids=0;
- (HIST||[]).forEach(function(e){var st=normStat(e.stat);if(!st||!e.start)return;var t=new Date(e.start).getTime();if(isNaN(t))return;
+ lockFirst(HIST||[]).forEach(function(e){var st=normStat(e.stat);if(!st||!e.start)return;var t=new Date(e.start).getTime();if(isNaN(t))return;
   if(t>NOW()-1*3600000){pending++;return}
   var rs=e.result||null;if(rs&&rs.outcome==='void'){voids++;return}
   if(isCombo(e.player)){ // combo: needs the locked pick, and every player's result for that match added up
