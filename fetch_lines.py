@@ -114,8 +114,8 @@ def _key_txt(s):
 
 
 def moved_entry(by, l, t0):
-    """The existing history entry for this book / player / stat / team / opponent whose match start moved (start differs
-    by at most MOVE_HOURS and that entry is not settled yet), or None. Keeps one entry per match when a book reschedules."""
+    """The existing history entry for this book / player / stat / team / opponent whose match start moved or is the same
+    time written differently (start differs by at most MOVE_HOURS and that entry is not settled yet), or None. Keeps one entry per match when a book reschedules."""
     if t0 is None:
         return None
     best = None
@@ -125,7 +125,7 @@ def moved_entry(by, l, t0):
         if _key_txt(e.get("team")) != _key_txt(l.get("team")) or _key_txt(e.get("opponent")) != _key_txt(l.get("opponent")):
             continue
         t1 = parse_time(e.get("start"))
-        if t1 is None or t1 == t0:
+        if t1 is None:   # compared as times, so "...00.000Z" and "...00Z" are the same start
             continue
         d = abs((t1 - t0).total_seconds())
         if d <= MOVE_HOURS * 3600 and (best is None or d < best[0]):
