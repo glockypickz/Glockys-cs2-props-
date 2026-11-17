@@ -105,3 +105,4 @@ header img{filter:drop-shadow(0 0 10px rgba(0,255,102,.35));animation:gpglow 3.5
 .hb.g{border-color:var(--green);color:var(--green)}
 .hb.r{border-color:var(--red);color:var(--red)}
 .hb.na{opacity:.5}
+.cito{margin:8px 0 2px}.cito .ct{font-size:12px;table-layout:fixed}.cito .ct th,.cito .ct td{padding:4px 4px;white-space:normal;overflow:hidden;text-overflow:ellipsis}.cito .ct th:first-child,.cito .ct td:first-child{width:28%}.cito .muted{font-size:12px;margin-top:4px}.cito .cs{opacity:.8}
