@@ -96,7 +96,7 @@ def try_lock(gr, e, now, t0):
         if g:
             e["lock"] = {"line": float(e["line"]), "proj": g["proj"], "grade": g["grade"], "pick": g["pick"],
                          "p_over": g["p_over"], "p_pick": g["p_pick"], "be": g["be"], "edge_pp": g["edge_pp"],
-                         "reasons": g["reasons"], "model": g["model"], "odds": e.get("odds"),
+                         "reasons": g["reasons"], "flag": g.get("flag", ""), "model": g["model"], "odds": e.get("odds"),
                          "at": now.isoformat(timespec="seconds"), "stats_updated": STATS_STAMP}
     except Exception as ex:
         print("lock failed for", e.get("player"), ex)

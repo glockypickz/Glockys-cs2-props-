@@ -264,11 +264,12 @@ def grade_table(rows, w, P, label):
         if r["push"]:
             continue
         g = G.finish(r["mu"], r["line"], r["stat"], r["book"], None, r["v2"]["reasons"])
+        g["flagged"] = bool(g["reasons"])
         hit = r["over"] if g["pick"] == "OVER" else (not r["over"])
         out.append(dict(r, ng=g["grade"], npick=g["pick"], nhit=hit, epp=g["edge_pp"]))
     print("\n  v2 grades on %s (w=%.2f):" % (label, w))
     print("  %-6s %5s %9s %8s %16s %16s" % ("grade", "n", "record", "hit", "Wilson 95%", "match-clustered"))
-    for gname in ("A+", "B", "C", "D", "F"):
+    for gname in ("A", "B", "C", "D", "F"):
         a = [x for x in out if x["ng"] == gname]
         k = sum(x["nhit"] for x in a)
         lo, hi = wilson(k, len(a))

@@ -13,15 +13,16 @@ How a prop is graded
   3. H2H is only used with 3+ earlier meetings, and only as a small blend.
   4. Projection mu = rate * adj * expected rounds (2 maps), optionally blended with the line (w).
   5. P(over) from a negative binomial with mean mu and a per-stat dispersion fitted by backtest.py.
-  6. Grade on the old letter scale, by edge in percentage points (pp) of the pick side over the book's break-even:
-       A+ = Over  edge >= +6pp   (old: Excellent Over)
-       B  = Over  edge >= +3pp   (old: Lean Over)
-       C  = neither side reaches +3pp: no edge / no play, the lean side is still shown (old: Risk Lean Over)
-       D  = Under edge >= +3pp   (old: Lean Under)
-       F  = Under edge >= +6pp   (old: Terrible Take Under, the strongest Under)
-     The old grader never had a plain "A".
+  6. Letter = direction + strength. Lean side = Over if P(over) >= P(under), else Under. Edge (pp) = P(lean side)
+     minus the book's break-even, in percentage points:
+       A = Over,  edge >= +6pp   (excellent Over)
+       B = Over,  edge >= +3pp   (lean Over)
+       C = Over,  edge <  +3pp   (slight Over lean, weaker than B; can be below break-even)
+       D = Under, edge <  +3pp   (slight Under lean)
+       F = Under, edge >= +3pp   (take the Under)
+     No A+ and no E.
      Break-even comes from the line's odds when stored, else the book default.
-  7. Filters (always C, with the reason shown): fewer than 8 earlier series, player not on the line's team,
+  7. Filters, shown as a flag next to the letter (the letter itself is not changed): fewer than 8 earlier series, player not on the line's team,
      player missed 2+ of his team's last 3 series (stand-in / roster change).
 """
 import re, math, bisect
@@ -33,7 +34,7 @@ PARAMS = {"m": 100, "half_life": 8, "n_max": 20, "m_team": 1500, "elo_k": 16, "b
           "min_series": 8, "grade_a": 6.0, "grade_b": 3.0}
 # w_line = weight on the book line in the mean used for P(over). backtest.py fit it on the earliest locked lines
 # (Nov 13-14 2026, 16 matches): the line alone scored best (w=1.0), i.e. the model has not shown it adds
-# information beyond the line yet, so v2 grades nearly everything C (no edge). Re-run `python backtest.py --tune`
+# information beyond the line yet, so v2 grades nearly everything C or D (slight leans, below break-even). Re-run `python backtest.py --tune`
 # as locked v2 picks pile up and lower w_line (here AND in model.js) only if the holdout supports it.
 BOOK_BE = {"prizepicks": 0.577, "underdog": 0.53}   # break-even per pick when no odds are stored
 DEFAULT_BE = 0.577                                  # unknown book / manual line: assume PrizePicks
@@ -138,12 +139,10 @@ def blend_mean(mu, line, size, w):
 
 
 def letter(pick, epp, P=PARAMS):
-    """Old letter scale: A+ / B = Over plays, C = no edge, D / F = Under plays (F strongest)."""
-    if epp >= P["grade_a"]:
-        return "A+" if pick == "OVER" else "F"
-    if epp >= P["grade_b"]:
-        return "B" if pick == "OVER" else "D"
-    return "C"
+    """A / B / C = Over (strongest to weakest), D / F = Under (F = take the Under)."""
+    if pick == "OVER":
+        return "A" if epp >= P["grade_a"] else "B" if epp >= P["grade_b"] else "C"
+    return "F" if epp >= P["grade_b"] else "D"
 
 
 class Grader:
@@ -349,17 +348,18 @@ class Grader:
         nopush = max(1e-12, 1 - eq)
         po, pu = over / nopush, under / nopush
         be = break_even(book, odds)
-        pick = "OVER" if po >= pu else "UNDER"
+        if abs(po - pu) < 1e-6:  # blended chance is a coin flip (w_line = 1): the model's own mean sets the lean side
+            pick = "OVER" if mu >= line_mean(line, size) else "UNDER"
+        else:
+            pick = "OVER" if po > pu else "UNDER"
         pp = max(po, pu)
         epp = (pp - be) * 100
         reasons = list(reasons or [])
         g = letter(pick, epp, P)
-        if reasons:
-            g = "C"
         # proj / edge show the model's own number; the probabilities use the line-blended mean
         return {"proj": round(mu, 1), "mu_model": round(mu, 2), "mu_blend": round(mu_f, 2), "edge": round(mu - line, 1), "grade": g, "pick": pick,
                 "p_over": round(po, 4), "p_push": round(eq, 4), "p_pick": round(pp, 4), "be": round(be, 4),
-                "edge_pp": round(epp, 2), "reasons": reasons, "model": MODEL_VERSION}
+                "edge_pp": round(epp, 2), "reasons": reasons, "flag": "; ".join(reasons), "model": MODEL_VERSION}
 
     def grade(self, p, st, line, opp, team=None, book=None, odds=None, before="9999"):
         if line is None or (isinstance(line, float) and math.isnan(line)):

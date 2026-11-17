@@ -1,7 +1,8 @@
 /* Grader v2 model (browser + node). JS copy of grader.py: keep the two in step (python parity_check.py compares them).
    Per-round rate (decayed, shrunk to the team) x Elo strength adjustment x expected rounds -> negative binomial P(over),
-   graded on the old letter scale by edge (pp) of the pick side over the book's break-even:
-   A+ = Over >= +6pp, B = Over >= +3pp, C = no edge (and every filtered prop, reason shown), D = Under >= +3pp, F = Under >= +6pp. */
+   letter = direction + strength, by edge (pp) of the lean side over the book's break-even:
+   A = Over >= +6pp, B = Over >= +3pp, C = Over < +3pp (slight lean), D = Under < +3pp (slight lean), F = Under >= +3pp.
+   Filter reasons are a flag next to the letter; they do not change it. */
 (function(root){
 'use strict';
 // PARAMS: tuned by backtest.py on the early slice. MUST match PARAMS in grader.py.
@@ -62,9 +63,9 @@ function filters(ctx,p,team,n,before){var P=ctx.P,out=[];before=before||'9999';
  if(last.length>=3&&last.filter(function(m){return mine[m]}).length<2)out.push('missed 2+ of the team\'s last 3 series (stand-in or roster change)');
  return out}
 function finish(ctx,mu,line,st,book,odds,reasons){var P=ctx.P,size=st==='kills'?P.size_kills:P.size_hs,muF=blendMean(mu,line,size,P.w_line),r=nbProbs(muF,size,line),np=Math.max(1e-12,1-r[1]),
- po=r[0]/np,pu=r[2]/np,be=breakEven(book,odds),pick=po>=pu?'OVER':'UNDER',pp=Math.max(po,pu),epp=(pp-be)*100;reasons=(reasons||[]).slice();
- var g=epp>=P.grade_a?(pick==='OVER'?'A+':'F'):epp>=P.grade_b?(pick==='OVER'?'B':'D'):'C';if(reasons.length)g='C';
- return{proj:mu,muBlend:muF,edge:mu-line,grade:g,pick:pick,pOver:po,pPush:r[1],pPick:pp,be:be,edgePP:epp,reasons:reasons,model:VERSION}}
+ po=r[0]/np,pu=r[2]/np,be=breakEven(book,odds),pick=Math.abs(po-pu)<1e-6?(mu>=lineMean(line,size)?'OVER':'UNDER'):(po>pu?'OVER':'UNDER'),pp=Math.max(po,pu),epp=(pp-be)*100;reasons=(reasons||[]).slice();
+ var g=pick==='OVER'?(epp>=P.grade_a?'A':epp>=P.grade_b?'B':'C'):(epp>=P.grade_b?'F':'D');
+ return{proj:mu,muBlend:muF,edge:mu-line,grade:g,pick:pick,pOver:po,pPush:r[1],pPick:pp,be:be,edgePP:epp,reasons:reasons,flag:reasons.join('; '),model:VERSION}}
 function grade(ctx,p,st,line,opp,o){o=o||{};if(line==null||isNaN(line))return null;var pr=project(ctx,p,st,opp,o.team||p.team,o.before);if(!pr)return null;
  var r=finish(ctx,pr.mu,+line,st,o.book,o.odds,filters(ctx,p,o.team,pr.n,o.before));r.n=pr.n;r.rounds=pr.rounds;r.pwin=pr.pwin;r.rate=pr.rate;r.prior=pr.prior;r.adj=pr.adj;r.cs=pr.cs;r.nRate=pr.nRate;return r}
 function gradeCombo(ctx,ps,names,st,line,opp,o){o=o||{};var mu=0,reasons=[],nmin=999,parts=[];

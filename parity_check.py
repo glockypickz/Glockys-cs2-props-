@@ -8,7 +8,7 @@ const M=require('./model.js');const fs=require('fs');
 const d=JSON.parse(fs.readFileSync('players.json','utf8'));const cases=JSON.parse(fs.readFileSync(0,'utf8'));
 const ctx=M.build(d.players,cases.length&&cases[0].params||null);
 const out=cases.map(c=>{const p=d.players[c.i];const g=M.grade(ctx,p,c.st,c.line,c.opp,{team:c.team,book:c.book,odds:c.odds,before:c.before});
- return g?{proj:g.proj,p_over:g.pOver,grade:g.grade,pick:g.pick,edge_pp:g.edgePP,reasons:g.reasons}:null});
+ return g?{proj:g.proj,p_over:g.pOver,grade:g.grade,pick:g.pick,edge_pp:g.edgePP,reasons:g.reasons,flag:g.flag}:null});
 process.stdout.write(JSON.stringify({params:M.PARAMS,ctxp:ctx.P,aliases:M.TEAM_ALIASES,out:out}));
 """
 
@@ -61,7 +61,7 @@ def run(d, extra):
             bad += 1; print("one side None", c, g, j); continue
         if g is None:
             continue
-        if abs(g["mu_model"] - j["proj"]) > 0.01 or abs(g["p_over"] - j["p_over"]) > 1e-3 or g["grade"] != j["grade"] or g["pick"] != j["pick"] or g["reasons"] != j["reasons"]:
+        if abs(g["mu_model"] - j["proj"]) > 0.01 or abs(g["p_over"] - j["p_over"]) > 1e-3 or g["grade"] != j["grade"] or g["pick"] != j["pick"] or g["reasons"] != j["reasons"] or g["flag"] != j["flag"]:
             bad += 1
             if bad < 10:
                 print("MISMATCH", c, {k: g[k] for k in ("mu_model", "p_over", "grade", "pick", "reasons")}, j)
