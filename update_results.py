@@ -2,6 +2,7 @@
 Only adds games for players already in players.json. The daily update_data.py still decides who is in the data."""
 import asyncio, json, datetime, re, aiohttp
 import update_data as U
+from grader import load_players, save_players
 
 PAGES = 8          # pages of 100 recent finished matches to scan
 LOOKBACK_DAYS = 3  # only matches that started within this many days
@@ -90,12 +91,12 @@ async def run(data, cutoff):
 
 
 def main():
-    data = json.load(open("players.json", encoding="utf-8"))
+    data = load_players("players.json")
     cutoff = (datetime.date.today() - datetime.timedelta(days=LOOKBACK_DAYS)).isoformat()
     added = asyncio.run(run(data, cutoff))
     if added:
         data["results_updated"] = datetime.datetime.utcnow().isoformat(timespec="seconds") + "Z"
-        json.dump(data, open("players.json", "w", encoding="utf-8"), separators=(",", ":"), ensure_ascii=False)
+        save_players(data, "players.json")   # compact fmt 2 (see grader.encode_players)
         print("players.json updated")
     else:
         print("nothing new to add")

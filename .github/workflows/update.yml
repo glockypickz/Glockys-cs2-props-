@@ -18,7 +18,13 @@ jobs:
         with:
           python-version: "3.12"
       - run: pip install aiohttp
+      # Full season, incremental: only new matches each day, then backfill older season matches with the time left
+      # (TIME_LIMIT_H, default 4.5 h; progress is saved in season_state.json and resumes on the next run).
+      # bo3.gg pace: BO3_CONCURRENCY requests at once, BO3_DELAY s pause each (old pace: 1 and 0.3). Prop-board teams go first.
       - run: python update_data.py
+        env:
+          BO3_CONCURRENCY: "4"
+          BO3_DELAY: "0.1"
       # The ONLY step anywhere that gets the Cito key (max ~14 calls/day, see cito_update.py). Never fails the job.
       - name: Cito team strength + settle backup
         continue-on-error: true
@@ -30,7 +36,7 @@ jobs:
           git config user.name "actions-user"
           git config user.email "actions@github.com"
           git add players.json
-          for f in team_strength.json cito_ids.json cito_cache; do [ -e "$f" ] && git add "$f"; done
+          for f in team_strength.json cito_ids.json cito_cache season_state.json; do [ -e "$f" ] && git add "$f"; done
           git diff --staged --quiet || git commit -m "Daily data update"
           git checkout -- games.json 2>/dev/null || true
           git pull --rebase

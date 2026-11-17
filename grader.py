@@ -28,11 +28,32 @@ How a prop is graded
 import re, math, bisect
 
 # ---- model parameters. Tuned by backtest.py on the early slice only. MUST match PARAMS in model.js.
-PARAMS = {"m": 100, "half_life": 8, "n_max": 20, "m_team": 1500, "elo_k": 16, "beta": 0.25,
+HS_WIN = ("5", "10", "15", "szn")
+PARAMS = {"m": 100, "half_life": 8, "n_max": 200, "m_team": 1500, "elo_k": 16, "beta": 0.25,
           "rd_a": 17.34, "rd_b": 16.18, "h2h_min": 3, "h2h_w": 0.0, "w_line": 0.7,
           "g_kills": 0.6573, "g_hs": 0.3404, "size_kills": 20.0, "size_hs": 16.0,
           "min_series": 8, "grade_a": 6.0, "grade_b": 3.0,
-          "w_rank": 0.25, "rank_s": 1.0, "w_maps": 0.25, "k_maps": 6.0, "w_hr": 0.0, "k_hr": 5.0}
+          "w_rank": 0.25, "rank_s": 1.0, "w_maps": 0.25, "k_maps": 6.0, "w_hr": 0.0, "k_hr": 5.0,
+          "w_l5": 0.1, "w_l10": 0.1, "w_l15": 0.0, "w_szn": 0.0, "w_kd": 0.1, "k_kd": 40.0,
+          "w_hs5": 0.3, "w_hs10": 0.2, "w_hs15": 0.0, "w_hsszn": 0.1,
+          "w_khs5": 0.1, "w_khs10": 0.0, "w_khs15": 0.0, "w_khsszn": 0.0, "k_hsp": 30.0, "w_hkd": -0.1}
+# Kill-model form inputs (kills props only; series before the match only; tuned by backtest.py --tune-form):
+#   w_l5 / w_l10 / w_l15 / w_szn: the per-round kill rate moves toward the player's raw rate over his last 5 / 10 / 15
+#           series / this season: rate += w * (window rate - rate). 0 = not used.
+#   w_hkd: the same season K/D factor on the headshots projection (hs rate x kd ** w_hkd).
+#   w_kd: kill rate x kd ** w_kd, kd = season (kills + k_kd) / (deaths + k_kd) (shrunk toward 1). 0 = not used.
+#   Backtest (Nov 2026): every non-zero weight made kills MAE, NB log-lik and locked-line log loss slightly worse (tuned
+#   value 0). By owner decision w_l5 0.1, w_l10 0.1 and w_kd 0.1 ship anyway (small, active; full season stays the base).
+# HS% form inputs (HS% = hs / kills, Maps 1-2 series before the match only; tuned by backtest.py --tune-hs):
+#   shrunk HS%: season = (HS + k_hsp * team HS%) / (K + k_hsp); last 5 / 10 / 15 = (HS + k_hsp * season HS%) / (K + k_hsp)
+#   w_hs5 / w_hs10 / w_hs15 / w_hsszn (headshots): hs rate += w * (player kill rate x shrunk HS% - hs rate)
+#   w_khs5 / w_khs10 / w_khs15 / w_khsszn (kills): kill rate x (shrunk HS% / reference) ** w, reference = season HS%
+#           for the last-N windows and team HS% for the season window. 0 = not used.
+#   Backtest (Nov 2026, early-slice tuning, holdout from 2026-10-20): headshots MAE 3.997 -> 3.974, NB log-lik -3.0211 ->
+#   -3.0151, so w_hs5 0.3 / w_hs10 0.2 / w_hsszn 0.1 ship. The kills weights were tuned to ~0 (holdout slightly worse);
+#   by owner decision w_khs5 0.1 ships (the closest-to-neutral non-zero value). w_hkd -0.1 (best non-zero; +0.1 was worse).
+# n_max 200: the rate uses every series this season (players.json holds the full calendar-year season), decayed with
+#   half_life 8; it was 20 when players.json held only the last 15 matches per team.
 # Hit rates vs the current line (L5 / L10 / L20 / season / H2H, series-level Maps 1-2, earlier series only).
 #   w_hr: weight of a decayed, shrunk hit rate blended into P(over): P = (1 - w_hr) * P_model + w_hr * hr, where
 #         hr = (sum w_i * over_i + k_hr * 0.5) / (sum w_i + k_hr) over the last n_max series (pushes left out,
@@ -159,6 +180,101 @@ def letter(pick, epp, P=PARAMS):
     return "F" if epp >= P["grade_b"] else "D"
 
 
+# ---- players.json storage. fmt 2 (compact) keeps a whole season small enough for the site (Workers assets <= 25 MiB):
+# each log is one array in LOG_COLS order; text columns are indexes into a shared string table "s"; "x" (extra per-map
+# stats) is an array in XCOLS order. decode_players turns it back into the usual {"players":[{"name","team","logs":[{...}]}]}.
+# The same decoder is decodePlayers in model.js (the site). Old files without "fmt" are read as they are.
+LOG_COLS = ["date", "mid", "n", "map", "opp", "kills", "hs", "d", "a", "adr", "rd", "rw", "ev", "x"]
+STR_COLS = ("date", "map", "opp", "ev")
+
+
+def _rnd(v, k):
+    return round(v, k) if isinstance(v, float) else v
+
+
+def encode_players(data):
+    """Plain players data -> fmt 2. adr is rounded to 2 decimals and extra stats to 3 (display only, not graded)."""
+    strings, sidx = [], {}
+
+    def si(v):
+        if v is None:
+            return None
+        v = str(v)
+        if v not in sidx:
+            sidx[v] = len(strings)
+            strings.append(v)
+        return sidx[v]
+    xcols = sorted({k for p in data.get("players", []) for l in p.get("logs") or [] for k in (l.get("x") or {})})
+    out = {k: v for k, v in data.items() if k != "players"}
+    out.update({"fmt": 2, "cols": LOG_COLS, "xcols": xcols, "players": []})
+    for p in data.get("players", []):
+        rows = []
+        for l in p.get("logs") or []:
+            r = []
+            for c in LOG_COLS:
+                v = l.get(c)
+                if c in STR_COLS:
+                    v = si(v)
+                elif c == "adr":
+                    v = _rnd(v, 2)
+                elif c == "x":
+                    v = [_rnd(v.get(k), 3) for k in xcols] if isinstance(v, dict) and v else None
+                r.append(v)
+            while r and r[-1] is None:
+                r.pop()
+            rows.append(r)
+        q = {k: v for k, v in p.items() if k != "logs"}
+        q["rows"] = rows
+        out["players"].append(q)
+    out["s"] = strings
+    return out
+
+
+def decode_players(data):
+    """fmt 2 -> plain players data (logs as dicts; missing / null fields are left out). Plain data is returned as is."""
+    if not isinstance(data, dict) or data.get("fmt") != 2:
+        return data
+    S, cols, xcols = data.get("s") or [], data.get("cols") or LOG_COLS, data.get("xcols") or []
+    out = {k: v for k, v in data.items() if k not in ("fmt", "cols", "xcols", "s", "players")}
+    out["players"] = []
+    for p in data.get("players", []):
+        logs = []
+        for r in p.get("rows") or []:
+            l = {}
+            for i, v in enumerate(r):
+                if v is None:
+                    continue
+                c = cols[i]
+                if c in STR_COLS:
+                    v = S[v]
+                elif c == "x":
+                    v = {k: x for k, x in zip(xcols, v) if x is not None}
+                    if not v:
+                        continue
+                l[c] = v
+            logs.append(l)
+        q = {k: v for k, v in p.items() if k != "rows"}
+        q["logs"] = logs
+        out["players"].append(q)
+    return out
+
+
+def load_players(path="players.json"):
+    """players.json (either format) as plain data: {"players": [{"name", "team", "logs": [...]}], "ranks": {...}, ...}."""
+    import json
+    with open(path, encoding="utf-8") as f:
+        return decode_players(json.load(f))
+
+
+def save_players(data, path="players.json"):
+    import json
+    tmp = path + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as f:
+        json.dump(encode_players(data), f, separators=(",", ":"), ensure_ascii=False)
+    import os
+    os.replace(tmp, path)
+
+
 def load_strength(path="team_strength.json"):
     """team_strength.json written by cito_update.py (derived numbers only). None if missing or unreadable."""
     try:
@@ -266,13 +382,17 @@ class Grader:
         for l in (p.get("logs") if logs is None else logs) or []:
             if l.get("n") in (1, 2) and l.get("mid") is not None:
                 g = by.setdefault(l["mid"], {"mid": l["mid"], "date": l.get("date"), "opp": l.get("opp"), "m": {}, "kills": 0, "hs": 0,
-                                             "hsOk": True, "rd": 0, "rdOk": True, "adr": []})
+                                             "hsOk": True, "rd": 0, "rdOk": True, "adr": [], "d": 0, "dOk": True})
                 g["m"][l["n"]] = l.get("map")
                 g["kills"] += float(l.get("kills") or 0)
                 if l.get("hs") is None:
                     g["hsOk"] = False
                 else:
                     g["hs"] += float(l.get("hs") or 0)
+                if l.get("d") is None:
+                    g["dOk"] = False
+                else:
+                    g["d"] += float(l.get("d") or 0)
                 if l.get("rd") is None or l["rd"] < 13:
                     g["rdOk"] = False
                 else:
@@ -284,6 +404,7 @@ class Grader:
             if 1 in g["m"] and 2 in g["m"]:
                 out.append({"mid": str(g["mid"]), "date": g["date"] or "", "opp": g["opp"], "kills": g["kills"],
                             "hs": g["hs"] if g["hsOk"] else None, "rd": g["rd"] if g["rdOk"] else None,
+                            "deaths": g["d"] if g["dOk"] else None,
                             "adr": (sum(g["adr"]) / len(g["adr"])) if g["adr"] else None})
         out.sort(key=lambda c: (c["date"], c["mid"]), reverse=True)
         return out
@@ -437,6 +558,33 @@ class Grader:
         if len(h2h) >= P["h2h_min"] and P["h2h_w"] > 0:
             hr = (sum(c[st] for c in h2h) + P["m"] * rate) / (sum(c["rd"] for c in h2h) + P["m"])
             rate = (1 - P["h2h_w"]) * rate + P["h2h_w"] * hr
+        form = self.form(cs, rows, before)
+        if st == "kills":
+            for k in ("l5", "l10", "l15", "szn"):
+                if P["w_" + k] > 0 and form["rate"][k] is not None:
+                    rate += P["w_" + k] * (form["rate"][k] - rate)
+            if P["w_kd"] > 0 and form["kd_s"] is not None:
+                rate *= form["kd_s"] ** P["w_kd"]
+        hsf = self.hs_form(cs, team, before)
+        if st == "kills":
+            for k in HS_WIN:
+                w = P["w_khs" + k]
+                if w != 0:
+                    rate *= (hsf["s"][k] / (hsf["s"]["szn"] if k != "szn" else hsf["team"])) ** w
+        elif any(P["w_hs" + k] != 0 for k in HS_WIN):
+            krows = [c for c in cs if c["rd"] and c.get("kills") is not None][:P["n_max"]]
+            kp = self.team_prior(team, "kills", before)
+            a = b = 0.0
+            for i, c in enumerate(krows):
+                w = 0.5 ** (i / P["half_life"])
+                a += w * c["kills"]
+                b += w * c["rd"]
+            krate = (a + P["m"] * kp) / (b + P["m"])
+            for k in HS_WIN:
+                if P["w_hs" + k] != 0:
+                    rate += P["w_hs" + k] * (krate * hsf["s"][k] - rate)
+        if st == "hs" and P["w_hkd"] != 0 and form["kd_s"] is not None:
+            rate *= form["kd_s"] ** P["w_hkd"]
         pbar = sp / sw
         pw = self.pwin(team, opp, before) if opp else pbar
         adj = 1 + P["beta"] * (pw - pbar)
@@ -448,17 +596,54 @@ class Grader:
         return {"mu": mu, "rate": rate, "prior": prior, "adj": adj, "pwin": pw, "pbar": pbar, "rounds": rounds,
                 "rounds_elo": 2 * base, "rounds_maps": (2 * em if em is not None else None),
                 "p_rank": (self.p_rank(team, opp, before) if opp else None),
-                "n": len(cs), "n_rate": len(rows), "h2h": len(h2h), "cs": cs}
+                "n": len(cs), "n_rate": len(rows), "h2h": len(h2h), "cs": cs, "form": form, "hsf": hsf}
+
+    def hs_form(self, cs, team, before="9999"):
+        """HS% (hs / kills) over the last 5 / 10 / 15 series with headshot data and the season (calendar year), only
+        series before the match: raw (for display) and shrunk (season toward the team HS%, last-N toward the season)."""
+        P = self.P
+        yr = str(before)[:4] if before != "9999" else (cs[0]["date"][:4] if cs else "")
+        hc = [c for c in cs if c.get("hs") is not None and c["kills"] > 0]
+        tk = self.team_prior(team, "kills", before)
+        team_hsp = self.team_prior(team, "hs", before) / tk if tk > 0 else 0.5
+        win = {"5": hc[:5], "10": hc[:10], "15": hc[:15], "szn": [c for c in hc if c["date"][:4] == yr]}
+        out = {"raw": {}, "s": {}, "n": {}, "team": team_hsp}
+        for k, w in win.items():
+            H, K = sum(c["hs"] for c in w), sum(c["kills"] for c in w)
+            out["n"][k] = len(w)
+            out["raw"][k] = H / K if K > 0 else None
+        Hs, Ks = sum(c["hs"] for c in win["szn"]), sum(c["kills"] for c in win["szn"])
+        out["s"]["szn"] = (Hs + P["k_hsp"] * team_hsp) / (Ks + P["k_hsp"])
+        for k in ("5", "10", "15"):
+            H, K = sum(c["hs"] for c in win[k]), sum(c["kills"] for c in win[k])
+            out["s"][k] = (H + P["k_hsp"] * out["s"]["szn"]) / (K + P["k_hsp"])
+        return out
+
+    def form(self, cs, rows, before="9999"):
+        """Kill form, series before the match only: kills per map (kpm) and per-round rate over the last 5 / 10 / 15
+        series and this season (calendar year), and season K/D (raw, and shrunk with k_kd for the model)."""
+        yr = str(before)[:4] if before != "9999" else (cs[0]["date"][:4] if cs else "")
+        win = {"l5": rows[:5], "l10": rows[:10], "l15": rows[:15], "szn": [c for c in rows if c["date"][:4] == yr]}
+        out = {"rate": {}, "kpm": {}, "n": {}}
+        for k, w in win.items():
+            out["n"][k] = len(w)
+            out["rate"][k] = sum(c["kills"] for c in w) / sum(c["rd"] for c in w) if w else None
+            out["kpm"][k] = sum(c["kills"] for c in w) / (2.0 * len(w)) if w else None
+        sz = [c for c in cs if c["date"][:4] == yr and c.get("deaths") is not None]
+        K, D = sum(c["kills"] for c in sz), sum(c["deaths"] for c in sz)
+        out["kd"] = K / D if D > 0 else None
+        out["kd_s"] = (K + self.P["k_kd"]) / (D + self.P["k_kd"]) if sz else None
+        return out
 
     def hitrates(self, p, st, line, opp=None, before="9999"):
         """Series that went OVER this exact line (equal = not over), Maps 1-2, only series dated before `before`.
-        l5 / l10 / l20 = last 5 / 10 / 20; szn = this calendar year (the match's year, else the newest series' year);
+        l5 / l10 / l15 / l20 = last 5 / 10 / 15 / 20 (l5-l15: Players-tab research only, not graded); szn = this calendar year (the match's year, else the newest series' year);
         h2h = vs this opponent. Each is [over, series]. p = decayed, shrunk hit rate used when w_hr > 0."""
         P = self.P
         cs = [c for c in self.series(p) if c["date"] < before and c.get(st) is not None]
         yr = str(before)[:4] if before != "9999" else (cs[0]["date"][:4] if cs else "")
         hx = lambda rows: [sum(1 for c in rows if c[st] > line), len(rows)]
-        out = {"l5": hx(cs[:5]), "l10": hx(cs[:10]), "l20": hx(cs[:20]),
+        out = {"l5": hx(cs[:5]), "l10": hx(cs[:10]), "l15": hx(cs[:15]), "l20": hx(cs[:20]),
                "szn": hx([c for c in cs if c["date"][:4] == yr]),
                "h2h": hx([c for c in cs if opp and teq(c["opp"], opp)])}
         sw = sh = 0.0
@@ -516,11 +701,14 @@ class Grader:
             return None
         hits = self.hitrates(p, st, float(line), opp, before)
         r = self.finish(pr["mu"], float(line), st, book, odds, self.filters(p, team, pr["n"], before), hr=hits["p"])
-        r["hits"] = {k: hits[k] for k in ("l5", "l10", "l20", "szn", "h2h")}
+        r["hits"] = {k: hits[k] for k in ("l5", "l10", "l15", "l20", "szn", "h2h")}
         r["p_hr"] = round(hits["p"], 4)
         r.update({"n": pr["n"], "rounds": round(pr["rounds"], 1), "pwin": round(pr["pwin"], 3), "rate": round(pr["rate"], 4),
                   "p_rank": None if pr["p_rank"] is None else round(pr["p_rank"], 3),
-                  "rounds_maps": None if pr["rounds_maps"] is None else round(pr["rounds_maps"], 1)})
+                  "rounds_maps": None if pr["rounds_maps"] is None else round(pr["rounds_maps"], 1),
+                  "kd": None if pr["form"]["kd"] is None else round(pr["form"]["kd"], 3),
+                  "kpm": {k: (None if v is None else round(v, 2)) for k, v in pr["form"]["kpm"].items()},
+                  "hsp": {("szn" if k == "szn" else "l" + k): (None if v is None else round(v, 4)) for k, v in pr["hsf"]["raw"].items()}})
         return r
 
     def grade_combo(self, name, team, st, line, opp, book=None, odds=None, before="9999"):

@@ -153,7 +153,8 @@ def settle_candidates(now):
     try:
         from grader import Grader
         from settle import find_result
-        pj = _load("players.json", {})
+        from grader import load_players
+        pj = load_players("players.json")
         gr = Grader(pj.get("players", []), pj.get("ranks") or {})
         hist = _load("lines_history.json", {}).get("entries", [])
     except Exception as e:

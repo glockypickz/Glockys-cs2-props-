@@ -1,5 +1,19 @@
-"""Fetch recent per-map CS2 player stats for every active ranked team from bo3.gg -> players.json."""
-import re, asyncio, json, datetime, time, aiohttp
+"""Full-season per-map CS2 player stats for every active team from bo3.gg -> players.json.
+
+Incremental (players.json and season_state.json are kept between runs):
+  1. Update: for every team, only matches newer than the ones already stored are fetched (pages of PAGE_LIMIT,
+     newest first, stopping at the first known match). The roster is worked out again only when there is something new.
+  2. Backfill: with the time left, older matches are fetched for teams whose season is not complete yet (pages of
+     BACKFILL_PAGE, older than the oldest match scanned so far, stopping at SEASON_START). Progress is saved per team in
+     season_state.json, so a backfill that does not finish in one run carries on in the next one.
+Season = calendar year (SEASON_START, default Jan 1 of this year), the same as the SZN hit-rate box. Logs from before
+SEASON_START are dropped. players.json is written in the compact fmt 2 (grader.encode_players) so a full season stays
+small enough for the site.
+Speed: up to BO3_CONCURRENCY (default 4) bo3.gg requests in flight with a BO3_DELAY (default 0.1 s) pause per request;
+a 429 makes every worker back off together. Teams on today's prop board (lines.json) are updated and backfilled first.
+Dial back with BO3_CONCURRENCY=1 BO3_DELAY=0.3 (the old pace) if bo3.gg starts rate-limiting."""
+import re, asyncio, json, datetime, time, os, aiohttp
+from grader import load_players, encode_players
 
 def _canon(n):
     k = re.sub(r"[^a-z0-9]", "", str(n or "").lower())
@@ -41,24 +55,47 @@ H = {"accept": "application/json", "origin": "https://bo3.gg", "referer": "https
 MAX_TEAMS = 150          # ranked teams to consider
 MAX_UNRANKED = 250       # extra active teams bo3.gg has no rank for (raise for more, run gets longer)
 DISCOVERY_PAGES = 60     # pages of 100 recent matches scanned to find active unranked teams
-TIME_LIMIT = 4.5 * 3600  # seconds; stop cleanly and save what we have
-MATCHES_PER_TEAM = 15   # last 15 needs 15 matches per team (run takes longer)
+TIME_LIMIT = float(os.environ.get("TIME_LIMIT_H", "4.5")) * 3600  # seconds; stop cleanly and save what we have (job limit 6 h)
+SEASON_START = os.environ.get("SEASON_START") or "%d-01-01" % datetime.date.today().year  # every finished match since this day
+PAGE_LIMIT = 15          # matches per page in the daily update (newest first, stops at the first stored match)
+BACKFILL_PAGE = 25       # matches per page when filling in older season matches
+STATE_FILE = "season_state.json"   # per-team scan progress (match ids seen, oldest match reached, season complete?)
+MAX_BYTES = 22 * 1024 * 1024       # players.json must stay under the 25 MiB Workers asset limit: oldest logs are trimmed above this
+ONLY_TEAMS = [x.strip() for x in os.environ.get("ONLY_TEAMS", "").split(",") if x.strip()]  # testing: scan only these team slugs
 ACTIVE_DAYS = 120        # skip teams with no match in this many days
-DELAY = 0.3
+DELAY = float(os.environ.get("BO3_DELAY", "0.1"))           # pause after each request, per worker slot (was 0.3)
+CONCURRENCY = int(os.environ.get("BO3_CONCURRENCY", "4"))   # bo3.gg requests in flight at once (was 1)
 # Optional per-map fields saved when bo3.gg returns them (names are guesses; the Actions log prints the real keys)
 EXTRA_KEYS = ["rating", "player_rating", "kast", "first_kills", "first_deaths", "clutches_won", "clutches",
               "rounds_count", "rounds", "hits", "shots"]
-EVENT_TYPE = {}   # tournament id -> "lan" / "online" / None
+EVENT_TYPE = {}   # tournament id -> "lan" / "online" / None (kept in season_state.json between runs)
 SAMPLE_PRINTED = False
+STATS = {}        # game id -> trimmed players_stats rows (this run only: a match between two tracked teams is fetched once)
+REQ = {"n": 0, "429": 0}   # requests made / rate-limit answers this run
+STATS_WAIT = {}   # game id -> in-flight fetch (concurrent callers share it, so a game is fetched once)
+EVENT_WAIT = {}   # tournament id -> in-flight event-type lookup
+SEM = None        # asyncio.Semaphore(CONCURRENCY), made in main()
+PAUSE = {"until": 0.0}   # global back-off after a 429: every worker waits until this time
+STAT_KEEP = ["kills", "headshots", "death", "assists", "adr", "team_clan", "steam_profile"] + EXTRA_KEYS
 
 async def get(s, path, params=None):
-    for attempt in range(5):
-        async with s.get(B + path, params=params) as r:
-            if r.status == 429:
-                await asyncio.sleep(3 * (attempt + 1))
-                continue
-            r.raise_for_status()
-            data = await r.json()
+    """One bo3.gg request. At most CONCURRENCY in flight; a 429 pauses ALL workers (shared back-off)."""
+    for attempt in range(6):
+        async with SEM:
+            wait = PAUSE["until"] - time.time()
+            if wait > 0:
+                await asyncio.sleep(wait)
+            async with s.get(B + path, params=params) as r:
+                if r.status == 429:
+                    REQ["429"] += 1
+                    ra = r.headers.get("Retry-After")
+                    back = float(ra) if ra and ra.replace(".", "", 1).isdigit() else 3.0 * (attempt + 1)
+                    PAUSE["until"] = max(PAUSE["until"], time.time() + back)
+                    print("429 from bo3.gg on %s: all workers pause %.0f s" % (path.split("?")[0], back))
+                    continue
+                r.raise_for_status()
+                REQ["n"] += 1
+                data = await r.json()
             await asyncio.sleep(DELAY)
             return data
     raise Exception("rate limited: " + path)
@@ -102,71 +139,195 @@ async def event_type(s, m):
     tid = (m.get("tournament") or {}).get("id")
     if tid is None:
         return None
-    if tid not in EVENT_TYPE:
-        try:
-            det = await get(s, f"/matches/{m['slug']}")
-            EVENT_TYPE[tid] = (det.get("tournament") or {}).get("event_type")
-        except Exception as e:
-            print("event type lookup failed:", tid, e)
-            EVENT_TYPE[tid] = None
-    return EVENT_TYPE[tid]
+    if tid in EVENT_TYPE:
+        return EVENT_TYPE[tid]
+    if tid not in EVENT_WAIT:
+        async def look():
+            try:
+                det = await get(s, f"/matches/{m['slug']}")
+                EVENT_TYPE[tid] = (det.get("tournament") or {}).get("event_type")
+            except Exception as e:
+                print("event type lookup failed:", tid, e)
+                EVENT_TYPE[tid] = None
+        EVENT_WAIT[tid] = asyncio.ensure_future(look())
+    await EVENT_WAIT[tid]
+    return EVENT_TYPE.get(tid)
 
-async def do_team(s, t, cutoff, out):
+def _trim(p):
+    return {k: p[k] for k in STAT_KEEP if k in p}
+
+
+async def game_stats(s, gid):
+    """Per-game stats, fetched once per run even when two tracked teams ask for the same game at the same time."""
+    if gid in STATS:
+        return STATS[gid]
+    if gid not in STATS_WAIT:
+        async def fetch():
+            STATS[gid] = [_trim(p) for p in (await get(s, f"/games/{gid}/players_stats") or [])]
+        STATS_WAIT[gid] = asyncio.ensure_future(fetch())
+    try:
+        await STATS_WAIT[gid]
+    except Exception:
+        STATS_WAIT.pop(gid, None)   # failed: let a later caller retry
+        raise
+    return STATS[gid]
+
+
+async def matches_page(s, tid, offset, limit, before=None):
+    q = {"scope": "widget-matches", "page[offset]": offset, "page[limit]": limit,
+         "sort": "-start_date", "filter[matches.status][in]": "finished",
+         "filter[matches.team_ids][overlap]": tid,
+         "filter[matches.discipline_id][eq]": 1, "with": "teams,tournament,games"}
+    if before:
+        q["filter[matches.start_date][lt]"] = before
+    return (await get(s, "/matches", q)).get("results") or []
+
+
+async def match_rows(s, m, tid, tname, only=None):
+    """Per-player per-map logs of this team in one match. only = set of canon names to keep (backfill), else everyone."""
     global SAMPLE_PRINTED
-    tid, tname = t["id"], t.get("name", t["slug"])
-    ms = (await get(s, "/matches", {
-        "scope": "widget-matches", "page[offset]": 0, "page[limit]": MATCHES_PER_TEAM,
-        "sort": "-start_date", "filter[matches.status][in]": "finished",
-        "filter[matches.team_ids][overlap]": tid,
-        "filter[matches.discipline_id][eq]": 1, "with": "teams,tournament,games"}))["results"]
-    if not ms or ms[0]["start_date"][:10] < cutoff:
-        print("inactive:", tname)
-        return
+    date = m["start_date"][:10]
+    et = await event_type(s, m)
     rows = []
-    for m in ms:
-        date = m["start_date"][:10]
-        et = await event_type(s, m)
-        for g in m.get("games", []):
-            if g.get("state") != "done":
+    gs = [g for g in m.get("games", []) if g.get("state") == "done"]
+    all_stats = await asyncio.gather(*(game_stats(s, g["id"]) for g in gs))
+    for g, stats in zip(gs, all_stats):
+        if stats and not SAMPLE_PRINTED:
+            SAMPLE_PRINTED = True
+            print("players_stats keys:", sorted(stats[0].keys()))
+        for p in stats:
+            tc = p.get("team_clan") or {}
+            nick = (p.get("steam_profile") or {}).get("nickname", "")
+            if _canon(nick) in WATCH:
+                print("WATCH", nick, "| scanning", tname, tid, "| team_clan:", {k: v for k, v in tc.items() if not isinstance(v, (dict, list))})
+            same = tc.get("team_id") == tid
+            if not same:
+                # bo3.gg sometimes lists a stand-in/new signing under another clan id: accept if the clan name is this team
+                cn = tc.get("name") or tc.get("clan_name") or tc.get("team_name") or ""
+                same = bool(cn) and _tn(cn) == _tn(tname)
+            if not same or (only is not None and _canon(nick) not in only):
                 continue
-            stats = await get(s, f"/games/{g['id']}/players_stats")
-            if stats and not SAMPLE_PRINTED:
-                SAMPLE_PRINTED = True
-                print("players_stats keys:", sorted(stats[0].keys()))
-            for p in stats:
-                tc = p.get("team_clan") or {}
-                nick = (p.get("steam_profile") or {}).get("nickname", "")
-                if _canon(nick) in WATCH:
-                    print("WATCH", nick, "| scanning", tname, tid, "| team_clan:", {k: v for k, v in tc.items() if not isinstance(v, (dict, list))})
-                same = tc.get("team_id") == tid
-                if not same:
-                    # bo3.gg sometimes lists a stand-in/new signing under another clan id: accept if the clan name is this team
-                    cn = tc.get("name") or tc.get("clan_name") or tc.get("team_name") or ""
-                    same = bool(cn) and _tn(cn) == _tn(tname)
-                if not same:
-                    continue
-                rows.append({"mid": m["id"], "name": p["steam_profile"]["nickname"],
-                             "log": mk_log(date, m, g, p, et)})
+            rows.append({"mid": m["id"], "date": date, "name": nick, "log": mk_log(date, m, g, p, et)})
+    return rows
+
+
+def _merge_logs(old, new):
+    """Union by (match, map), newest first, season only."""
+    by = {}
+    for l in list(old) + list(new):
+        if (l.get("date") or "") >= SEASON_START:
+            by[(l.get("mid"), l.get("n"))] = l
+    return sorted(by.values(), key=lambda l: (l.get("date") or "", l.get("mid") or 0, -(l.get("n") or 0)), reverse=True)
+
+
+def team_state(state, t):
+    st = state["teams"].setdefault(str(t["id"]), {})
+    st["name"] = t.get("name", t["slug"])
+    return st
+
+
+async def update_team(s, t, cutoff, out, prev, state):
+    """Daily step for one team: new matches only. prev = this team's entries from the last players.json (name -> entry)."""
+    tid, tname = t["id"], t.get("name", t["slug"])
+    st = team_state(state, t)
+    if not prev:                     # nothing stored for this team: start its season from scratch
+        st.clear(); st["name"] = tname
+    known = set(st.get("mids") or []) | {l.get("mid") for e in prev.values() for l in e["logs"]}
+    new, offset = [], 0
+    while True:
+        ms = await matches_page(s, tid, offset, PAGE_LIMIT)
+        if offset == 0 and (not ms or ms[0]["start_date"][:10] < cutoff):
+            print("inactive:", tname)
+            return "inactive"
+        stop = False
+        for m in ms:
+            if m["id"] in known:
+                stop = True
+                break
+            if m["start_date"][:10] < SEASON_START:
+                stop = True
+                st["done"] = True
+                break
+            new.append(m)
+        if len(ms) < PAGE_LIMIT and not stop:
+            st["done"] = True
+        if stop or len(ms) < PAGE_LIMIT or not known:   # a team seen for the first time: one page now, the rest is backfill
+            break
+        offset += PAGE_LIMIT
+    if not st.get("oldest"):
+        if new:
+            st["oldest"] = new[-1]["start_date"]
+        dates = [l.get("date") for e in prev.values() for l in e["logs"] if l.get("date")]
+        if dates:   # first run after the switch: carry on below the matches already stored
+            o = min(dates) + "T23:59:59"
+            st["oldest"] = min(st.get("oldest") or o, o)
+    rows = []
+    for m, rs in zip(new, await asyncio.gather(*(match_rows(s, m, tid, tname) for m in new))):
+        rows += rs
+        known.add(m["id"])
+    st["mids"] = sorted(x for x in known if x is not None)
+    st["scanned"] = datetime.date.today().isoformat()
     if not rows:
-        print("no data:", tname)
-        return
-    # Roster = newest lineup plus anyone who played 2+ of the 3 latest series (keeps regulars who sat out once)
-    mids = []
-    for r in rows:
-        if r["mid"] not in mids:
-            mids.append(r["mid"])
-    recent = mids[:3]
+        for k, e in prev.items():
+            out[(tid, k)] = dict(e, team=tname, logs=_merge_logs(e["logs"], []))
+        print("no new matches:", tname, "| kept", len(prev), "players")
+        return "kept"
+    # Roster = newest lineup plus anyone who played 2+ of the 3 latest series (keeps regulars who sat out once),
+    # plus anyone on a line today who played for this team in its last PAGE_LIMIT series.
+    allrows = rows + [{"mid": l.get("mid"), "date": l.get("date") or "", "name": e["name"], "log": l} for e in prev.values() for l in e["logs"]]
+    order = sorted({(r["date"], r["mid"]) for r in allrows if r["mid"] is not None}, reverse=True)
+    mids = [m for _, m in order]
+    recent, latest = set(mids[:3]), set(mids[:PAGE_LIMIT])
     seen = {}
-    for r in rows:
+    for r in allrows:
         if r["mid"] in recent:
             seen.setdefault(r["name"], set()).add(r["mid"])
-    roster = {r["name"] for r in rows if r["mid"] == rows[0]["mid"]} | {n for n, v in seen.items() if len(v) >= 2}
-    roster |= {r["name"] for r in rows if _canon(r["name"]) in WANTED}  # anyone on a line today who played for this team recently
-    for r in rows:
-        if r["name"] in roster:
-            e = out.setdefault(f"{tname}|{r['name']}", {"name": r["name"], "team": tname, "logs": []})
-            e["logs"].append(r["log"])
-    print("done:", tname, sorted(roster))
+    roster = {r["name"] for r in allrows if mids and r["mid"] == mids[0]} | {n for n, v in seen.items() if len(v) >= 2}
+    roster |= {r["name"] for r in allrows if r["mid"] in latest and _canon(r["name"]) in WANTED}
+    for name in roster:
+        old = prev.get(name, {}).get("logs") or []
+        newl = [r["log"] for r in rows if r["name"] == name]
+        out[(tid, name)] = {"name": name, "team": tname, "logs": _merge_logs(old, newl)}
+    print("done:", tname, "| new matches", len(new), "|", sorted(roster))
+    return "updated"
+
+
+async def backfill_team(s, t, out, state, deadline):
+    """Older season matches for one team, for the players on its current roster. Resumable (season_state.json)."""
+    tid, tname = t["id"], t.get("name", t["slug"])
+    st = team_state(state, t)
+    names = {_canon(k[1]): k for k in out if k[0] == tid}
+    if st.get("done") or not names:   # nothing to fill (or no roster to fill it for yet)
+        return 0
+    known = set(st.get("mids") or [])
+    added = pages = 0
+    while time.time() < deadline:
+        ms = await matches_page(s, tid, 0, BACKFILL_PAGE, before=st.get("oldest"))
+        pages += 1
+        todo = []
+        for m in ms:
+            if m["start_date"][:10] < SEASON_START:
+                st["done"] = True
+                break
+            if m["id"] not in known:
+                todo.append(m)
+        res = await asyncio.gather(*(match_rows(s, m, tid, tname, only=set(names)) for m in todo))
+        for m, rs in zip(todo, res):   # state moves only after the whole page is in (resumable)
+            for r in rs:
+                e = out[names[_canon(r["name"])]]
+                e["logs"] = _merge_logs(e["logs"], [r["log"]])
+                added += 1
+            known.add(m["id"])
+        if ms:
+            st["oldest"] = ms[-1]["start_date"]
+        if len(ms) < BACKFILL_PAGE:
+            st["done"] = True
+        st["mids"] = sorted(known)
+        if st.get("done"):
+            break
+    print("backfill:", tname, "| pages", pages, "| logs added", added, "| season complete" if st.get("done") else "| continues next run (reached %s)" % str(st.get("oldest"))[:10])
+    return added
+
 
 UP_TEAMS = []   # every team in the next scheduled matches (they are scanned first, so anyone with a line today gets stats)
 
@@ -227,28 +388,151 @@ async def unranked_teams(s, known_ids, cutoff):
     print("unranked active teams found:", len(out))
     return out[:MAX_UNRANKED]
 
+def load_state():
+    try:
+        with open(STATE_FILE, encoding="utf-8") as f:
+            st = json.load(f)
+    except Exception:
+        st = {}
+    if st.get("season_start") != SEASON_START:   # new season (or first run): start over
+        st = {"season_start": SEASON_START, "teams": {}, "events": st.get("events") or {}}
+    st.setdefault("teams", {})
+    EVENT_TYPE.update({int(k) if str(k).isdigit() else k: v for k, v in (st.get("events") or {}).items()})
+    return st
+
+
+def save_state(st):
+    st["events"] = {str(k): v for k, v in EVENT_TYPE.items()}
+    tmp = STATE_FILE + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as f:
+        json.dump(st, f, separators=(",", ":"), sort_keys=True)
+    os.replace(tmp, STATE_FILE)
+
+
+def write_players(data):
+    """Compact players.json; if it would pass MAX_BYTES, the oldest months are trimmed until it fits."""
+    enc = json.dumps(encode_players(data), separators=(",", ":"), ensure_ascii=False)
+    while len(enc.encode()) > MAX_BYTES:
+        dates = sorted({l["date"][:7] for p in data["players"] for l in p["logs"] if l.get("date")})
+        if len(dates) <= 2:
+            break
+        print("players.json too big (%d bytes): dropping logs from %s" % (len(enc.encode()), dates[0]))
+        for p in data["players"]:
+            p["logs"] = [l for l in p["logs"] if (l.get("date") or "")[:7] > dates[0]]
+        enc = json.dumps(encode_players(data), separators=(",", ":"), ensure_ascii=False)
+    with open("players.json.tmp", "w", encoding="utf-8") as f:
+        f.write(enc)
+    os.replace("players.json.tmp", "players.json")
+    return len(enc.encode())
+
+
+def board_teams():
+    """Team names on today's prop board (lines.json): fetched and backfilled first."""
+    try:
+        return {_tn(x) for l in (json.load(open("lines.json")).get("lines") or []) if l.get("team")
+                for x in re.split(r"\s*[/+]\s*", str(l["team"]))} - {""}
+    except Exception:
+        return set()
+
+
+async def pool(items, fn, n):
+    """Run fn(item) for items in order with n workers (items keep their priority order)."""
+    it = iter(items)
+    async def worker():
+        for x in it:
+            await fn(x)
+    await asyncio.gather(*(worker() for _ in range(max(1, n))))
+
+
 async def main():
+    global SEM
+    SEM = asyncio.Semaphore(max(1, CONCURRENCY))
     out = {}
+    started = time.time()
+    deadline = started + TIME_LIMIT
     cutoff = (datetime.date.today() - datetime.timedelta(days=ACTIVE_DAYS)).isoformat()
+    state = load_state()
+    try:
+        old = load_players("players.json")
+    except Exception:
+        old = {"players": []}
+    prev_by_tn = {}
+    for e in old.get("players", []):
+        prev_by_tn.setdefault(_tn(e.get("team")), {})[e["name"]] = e
+    print("season from", SEASON_START, "| stored players:", len(old.get("players", [])))
     async with aiohttp.ClientSession(headers=H) as s:
         teams = await ranked_teams(s)
         ranks = {t.get("name", t["slug"]): t["rank"] for t in teams if t.get("rank")}
         games = await upcoming(s)
         print(len(teams), "ranked teams")
-        extra = await unranked_teams(s, {t["id"] for t in teams}, cutoff)
-        started = time.time()
+        extra = await unranked_teams(s, {t["id"] for t in teams}, cutoff) if not ONLY_TEAMS else []
         front_ids = {t["id"] for t in UP_TEAMS}
         queue = UP_TEAMS + [t for t in teams + extra if t["id"] not in front_ids]
-        print("teams with upcoming matches (scanned first):", len(UP_TEAMS), "| total queue:", len(queue))
-        for i, t in enumerate(queue):
-            if time.time() - started > TIME_LIMIT:
-                print(f"time limit reached after {i} teams, saving what we have")
-                break
+        seen_ids, q2 = set(), []
+        for t in queue:
+            if t["id"] not in seen_ids and (not ONLY_TEAMS or t.get("slug") in ONLY_TEAMS):
+                seen_ids.add(t["id"])
+                q2.append(t)
+        board = board_teams()
+        on_board = lambda t: _tn(t.get("name", t["slug"])) in board or _tn((state["teams"].get(str(t["id"])) or {}).get("name")) in board
+        queue = [t for t in q2 if on_board(t)] + [t for t in q2 if not on_board(t)]   # stable: board, then upcoming, then the rest
+        board_ids = {t["id"] for t in queue if on_board(t)}
+        print("teams on today's prop board:", len(board_ids), "| with upcoming matches:", len(UP_TEAMS), "| total queue:", len(queue),
+              "| bo3.gg concurrency %d, delay %.2f s" % (CONCURRENCY, DELAY))
+        status = {}
+        t1 = time.time()
+
+        async def upd(t):
+            st = state["teams"].get(str(t["id"])) or {}
+            names = {_tn(t.get("name", t["slug"])), _tn(st.get("name"))} - {""}
+            prev = {}
+            for k in names:
+                prev.update(prev_by_tn.get(k, {}))
+            if time.time() > deadline:
+                status[t["id"]] = "kept"   # out of time: keep what we had
+                for name, e in prev.items():
+                    out[(t["id"], name)] = dict(e, logs=_merge_logs(e["logs"], []))
+                return
             try:
-                await do_team(s, t, cutoff, out)
-            except Exception as e:
-                print("skip", t.get("slug"), e)
-        print("teams with players:", len({v["team"] for v in out.values()}), "| players:", len(out))
+                status[t["id"]] = await update_team(s, t, cutoff, out, prev, state)
+            except Exception as ex:
+                print("skip", t.get("slug"), ex)
+                for name, e in prev.items():
+                    out[(t["id"], name)] = dict(e, logs=_merge_logs(e["logs"], []))
+        await pool(queue, upd, CONCURRENCY)
+        print("update phase: %.1f min, %d requests" % ((time.time() - t1) / 60, REQ["n"]))
+        t2, r2, filled = time.time(), REQ["n"], {"n": 0}
+        bleft = {x for x in board_ids if status.get(x) in ("updated", "kept")
+                 and not (state["teams"].get(str(x)) or {}).get("done")}
+        print("board teams to backfill: %d" % len(bleft))
+
+        async def bf(t):
+            if time.time() > deadline or status.get(t["id"]) not in ("updated", "kept"):
+                return
+            try:
+                got = await backfill_team(s, t, out, state, deadline)
+                filled["n"] += got
+            except Exception as ex:
+                print("backfill stopped for", t.get("slug"), ex)
+            if t["id"] in bleft:
+                bleft.discard(t["id"])
+                if not bleft:
+                    print("BOARD TEAMS BACKFILLED: all %d prop-board teams done after %.1f min (%.1f min since start), %d requests" % (
+                        len(board_ids), (time.time() - t2) / 60, (time.time() - started) / 60, REQ["n"]))
+        await pool(queue, bf, CONCURRENCY)
+        filled = filled["n"]
+        left = sum(1 for t in queue if status.get(t["id"]) in ("updated", "kept") and not (state["teams"].get(str(t["id"])) or {}).get("done"))
+        print("backfill phase: %.1f min, %d requests, %d logs added | teams still to backfill: %d" % (
+            (time.time() - t2) / 60, REQ["n"] - r2, filled, left))
+        if ONLY_TEAMS:   # test run on a few teams: keep everyone else as stored
+            done_tn = {_tn(e["team"]) for e in out.values()}
+            for k, ents in prev_by_tn.items():
+                if k not in done_tn:
+                    for name, e in ents.items():
+                        out[("old", k, name)] = dict(e, logs=_merge_logs(e["logs"], []))
+        el = time.time() - started
+        print("teams with players:", len({k[0] for k in out}), "| players:", len(out), "| requests this run:", REQ["n"],
+              "| %.2f req/s | 429s: %d" % (REQ["n"] / max(el, 1e-9), REQ["429"]))
     if len(out) < 20:
         raise SystemExit(f"Only {len(out)} players fetched, keeping the old players.json")
     today = datetime.date.today().isoformat()
@@ -256,9 +540,11 @@ async def main():
         json.dump({"updated": today, "games": games}, open("games.json", "w"),
                   separators=(",", ":"), ensure_ascii=False)
         print("wrote games.json:", len(games), "games")
-    data = {"updated": today, "ranks": ranks, "players": list(out.values())}
-    json.dump(data, open("players.json", "w"), separators=(",", ":"), ensure_ascii=False)
-    print("wrote players.json:", len(out), "players")
+    players = [e for e in out.values() if e["logs"]]
+    data = {"updated": today, "season_start": SEASON_START, "ranks": ranks, "players": players}
+    size = write_players(data)
+    save_state(state)   # only together with players.json, so the two always match
+    print("wrote players.json: %d players, %d logs, %.1f MB" % (len(players), sum(len(p["logs"]) for p in players), size / 1e6))
 
 if __name__ == "__main__":
     asyncio.run(main())
