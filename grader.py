@@ -35,16 +35,17 @@ How a prop is graded
 import re, math, bisect
 
 # ---- model parameters. Tuned by backtest.py on the early slice only. MUST match PARAMS in model.js.
-HS_WIN = ("5", "10", "20", "szn")   # projection windows (L15 is display-only)
+HS_WIN = ("5", "10", "20", "szn")   # headshots-projection HS% windows
+KHS_WIN = ("5", "10", "15", "szn")  # kills-projection HS% factor windows (no L20)
 PARAMS = {"m": 100, "half_life": 8, "n_max": 200, "m_team": 1500, "elo_k": 16, "beta": 0.25,
-          "rd_a": 17.34, "rd_b": 16.18, "h2h_min": 3, "h2h_w": 0.0, "w_line": 0.7,
+          "rd_a": 17.34, "rd_b": 16.18, "h2h_min": 3, "h2h_w": 0.1, "w_line": 0.7,
           "g_kills": 0.6573, "g_hs": 0.3404, "size_kills": 20.0, "size_hs": 16.0,
           "min_series": 8, "grade_a": 6.0, "grade_b": 3.0,
           "w_rank": 0.25, "rank_s": 1.0, "w_maps": 0.25, "k_maps": 6.0, "w_hr": 0.0, "k_hr": 5.0, "w_hr_l5": 0.25, "w_hr_l10": 0.25, "w_hr_l20": 0.25, "w_hr_szn": 0.25,
           "hr_upgrade_a": 0.85, "hr_upgrade_b": 0.75, "hr_szn_min": 8,
           "w_l5": 0.1, "w_l10": 0.05, "w_l20": 0.05, "w_szn": 0.0, "w_kd": 0.1, "k_kd": 40.0,
           "w_hs5": 0.3, "w_hs10": 0.2, "w_hs20": 0.15, "w_hsszn": 0.1,
-          "w_khs5": 0.1, "w_khs10": 0.0, "w_khs20": 0.0, "w_khsszn": 0.0, "k_hsp": 30.0, "w_hkd": -0.1}
+          "w_khs5": 0.1, "w_khs10": 0.05, "w_khs15": 0.025, "w_khsszn": 0.0, "k_hsp": 30.0, "w_hkd": -0.1}
 # Kill-model form inputs (kills props only; series before the match only; tuned by backtest.py --tune-form):
 #   w_l5 / w_l10 / w_l20 / w_szn: the per-round kill rate moves toward the player's raw rate over his last 5 / 10 / 20
 #           series / this season: rate += w * (window rate - rate). 0 = not used.
@@ -55,7 +56,7 @@ PARAMS = {"m": 100, "half_life": 8, "n_max": 200, "m_team": 1500, "elo_k": 16, "
 # HS% form inputs (HS% = hs / kills, Maps 1-2 series before the match only; tuned by backtest.py --tune-hs):
 #   shrunk HS%: season = (HS + k_hsp * team HS%) / (K + k_hsp); last 5 / 10 / 15 / 20 = (HS + k_hsp * season HS%) / (K + k_hsp)
 #   w_hs5 / w_hs10 / w_hs20 / w_hsszn (headshots): hs rate += w * (player kill rate x shrunk HS% - hs rate)
-#   w_khs5 / w_khs10 / w_khs20 / w_khsszn (kills): kill rate x (shrunk HS% / reference) ** w, reference = season HS%
+#   w_khs5 / w_khs10 / w_khs15 / w_khsszn (kills): kill rate x (shrunk HS% / reference) ** w, reference = season HS%
 #           for the last-N windows and team HS% for the season window. 0 = not used.
 #   Backtest (Nov 2026, early-slice tuning, holdout from 2026-10-20): headshots MAE 3.997 -> 3.974, NB log-lik -3.0211 ->
 #   -3.0151, so w_hs5 0.3 / w_hs10 0.2 / w_hsszn 0.1 ship. The kills weights were tuned to ~0 (holdout slightly worse);
@@ -63,7 +64,10 @@ PARAMS = {"m": 100, "half_life": 8, "n_max": 200, "m_team": 1500, "elo_k": 16, "
 #   Nov 17 2026 (owner): projections use only last 5 / 10 / 20 + season; L15 is display-only (kpm / HS% / hit-rate cards).
 #   w_hs20 0.15 added (headshots: holdout MAE 3.908 -> 3.907, early 3.905 -> 3.903, locked hs lines Brier .2516 -> .2515).
 #   Kills: w_l10 0.1 split into w_l10 0.05 + w_l20 0.05 (holdout MAE 6.277 -> 6.275, locked kills lines Brier .2552 -> .2551).
-#   w_khs20 stays 0: 0.05 / 0.1 made kills MAE and locked-line Brier slightly worse.
+#   Kills HS% factor uses L5 / L10 / L15 + season (KHS_WIN, owner: no L20): w_khs5 0.1, w_khs10 0.05, w_khs15 0.025 (least
+#   harmful ladder tried: kills holdout MAE 6.2745 -> 6.2750, locked kills lines Brier unchanged .2551).
+#   h2h_w 0.1 (owner: use head-to-head; h2h_min 3 series, Maps 1-2, rate vs this opponent shrunk toward the player rate
+#   with m): locked lines Brier .25340 -> .25339, kills holdout MAE +0.0003; 0.05-0.2 and h2h_min 2/3/5 all within noise.
 # n_max 200: the rate uses every series this season (players.json holds the full calendar-year season), decayed with
 #   half_life 8; it was 20 when players.json held only the last 15 matches per team.
 # Hit rates vs the current line (L5 / L10 / L20 / season / H2H, series-level Maps 1-2, earlier series only).
@@ -614,6 +618,8 @@ class Grader:
             sp += w * self.pwin(team, c["opp"], c["date"])
         rate = (sk + P["m"] * prior) / (sr + P["m"])
         h2h = [c for c in rows if opp and teq(c["opp"], opp)]
+        h2h_rd = sum(c["rd"] for c in h2h)
+        h2h_rate = sum(c[st] for c in h2h) / h2h_rd if h2h_rd > 0 else None   # raw per-round rate vs this opponent (display)
         if len(h2h) >= P["h2h_min"] and P["h2h_w"] > 0:
             hr = (sum(c[st] for c in h2h) + P["m"] * rate) / (sum(c["rd"] for c in h2h) + P["m"])
             rate = (1 - P["h2h_w"]) * rate + P["h2h_w"] * hr
@@ -626,7 +632,7 @@ class Grader:
                 rate *= form["kd_s"] ** P["w_kd"]
         hsf = self.hs_form(cs, team, before)
         if st == "kills":
-            for k in HS_WIN:
+            for k in KHS_WIN:
                 w = P["w_khs" + k]
                 if w != 0:
                     rate *= (hsf["s"][k] / (hsf["s"]["szn"] if k != "szn" else hsf["team"])) ** w
@@ -655,7 +661,7 @@ class Grader:
         return {"mu": mu, "rate": rate, "prior": prior, "adj": adj, "pwin": pw, "pbar": pbar, "rounds": rounds,
                 "rounds_elo": 2 * base, "rounds_maps": (2 * em if em is not None else None),
                 "p_rank": (self.p_rank(team, opp, before) if opp else None),
-                "n": len(cs), "n_rate": len(rows), "h2h": len(h2h), "cs": cs, "form": form, "hsf": hsf}
+                "n": len(cs), "n_rate": len(rows), "h2h": len(h2h), "h2h_rate": h2h_rate, "cs": cs, "form": form, "hsf": hsf}
 
     def hs_form(self, cs, team, before="9999"):
         """HS% (hs / kills) over the last 5 / 10 / 15 / 20 series with headshot data and the season (calendar year), only
@@ -771,6 +777,7 @@ class Grader:
         r = self.finish(pr["mu"], float(line), st, book, odds, self.filters(p, team, pr["n"], before), hr=hits["p"], hits=hits)
         r["hits"] = {k: hits[k] for k in ("l5", "l10", "l15", "l20", "szn", "h2h")}
         r["p_hr"] = round(hits["p"], 4)
+        r["h2h_n"], r["h2h_rate"] = pr["h2h"], (None if pr["h2h_rate"] is None else round(pr["h2h_rate"], 4))
         r.update({"n": pr["n"], "rounds": round(pr["rounds"], 1), "pwin": round(pr["pwin"], 3), "rate": round(pr["rate"], 4),
                   "p_rank": None if pr["p_rank"] is None else round(pr["p_rank"], 3),
                   "rounds_maps": None if pr["rounds_maps"] is None else round(pr["rounds_maps"], 1),
