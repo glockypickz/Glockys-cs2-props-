@@ -20,6 +20,10 @@ function mono(t){var w=String(t||'?').replace(/[^A-Za-z0-9 ]/g,' ').trim().split
 function pct(x){return x==null||isNaN(x)?'–':Math.round(x*100)+'%'}
 function edge(g){return g.edgePP==null||isNaN(g.edgePP)?'–':(g.edgePP>=0?'+':'')+g.edgePP.toFixed(1)+'pp'}
 function l10(g){var h=g.hits&&g.hits.l10;return h&&h[1]?h[0]+'/'+h[1]:'–'}
+// Season player stats from the same Maps 1-2 series the grade uses (g.cs = every series this season, newest first).
+// KPM 1-2 = kills per map (series total / 2); HS/map 1-2 = headshots per map; HS% = headshots / kills; K/D = kills / deaths.
+function pstats(g){var cs=g.cs||[],k=0,n=0,hk=0,hh=0,nh=0,dk=0,dd=0;cs.forEach(function(c){if(c.kills==null)return;k+=c.kills;n++;if(c.hs!=null){hh+=c.hs;hk+=c.kills;nh++}if(c.deaths!=null){dk+=c.kills;dd+=c.deaths}});
+ return {n:n,hsp:hk?Math.round(hh/hk*100)+'%':'–',kd:dd?(dk/dd).toFixed(2):'–',kpm:n?(k/(2*n)).toFixed(1):'–',hpm:nh?(hh/(2*nh)).toFixed(1):'–'}}
 function vals(g){return (g.cs||[]).slice(0,10).map(function(c){return c[g.stat]}).filter(function(x){return x!=null}).reverse()}
 
 // ---- logos
@@ -38,9 +42,9 @@ function html(g){if(!g)return '';var t=tier(g.grade),u=g.pick==='UNDER',fo=t.foi
  '<div class="tc-in"><div class="tc-top"><div class="tc-rate"><b>'+esc(g.grade)+'</b><span>'+t.name+'</span></div>'+
  '<div class="tc-logo'+(logoUrl(g.team)?'':' mono')+'" data-team="'+esc(g.team)+'">'+badge(g.team)+'<span>'+esc(mono(g.team))+'</span></div></div>'+
  '<div class="tc-art"><div class="tc-stat">'+esc(sname(g.stat))+' · Maps 1-2</div><div class="tc-pick'+(u?' u':'')+'">'+esc(g.pick)+' '+esc(g.line)+'</div>'+
- '<div class="tc-proj"><span>PROJ</span><b>'+esc(g.proj)+'</b></div>'+spark(g)+'<div class="tc-book">'+esc(g.book||'PrizePicks')+'</div></div>'+
+ '<div class="tc-proj"><span>PROJ</span><b>'+esc(g.proj)+'</b></div>'+'<div class="tc-meta">'+pct(g.pPick)+' chance · '+edge(g)+' edge · L10 '+l10(g)+'</div>'+spark(g)+'<div class="tc-book">'+esc(g.book||'PrizePicks')+'</div></div>'+
  '<div class="tc-name"><b>'+esc(g.player)+'</b><span>'+esc(g.team||'')+(g.opp?' vs '+esc(g.opp):'')+'</span></div>'+
- '<div class="tc-back"><div><b>'+esc(g.proj)+'</b><i>Proj</i></div><div><b>'+pct(g.pPick)+'</b><i>Chance</i></div><div><b>'+edge(g)+'</b><i>Edge</i></div><div><b>'+l10(g)+'</b><i>L10 over</i></div></div>'+
+ (function(){var q=pstats(g);return '<div class="tc-back"><div class="tc-bh">Season · Maps 1-2 · '+q.n+' series</div><div><b>'+q.hsp+'</b><i>HS%</i></div><div><b>'+q.kd+'</b><i>K/D</i></div><div><b>'+q.kpm+'</b><i>KPM 1-2</i></div><div><b>'+q.hpm+'</b><i>HS/map 1-2</i></div></div>'})()+
  '<div class="tc-foot"><span>GLOCKY PICKS</span><span>CS2 PROP GRADER</span></div></div></div></div>'}
 
 // ---- image export (canvas, no libraries). 750x1050 = 2.5 x 3.5 in at 300 dpi.
@@ -67,27 +71,32 @@ function draw(g,logo,mark){var c=document.createElement('canvas');c.width=W;c.he
  if(logo){var s=Math.min(br*1.5/logo.width,br*1.5/logo.height);x.drawImage(logo,bx-logo.width*s/2,by-logo.height*s/2,logo.width*s,logo.height*s)}
  else{x.fillStyle=t.accent;var m=mono(g.team);fit(x,m,m.length>2?54:66,br*1.6);x.textBaseline='middle';x.fillText(m,bx,by+3);x.textBaseline='alphabetic'}x.restore();
  // art window: stat, pick, projection, sparkline
- x.fillStyle='#c8cdd2';x.font='28px '+FONT;x.fillText((sname(g.stat)+' · Maps 1-2').toUpperCase(),W/2,300);
- var pk=g.pick+' '+g.line;x.shadowColor=pc;x.shadowBlur=26;x.fillStyle=pc;fit(x,pk,92,600);x.fillText(pk,W/2,395);x.shadowBlur=0;
- x.fillStyle='#8b9297';x.font='24px '+FONT;x.fillText('PROJECTION',W/2,445);x.fillStyle='#fff';x.font='64px '+FONT;x.fillText(String(g.proj),W/2,510);
- var v=vals(g),sx=110,sw=W-220,sy=540,sh=150;if(v.length){var mx=Math.max.apply(null,v.concat([g.line||0,1]))*1.15,bw=sw/v.length;
+ x.fillStyle='#c8cdd2';x.font='26px '+FONT;x.fillText((sname(g.stat)+' · Maps 1-2').toUpperCase(),W/2,290);
+ var pk=g.pick+' '+g.line;x.shadowColor=pc;x.shadowBlur=26;x.fillStyle=pc;fit(x,pk,86,600);x.fillText(pk,W/2,372);x.shadowBlur=0;
+ x.font='22px '+FONT;var pl='PROJ ',pw=x.measureText(pl).width;x.font='50px '+FONT;var pv=String(g.proj),vw=x.measureText(pv).width;var px0=W/2-(pw+vw)/2;
+ x.textAlign='left';x.fillStyle='#8b9297';x.font='22px '+FONT;x.fillText(pl,px0,428);x.fillStyle='#fff';x.font='50px '+FONT;x.fillText(pv,px0+pw,428);x.textAlign='center';
+ x.fillStyle='#c8cdd2';x.font='21px '+FONT;x.fillText(pct(g.pPick)+' CHANCE  ·  '+edge(g)+' EDGE  ·  L10 '+l10(g),W/2,466);
+ var v=vals(g),sx=120,sw=W-240,sy=488,sh=110;if(v.length){var mx=Math.max.apply(null,v.concat([g.line||0,1]))*1.15,bw=sw/v.length;
   v.forEach(function(val,k){var h=Math.max(6,val/mx*sh);x.fillStyle=val>g.line?'#00FF66':val<g.line?'#ff4d6d':'#777';rr(x,sx+k*bw+5,sy+sh-h,bw-10,h,5);x.fill()});
   var ly=sy+sh-g.line/mx*sh;x.setLineDash([10,8]);x.strokeStyle='#fff';x.lineWidth=3;x.beginPath();x.moveTo(sx-6,ly);x.lineTo(sx+sw+6,ly);x.stroke();x.setLineDash([]);
-  x.fillStyle='#8b9297';x.font='18px '+FONT;x.fillText('LAST '+v.length+' SERIES  ·  DASHED = LINE',W/2,sy+sh+28)}
- var bk=(g.book||'PrizePicks').toUpperCase();x.font='22px '+FONT;
+  x.fillStyle='#8b9297';x.font='17px '+FONT;x.fillText('LAST '+v.length+' SERIES  ·  DASHED = LINE',W/2,sy+sh+26)}
+ var bk=(g.book||'PrizePicks').toUpperCase();
  // name plate
- var ny=752;x.fillStyle=grad(x,t.foil,P,ny,W-P,ny+110);rr(x,P+30,ny,W-2*P-60,104,18);x.fill();x.fillStyle='rgba(0,0,0,.55)';rr(x,P+34,ny+4,W-2*P-68,96,15);x.fill();
- x.fillStyle='#fff';fit(x,String(g.player).toUpperCase(),58,W-2*P-110);x.fillText(String(g.player).toUpperCase(),W/2,ny+60);
- x.fillStyle=t.accent;fit(x,(g.team||'')+(g.opp?'  vs  '+g.opp:'')+'  ·  '+bk,24,W-2*P-110);x.fillText((g.team||'')+(g.opp?'  vs  '+g.opp:'')+'  ·  '+bk,W/2,ny+90);
- // back panel stats
- var cells=[[String(g.proj),'PROJ'],[pct(g.pPick),'CHANCE'],[edge(g),'EDGE'],[l10(g),'L10 OVER']],cy=878,cw=(W-2*P-60)/4;
- cells.forEach(function(cl,k){var cx=P+30+k*cw;x.fillStyle='rgba(255,255,255,.05)';rr(x,cx+5,cy,cw-10,84,12);x.fill();x.fillStyle='#fff';fit(x,cl[0],34,cw-24);x.fillText(cl[0],cx+cw/2,cy+44);x.fillStyle='#8b9297';x.font='16px '+FONT;x.fillText(cl[1],cx+cw/2,cy+70)});
+ var ny=650;x.fillStyle=grad(x,t.foil,P,ny,W-P,ny+100);rr(x,P+30,ny,W-2*P-60,100,18);x.fill();x.fillStyle='rgba(0,0,0,.55)';rr(x,P+34,ny+4,W-2*P-68,92,15);x.fill();
+ x.fillStyle='#fff';fit(x,String(g.player).toUpperCase(),56,W-2*P-110);x.fillText(String(g.player).toUpperCase(),W/2,ny+57);
+ var sub=(g.team||'')+(g.opp?'  vs  '+g.opp:'')+'  ·  '+bk;x.fillStyle=t.accent;fit(x,sub,23,W-2*P-110);x.fillText(sub,W/2,ny+86);
+ // card back: season player stats, 2 x 2
+ var q=pstats(g);x.fillStyle='#8b9297';x.font='17px '+FONT;x.fillText('SEASON  ·  MAPS 1-2  ·  '+q.n+' SERIES',W/2,ny+132);
+ var cells=[[q.hsp,'HS%'],[q.kd,'K/D'],[q.kpm,'KPM 1-2'],[q.hpm,'HS / MAP 1-2']],gx=P+30,gw=(W-2*P-60-12)/2,gy=ny+146,gh=70;
+ cells.forEach(function(cl,k){var cx=gx+(k%2)*(gw+12),cy=gy+Math.floor(k/2)*(gh+10);x.fillStyle='rgba(255,255,255,.06)';rr(x,cx,cy,gw,gh,12);x.fill();
+  x.strokeStyle=t.accent;x.globalAlpha=.35;x.lineWidth=2;rr(x,cx,cy,gw,gh,12);x.stroke();x.globalAlpha=1;
+  x.textAlign='left';x.fillStyle='#8b9297';x.font='19px '+FONT;x.fillText(cl[1],cx+20,cy+44);x.textAlign='right';x.fillStyle='#fff';x.font='38px '+FONT;x.fillText(cl[0],cx+gw-20,cy+50);x.textAlign='center'});
  // watermark: subtle diagonal + corner
  x.save();rr(x,P,P,W-2*P,H-2*P,30);x.clip();x.translate(W/2,H/2);x.rotate(-Math.PI/5);x.font='54px '+FONT;x.fillStyle='rgba(255,255,255,.06)';
  for(var r=-6;r<=6;r++)x.fillText('GLOCKY PICKS   GLOCKY PICKS   GLOCKY PICKS',0,r*150);x.restore();
- if(mark){x.save();x.globalAlpha=.9;var mw=64,mh=mw*mark.height/mark.width;x.drawImage(mark,P+34,H-P-mh-18,mw,mh);x.restore()}
- x.textAlign='left';x.fillStyle='#00FF66';x.shadowColor='#00FF66';x.shadowBlur=12;x.font='24px '+FONT;x.fillText('GLOCKY PICKS',P+(mark?108:36),H-P-26);x.shadowBlur=0;
- x.textAlign='right';x.fillStyle='#8b9297';x.font='18px '+FONT;x.fillText('@GLOCKYPICKZ',W-P-36,H-P-26);
+ if(mark){x.save();x.globalAlpha=.9;var mh=40,mw=mh*mark.width/mark.height;x.drawImage(mark,P+34,H-P-mh-14,mw,mh);x.restore()}
+ x.textAlign='left';x.fillStyle='#00FF66';x.shadowColor='#00FF66';x.shadowBlur=12;x.font='24px '+FONT;x.fillText('GLOCKY PICKS',P+(mark?34+40*mark.width/mark.height+12:36),H-P-24);x.shadowBlur=0;
+ x.textAlign='right';x.fillStyle='#8b9297';x.font='18px '+FONT;x.fillText('@GLOCKYPICKZ',W-P-36,H-P-24);
  return c}
 function fontReady(cb){var d=false;function go(){if(!d){d=true;cb()}}setTimeout(go,1500);try{document.fonts.load('60px "Russo One"').then(go,go)}catch(e){go()}}
 // cb(canvas). Draws with the team logo when it can; if the logo would block the export (no CORS), redraws with the monogram.
