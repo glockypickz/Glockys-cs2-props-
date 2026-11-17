@@ -111,11 +111,45 @@ def build_strength(c, old):
         if k and mp:
             asof = str(r["fetched"])[:10]   # the stats cover matches up to the fetch day; the grader uses them from the next day
             maps.setdefault(k, {})[asof] = mp
+    odds = match_odds(c)
     out = {"source": "cito", "updated": datetime.datetime.now(datetime.timezone.utc).isoformat(timespec="seconds"),
            "note": "Derived numbers only. rankings: dated lists (team key -> points). maps: per team, dated snapshots "
-                   "{map: [maps played, total rounds on those maps, pick %]}. The grader only uses entries dated before the match day.",
+                   "{map: [maps played, total rounds on those maps, pick %]}. The grader only uses entries dated before the match day. "
+                   "odds: match winner prices from the saved upcoming-matches reply (display only, not used by the grader).",
            "rankings": {kind: [{"date": d, "points": rank[kind][d]} for d in sorted(rank[kind])[-KEEP_RANK_SNAPS:]] for kind in rank},
            "maps": {k: [{"asof": a, "maps": v[a]} for a in sorted(v)[-KEEP_MAP_SNAPS:]] for k, v in sorted(maps.items())}}
+    if odds:
+        out["odds"] = odds
+    return out
+
+
+def match_odds(c):
+    """Match-winner odds of upcoming matches from the newest saved /cs2/matches/upcoming reply (no extra call).
+    One row per match that has an h2h price: team keys and names, start, implied win chance and decimal odds for each
+    team, Map 1 / Map 2 prices when given, provider and capture time. Display only (Games tab)."""
+    recs = [r for r in c.saved("/cs2/matches/upcoming") if r.get("status") == 200]
+    if not recs:
+        return []
+    rec = max(recs, key=lambda r: str(r.get("fetched") or ""))
+    out = []
+    for m in data(rec.get("body")) or []:
+        by = {}
+        for o in m.get("odds") or []:
+            if o.get("market") in ("h2h", "map_h2h_1", "map_h2h_2") and o.get("market") not in by:
+                by[o["market"]] = o
+        h = by.get("h2h")
+        if not h or not isinstance(h.get("team1ImpliedProb"), (int, float)) or not isinstance(h.get("team2ImpliedProb"), (int, float)):
+            continue
+        row = {"t1": tn(m.get("team1Name")), "t2": tn(m.get("team2Name")), "n1": m.get("team1Name"), "n2": m.get("team2Name"),
+               "start": m.get("startsAt"), "p": [round(h["team1ImpliedProb"], 4), round(h["team2ImpliedProb"], 4)],
+               "dec": [h.get("team1Odds"), h.get("team2Odds")], "src": h.get("provider"),
+               "at": h.get("capturedAt") or rec.get("fetched")}
+        for k, mk in (("map1", "map_h2h_1"), ("map2", "map_h2h_2")):
+            o = by.get(mk)
+            if o and isinstance(o.get("team1ImpliedProb"), (int, float)) and isinstance(o.get("team2ImpliedProb"), (int, float)):
+                row[k] = [round(o["team1ImpliedProb"], 4), round(o["team2ImpliedProb"], 4)]
+        if row["t1"] and row["t2"]:
+            out.append(row)
     return out
 
 
