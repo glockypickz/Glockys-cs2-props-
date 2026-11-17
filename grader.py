@@ -29,7 +29,7 @@ import re, math, bisect
 
 # ---- model parameters. Tuned by backtest.py on the early slice only. MUST match PARAMS in model.js.
 PARAMS = {"m": 100, "half_life": 8, "n_max": 20, "m_team": 1500, "elo_k": 16, "beta": 0.25,
-          "rd_a": 17.34, "rd_b": 16.18, "h2h_min": 3, "h2h_w": 0.0, "w_line": 1.0,
+          "rd_a": 17.34, "rd_b": 16.18, "h2h_min": 3, "h2h_w": 0.0, "w_line": 0.7,
           "g_kills": 0.6573, "g_hs": 0.3404, "size_kills": 20.0, "size_hs": 16.0,
           "min_series": 8, "grade_a": 6.0, "grade_b": 3.0,
           "w_rank": 0.25, "rank_s": 1.0, "w_maps": 0.25, "k_maps": 6.0, "w_hr": 0.0, "k_hr": 5.0}
