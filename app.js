@@ -397,7 +397,7 @@ function viewGrader(){var combo=isCombo(sel.player),p=combo?{name:sel.player}:fi
  else if(!p)h+='<div class="card"><div class="warn">No player named "'+esc(sel.player)+'" in the data.</div></div>';
  else if(!g&&miss)h+='<div class="card"><div class="warn">Cannot grade this combo: no usable Maps 1-2 stats for '+esc(miss)+'. Every player in a combo needs stats.</div></div>';
  else if(!g)h+='<div class="card"><div class="warn">Not enough Maps 1-2 data for '+esc(p.name)+' yet (needs matches where both Map 1 and Map 2 were played) or the line is empty.</div></div>';
- else h+=gradeCard(g);return h+'</div>'+opts()}
+ else h+='<div>'+(window.GPCards?GPCards.html(g):'')+gradeCard(g)+'</div>';return h+'</div>'+opts()}
 // ---- bar chart: real number on every bar, dashed line = the prop line, green over / red under
 function chart(cs,st,line,n){var rows=cs.slice(0,n||10).filter(function(c){return c[st]!=null}).reverse();if(!rows.length)return '<div class="muted">No '+(st==='hs'?'headshot':'kill')+' data for this selection.</div>';
  var hasL=line!=null&&!isNaN(line),mx=Math.max.apply(null,rows.map(function(c){return c[st]}).concat([hasL?line:0,1]))*1.25;
@@ -555,8 +555,8 @@ document.addEventListener('click',function(e){var b=e.target.closest('[data-act]
  else if(a==='pg'){sel.player=b.dataset.p;var p=find(sel.player);sel.opp='';go('grader');toast('Loaded '+sel.player+'. Enter a line')}
  else if(a==='grade'){var np=$('gp').value;if(np!==sel.player)sel.team='';sel.player=np;sel.stat=$('gs').value;sel.line=$('gl').value;sel.opp=$('go').value;var nb=$('gb')?$('gb').value:'PrizePicks';if(nb!==sel.book||String(parseFloat(sel.line))!==String(sel.oddsLine))sel.odds=null;sel.book=nb;render();toast('Graded')}
  else if(a==='gadd'){var g=curGrade();if(g)addSlip(g)}
- else if(a==='gimg'){var g2=curGrade();if(g2)img({g:g2},function(c){dl(c,'grade-1080x1350.png')})}
- else if(a==='gshare'){var g3=curGrade();if(g3)img({g:g3},function(c){share(c,'grade.png')})}
+ else if(a==='gimg'){var g2=curGrade();if(g2)(window.GPCards?GPCards.img:function(g,f){img({g:g},f)})(g2,function(c){dl(c,'glocky-card.png')})}
+ else if(a==='gshare'){var g3=curGrade();if(g3)(window.GPCards?GPCards.img:function(g,f){img({g:g},f)})(g3,function(c){share(c,'glocky-card.png')})}
  else if(a==='madd'){var n=$('mp').value.trim(),l=parseFloat($('ml').value);if(!n||isNaN(l)){toast('Enter a player and a line');return}var p2=find(n);manual.push({player:p2?p2.name:n,team:p2?p2.team:'',stat:$('ms').value,line:l,opponent:$('mo').value,period:'Maps 1-2',src:'manual'});save('gp_manual',manual);render();toast('Line saved')}
  else if(a==='ldel'){manual.splice(i-LINES.length,1);save('gp_manual',manual);render();toast('Line removed')}
  else if(a==='lg'){var l2=allLines()[i];sel={player:l2.player,stat:l2.stat,line:String(l2.line),opp:l2.opp,team:l2.team,book:l2.book||'PrizePicks',odds:l2.odds,oddsLine:String(+l2.line)};go('grader');toast('Loaded '+l2.player)}
