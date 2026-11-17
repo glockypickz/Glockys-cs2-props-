@@ -106,6 +106,33 @@ def try_lock(gr, e, now, t0):
 STATS_STAMP = ""
 
 
+MOVE_HOURS = 12   # a start-time change within this window is the same match, not a new one
+
+
+def _key_txt(s):
+    return "".join(ch for ch in str(s or "").lower() if ch.isalnum())
+
+
+def moved_entry(by, l, t0):
+    """The existing history entry for this book / player / stat / team / opponent whose match start moved (start differs
+    by at most MOVE_HOURS and that entry is not settled yet), or None. Keeps one entry per match when a book reschedules."""
+    if t0 is None:
+        return None
+    best = None
+    for e in by.values():
+        if (e["book"], e["player"], e["stat"]) != (l["book"], l["player"], l["stat"]) or e.get("result"):
+            continue
+        if _key_txt(e.get("team")) != _key_txt(l.get("team")) or _key_txt(e.get("opponent")) != _key_txt(l.get("opponent")):
+            continue
+        t1 = parse_time(e.get("start"))
+        if t1 is None or t1 == t0:
+            continue
+        d = abs((t1 - t0).total_seconds())
+        if d <= MOVE_HOURS * 3600 and (best is None or d < best[0]):
+            best = (d, e)
+    return best[1] if best else None
+
+
 def update_history(lines, now_iso):
     """Remember every line we saw, per book/player/stat/match (PrizePicks and Underdog are separate entries).
     line / odds keep updating until the match starts, so they are the closing line and odds; first_line /
@@ -124,6 +151,12 @@ def update_history(lines, now_iso):
         k = (l["book"], l["player"], l["stat"], start)
         t0 = parse_time(start)
         e = by.get(k)
+        if e is None:
+            e = moved_entry(by, l, t0)
+            if e is not None:   # same match, new start time: move the existing entry (its lock / grade are never touched)
+                by.pop((e["book"], e["player"], e["stat"], e["start"]), None)
+                e["start"] = start
+                by[k] = e
         if e is None:
             by[k] = {"book": l["book"], "player": l["player"], "team": l.get("team", ""),
                      "opponent": l.get("opponent", ""), "stat": l["stat"], "start": start,
