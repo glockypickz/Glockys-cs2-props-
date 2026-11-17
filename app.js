@@ -129,8 +129,41 @@ function chips(){var c=[];c.push('<span class="chip g">'+DB.length+' players</sp
  c.push('<span class="chip'+(liveGames().length?' g':'')+'">Games: '+(GAMES.length?liveGames().length+' live · '+upGames().length+' upcoming':'none loaded')+'</span>');c.push('<span class="chip">Lines: '+(LINES.length?LINES.length+' feed':'manual')+'</span>');c.push('<span class="chip">Opened '+ftime()+'</span>');$('chips').innerHTML=c.join('')}
 function nav(){var h=TABS.map(function(t){return '<button data-t="'+t[0]+'" class="'+(tab===t[0]?'on':'')+'"><i>'+t[1]+'</i>'+t[2]+'</button>'}).join('');$('navBot').innerHTML=h;$('navTop').innerHTML=TABS.map(function(t){return '<button data-t="'+t[0]+'" class="'+(tab===t[0]?'on':'')+'">'+t[2]+'</button>'}).join('')}
 function roster(team){return DB.filter(function(p){return teq(p.team,team)}).map(function(p){return p.name})}
+
+// Official match streams from games.json (bo3.gg match detail). Embeds: Twitch and YouTube only, never a proxy.
+// Twitch parent must include the production hosts plus the current hostname (Pages preview, localhost, etc.).
+function twitchParents(){var req=["glockys-cs2-props.dpe364.workers.dev","glockypickz.github.io"],h=(typeof location!=="undefined"&&location.hostname)||"";
+ if(h&&req.indexOf(h)<0)req.push(h);return req}
+function ytId(u){var m=String(u||"").match(/(?:youtube\.com\/(?:watch\?(?:[^#]*&)?v=|embed\/|live\/|shorts\/)|youtu\.be\/)([A-Za-z0-9_-]{11})/);return m?m[1]:null}
+function twitchChan(u){var s=String(u||""),q=s.match(/player\.twitch\.tv\/?\?[^#]*channel=([A-Za-z0-9_]+)/i);if(q)return q[1];
+ var p=s.match(/twitch\.tv\/([A-Za-z0-9_]+)/i);return p&&["videos","directory","settings","p","popout"].indexOf(p[1].toLowerCase())<0?p[1]:null}
+function kickChan(u){var m=String(u||"").match(/(?:player\.)?kick\.com\/([A-Za-z0-9_]+)/i);return m?m[1]:null}
+function platName(p){return p==="twitch"?"Twitch":p==="youtube"?"YouTube":p==="kick"?"Kick":(p||"Stream")}
+function streamInfo(s){var url,plat,name,lang,official;
+ if(typeof s==="string"){url=s;plat="";name="";lang="";official=false}
+ else if(s&&typeof s==="object"){url=s.url||"";plat=s.platform||"";name=s.name||"";lang=s.language||"";official=!!s.official}
+ else return null;
+ if(!/^https:\/\//.test(url))return null;
+ if(!plat){if(ytId(url))plat="youtube";else if(twitchChan(url))plat="twitch";else if(kickChan(url))plat="kick"}
+ if(!name)name=twitchChan(url)||kickChan(url)||ytId(url)||"";
+ var embed=null;
+ if(plat==="twitch"&&twitchChan(url))embed="https://player.twitch.tv/?channel="+encodeURIComponent(twitchChan(url))+"&parent="+twitchParents().map(encodeURIComponent).join("&parent=");
+ else if(plat==="youtube"&&ytId(url))embed="https://www.youtube.com/embed/"+encodeURIComponent(ytId(url));
+ var label=platName(plat)+(name?" · "+name:"")+(lang?" · "+String(lang).toUpperCase():"")+(official?" · official":"");
+ return {url:url,platform:plat,name:name,language:lang,official:official,embed:embed,label:label||url}}
+function gameStreams(g){var out=[],seen={};(g&&g.streams||[]).forEach(function(s){var i=streamInfo(s);if(!i||seen[i.url])return;seen[i.url]=1;out.push(i)});return out}
+function streamBlock(g,emptyNote){var xs=gameStreams(g);
+ if(!xs.length)return emptyNote?'<div class="muted">No stream listed</div>':'';
+ var open=sel.watch&&String(sel.watch.id)===String(g.id),best=0;xs.forEach(function(x,i){if(!x.embed)return;if(!xs[best].embed)best=i;else if(x.official&&!xs[best].official)best=i});
+ var idx=open&&xs[sel.watch.s]&&xs[sel.watch.s].embed?sel.watch.s:best;
+ var links='<div class="slinks">'+xs.map(function(x){return '<a class="slink" href="'+esc(x.url)+'" target="_blank" rel="noopener">'+esc(x.label)+'</a>'}).join("")+"</div>";
+ var can=xs.some(function(x){return x.embed}),wbtn=can?'<button class="g" data-act="watch" data-i="'+g.id+'" data-s="'+(open?idx:best)+'">'+(open?"Hide player":"Watch")+"</button>":"";
+ var player="";
+ if(open&&xs[idx]&&xs[idx].embed){var alts=xs.map(function(x,i){return x.embed?'<button class="g'+(i===idx?" on":"")+'" data-act="watch" data-i="'+g.id+'" data-s="'+i+'">'+esc(platName(x.platform)+(x.name?" · "+x.name:""))+"</button>":""}).join("");
+  player='<div class="player"><div class="player-frame"><iframe src="'+esc(xs[idx].embed)+'" title="'+esc(xs[idx].label)+'" allow="autoplay; fullscreen; picture-in-picture" allowfullscreen loading="lazy" referrerpolicy="no-referrer-when-downgrade"></iframe></div>'+(alts?'<div class="slinks">'+alts+"</div>":"")+"</div>"}
+ return '<div class="streams">'+links+"</div>"+wbtn+player}
 function gameCard(g,full){var a=roster(g.team1),b=roster(g.team2);return '<div class="card"><div class="muted">'+esc(g.tournament||'')+' · '+esc(fmt(g.start))+(g.bo?' · Bo'+esc(g.bo):'')+'</div><div class="big">'+esc(g.team1)+' <span class="vs">vs</span> '+esc(g.team2)+'</div>'+
- (full?'<div class="muted">'+esc(g.team1)+(rankOf(g.team1)?' #'+rankOf(g.team1):'')+': '+(a.join(', ')||'no roster data')+'</div><div class="muted">'+esc(g.team2)+(rankOf(g.team2)?' #'+rankOf(g.team2):'')+': '+(b.join(', ')||'no roster data')+'</div>':'')+(full?citoBlock(g):'')+'<div class="btns"><button class="g" data-act="gamegrade" data-i="'+g.id+'">See props</button></div></div>'}
+ (full?'<div class="muted">'+esc(g.team1)+(rankOf(g.team1)?' #'+rankOf(g.team1):'')+': '+(a.join(', ')||'no roster data')+'</div><div class="muted">'+esc(g.team2)+(rankOf(g.team2)?' #'+rankOf(g.team2):'')+': '+(b.join(', ')||'no roster data')+'</div>':'')+(full?citoBlock(g):'')+'<div class="btns"><button class="g" data-act="gamegrade" data-i="'+g.id+'">See props</button></div>'+streamBlock(g,false)+'</div>'}
 function recents(){return load('gp_recent',[])}
 function viewDash(){var ls=allLines().filter(function(l){return l.g}).sort(function(a,b){return b.g.edgePP-a.g.edgePP}).slice(0,5),rc=recents(),dg=liveGames().concat(upGames());
  var h='<div class="card"><h2>Player search</h2><div class="row"><input id="ds" list="plist" placeholder="Search a player, e.g. donk"><button class="b" style="flex:0 0 auto;margin:0" data-act="dsearch">Stats</button></div>'+(rc.length?'<div class="btns" style="margin-top:6px"><span class="muted" style="align-self:center">Recent:</span>'+rc.map(function(n){return '<button class="g" data-act="plview" data-p="'+esc(n)+'">'+esc(n)+'</button>'}).join('')+'<button class="g" data-act="rclear">Clear</button></div>':'')+'</div>';
@@ -170,9 +203,7 @@ function citoBlock(g){if(!STRENGTH)return '<div class="cito muted">No Cito data 
  if(od&&od.p)src.push('odds: '+esc(String(od.src||'').replace(/_/g,' '))+', '+esc(ftime(od.at)));else src.push(STRENGTH.odds?'odds: n/a for this match':'odds: n/a (needs Cito Pro)');
  return h+'<div class="muted cs">'+notes.concat(src).join(' · ')+'</div></div>'}
 function liveCard(g){var sc=(g.s1!=null&&g.s2!=null)?' <span style="color:var(--green);margin-left:8px">'+g.s1+' – '+g.s2+'</span>':'';
- var ws=(g.streams||[]).filter(function(u){return /^https:\/\//.test(u)});
- var w=ws.map(function(u,k){return '<a href="'+esc(u)+'" target="_blank" rel="noopener" style="display:inline-block;margin-top:6px;padding:9px 12px;border:1px solid var(--green);border-radius:10px;color:var(--green);font-weight:700;text-decoration:none">Watch'+(ws.length>1?' '+(k+1):'')+'</a>'}).join('');
- return '<div class="card"><div class="muted"><span class="pill">LIVE</span> '+esc(g.tournament||'')+' · started '+esc(ftime(g.start))+(g.bo?' · Bo'+esc(g.bo):'')+'</div><div class="big">'+esc(g.team1)+' <span class="vs">vs</span> '+esc(g.team2)+sc+'</div>'+citoBlock(g)+'<div class="btns"><button class="g" data-act="gamegrade" data-i="'+g.id+'">See props</button>'+w+'</div></div>'}
+ return '<div class="card"><div class="muted"><span class="pill">LIVE</span> '+esc(g.tournament||'')+' · started '+esc(ftime(g.start))+(g.bo?' · Bo'+esc(g.bo):'')+'</div><div class="big">'+esc(g.team1)+' <span class="vs">vs</span> '+esc(g.team2)+sc+'</div>'+citoBlock(g)+'<div class="btns"><button class="g" data-act="gamegrade" data-i="'+g.id+'">See props</button></div>'+streamBlock(g,true)+'</div>'}
 function viewGames(){if(!GAMES.length)return '<div class="card"><h2>Games</h2><div class="warn">No schedule loaded yet. Run the "Update CS2 games" workflow once to create games.json.</div></div>';
  var lv=liveGames(),up=upGames(),v=sel.gv||(lv.length?'live':'up'),age=gamesAge();
  var h='<div class="btns" style="margin-bottom:10px"><button class="'+(v==='live'?'b':'g')+'" data-act="gsub" data-v="live">Live · '+lv.length+'</button><button class="'+(v==='up'?'b':'g')+'" data-act="gsub" data-v="up">Upcoming · '+up.length+'</button></div>';
@@ -180,7 +211,7 @@ function viewGames(){if(!GAMES.length)return '<div class="card"><h2>Games</h2><d
  if(age!=null&&age>90)h+='<div class="warn">This game data is '+(Math.round(age/6)/10)+' hours old, so live status may be out of date.</div>';
  if(v==='live'){
   if(!lv.length)return h+'<div class="card"><h2>Live</h2><div class="muted">No matches are live right now. A match shows here only while bo3.gg marks it live, and drops off when it finishes.</div></div>';
-  return h+'<div class="grid c2">'+lv.map(liveCard).join('')+'</div><div class="muted" style="margin-top:8px">Watch buttons appear only when bo3.gg gives an official stream link for the match.</div>'}
+  return h+'<div class="grid c2">'+lv.map(liveCard).join('')+'</div><div class="muted" style="margin-top:8px">Stream links come from bo3.gg. Watch opens an official Twitch or YouTube embed in this page (one at a time). Kick and other platforms open in a new tab. The app does not rebroadcast or proxy video.</div>'}
  if(!up.length)return h+'<div class="card"><h2>Upcoming</h2><div class="muted">No upcoming matches in the schedule.</div></div>';
  var days={};up.forEach(function(g){var d=new Intl.DateTimeFormat('en-US',{timeZone:'America/Chicago',weekday:'long',month:'short',day:'numeric'}).format(new Date(g.start));(days[d]=days[d]||[]).push(g)});
  return h+Object.keys(days).map(function(d){return '<h2>'+esc(d)+' · '+days[d].length+' games</h2><div class="grid c2">'+days[d].map(function(g){return gameCard(g,true)}).join('')+'</div>'}).join('')}
@@ -423,6 +454,7 @@ document.addEventListener('click',function(e){var b=e.target.closest('[data-act]
  if(a==='go')go(b.dataset.t);
  else if(a==='reload'){toast('Reloading…');boot()}
  else if(a==='gsub'){sel.gv=b.dataset.v;render()}
+ else if(a==='watch'){var id=b.dataset.i,si=+b.dataset.s;if(sel.watch&&String(sel.watch.id)===String(id)&&+sel.watch.s===si)sel.watch=null;else sel.watch={id:id,s:si};render()}
  else if(a==='lday'){sel.ld=b.dataset.d;render()}
  else if(a==='rday'){sel.rd=b.dataset.d;render()}
  else if(a==='gamegrade'){openGP(b.dataset.i)}

@@ -107,3 +107,13 @@ header img{filter:drop-shadow(0 0 10px rgba(0,255,102,.35));animation:gpglow 3.5
 .hb.r{border-color:var(--red);color:var(--red)}
 .hb.na{opacity:.5}
 .cito{margin:8px 0 2px}.cito .ct{font-size:12px;table-layout:fixed}.cito .ct th,.cito .ct td{padding:4px 4px;white-space:normal;overflow:hidden;text-overflow:ellipsis}.cito .ct th:first-child,.cito .ct td:first-child{width:28%}.cito .muted{font-size:12px;margin-top:4px}.cito .cs{opacity:.8}
+
+/* Official stream links + in-page Twitch/YouTube player (Games tab) */
+.slinks{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px}
+.slink{display:inline-block;padding:6px 10px;border:1px solid var(--line);border-radius:99px;color:var(--silver);font-size:12px;font-weight:700}
+.slink:hover{border-color:var(--green);color:var(--green)}
+.streams{margin-top:2px}
+.player{margin-top:10px}
+.player-frame{position:relative;width:100%;padding-top:56.25%;background:#000;border-radius:10px;overflow:hidden;border:1px solid var(--line)}
+.player-frame iframe{position:absolute;inset:0;width:100%;height:100%;border:0}
+.player .slinks button.on{border-color:var(--green);color:var(--green)}
