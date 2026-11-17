@@ -60,7 +60,7 @@ def cito_result(e):
     return None
 
 VOID_AFTER_H = 72
-WAIT_H = 5
+WAIT_H = 1
 
 
 def _pt(t):
