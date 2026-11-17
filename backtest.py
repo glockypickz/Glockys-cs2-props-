@@ -3,7 +3,7 @@
   python backtest.py            report with the PARAMS in grader.py
   python backtest.py --tune     also tune the parameters on the EARLY slice only and report on the later holdout
   python backtest.py --tune-hs     tune the HS% weights (w_hs5..w_hsszn for headshots, w_khs5..w_khsszn for kills)
-  python backtest.py --tune-form   tune the kill-form weights (w_l5 / w_l10 / w_l15 / w_szn / w_kd) the same way
+  python backtest.py --tune-form   tune the kill-form weights (w_l5 / w_l10 / w_l20 / w_szn / w_kd) the same way
   python backtest.py --strength tests/fixtures/team_strength_mock.json   use a Cito team_strength file (default:
                                 team_strength.json if present); --no-cito ignores it. Cito features only ever use
                                 snapshots dated BEFORE each predicted match (rankings / map stats), never same-day data.
@@ -180,13 +180,13 @@ def tune(players):
     return P
 
 
-FORM_GRID = {"w_l5": [0.0, 0.05, 0.1, 0.2, 0.3], "w_l10": [0.0, 0.05, 0.1, 0.2, 0.3], "w_l15": [0.0, 0.05, 0.1, 0.2, 0.3],
+FORM_GRID = {"w_l5": [0.0, 0.05, 0.1, 0.2, 0.3], "w_l10": [0.0, 0.05, 0.1, 0.2, 0.3], "w_l20": [0.0, 0.05, 0.1, 0.2, 0.3],
              "w_szn": [0.0, 0.1, 0.2, 0.3, 0.5, 0.75], "w_kd": [0.0, 0.25, 0.5, 1.0]}
 FORM_KEYS = tuple(FORM_GRID)
 
 
 def tune_form(players, P):
-    """Kill-form weights (w_l5 / w_l10 / w_l15 / w_szn / w_kd): coordinate search on the EARLY slice (kills NB log-lik),
+    """Kill-form weights (w_l5 / w_l10 / w_l20 / w_szn / w_kd): coordinate search on the EARLY slice (kills NB log-lik),
     then reported on the holdout. Every prediction only uses series dated before the predicted one."""
     early, late = (lambda d: d < SPLIT), (lambda d: d >= SPLIT)
     Q = dict(P, **{k: 0.0 for k in FORM_KEYS})
@@ -211,7 +211,7 @@ def tune_form(players, P):
 
 
 HS_GRID = {"hs": ("hs", {"w_hs5": [0.0, 0.1, 0.2, 0.3, 0.5], "w_hs10": [0.0, 0.1, 0.2, 0.3, 0.5],
-                          "w_hs15": [0.0, 0.1, 0.2, 0.3, 0.5], "w_hsszn": [0.0, 0.1, 0.2, 0.3, 0.5, 0.75, 1.0]}),
+                          "w_hs20": [0.0, 0.1, 0.2, 0.3, 0.5], "w_hsszn": [0.0, 0.1, 0.2, 0.3, 0.5, 0.75, 1.0]}),
            "kills": ("kills", {"w_khs5": [-0.5, -0.25, 0.0, 0.25, 0.5], "w_khs10": [-0.5, -0.25, 0.0, 0.25, 0.5],
                                "w_khs15": [-0.5, -0.25, 0.0, 0.25, 0.5], "w_khsszn": [-1.0, -0.5, -0.25, 0.0, 0.25, 0.5, 1.0]})}
 HS_KEYS = tuple(k for _st, g in HS_GRID.values() for k in g)

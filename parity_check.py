@@ -29,9 +29,9 @@ def main():
     else:
         print("no", MOCK, "(run python tests/make_mock_cito.py): Cito-feature parity not checked")
     for extra in ({"w_hr": 0.3}, {"w_hr": 0.3, "w_line": 0.0},   # hit-rate signal switched on
-                  {"w_line": 0.0, "w_l5": 0.2, "w_l10": 0.2, "w_l15": 0.1, "w_szn": 0.3, "w_kd": 0.5},  # kill form inputs on
+                  {"w_line": 0.0, "w_l5": 0.2, "w_l10": 0.2, "w_l20": 0.1, "w_szn": 0.3, "w_kd": 0.5},  # kill form inputs on
                   {"n_max": 20, "w_line": 0.0},
-                  {"w_line": 0.0, "w_hs5": 0.2, "w_hs10": 0.1, "w_hs15": 0.1, "w_hsszn": 0.3,   # HS% inputs on
+                  {"w_line": 0.0, "w_hs5": 0.2, "w_hs10": 0.1, "w_hs20": 0.1, "w_hsszn": 0.3,   # HS% inputs on
                    "w_khs5": 0.2, "w_khs10": -0.2, "w_khs15": 0.1, "w_khsszn": 0.5, "w_hkd": 0.3, "w_kd": 0.2}):  # the old 20-series window
         bad += run(d, extra)
     sys.exit(1 if bad else 0)
