@@ -3,37 +3,21 @@
 Python copy of model.js (the site uses model.js). Keep the two in step: parity_check.py compares them.
 Uses players.json (per-map logs + ranks) and, when present, team_strength.json (Cito-derived, see cito_update.py). No network.
 
-How a prop is graded
-  1. Per-round rate: the player's kills (or HS) per round over his recent Map 1+2 series, with exponentially
-     decaying weights (one window, no overlapping "recent/career/form" parts), shrunk toward his team's pooled
-     per-player rate with PARAMS m rounds of prior weight. The team rate is itself shrunk to a global rate.
-  2. Strength: map Elo is built from every map result in players.json (rounds won vs rounds played).
-     Win chance p vs this opponent changes the per-round rate (1 + beta * (p - player's usual p)) and the
-     expected rounds per map (close matches go longer: rounds = a + b * p * (1 - p)).
-  3. H2H is only used with 3+ earlier meetings, and only as a small blend.
-  4. Projection mu = rate * adj * expected rounds (2 maps), optionally blended with the line (w).
-  5. P(over) from a negative binomial with mean mu and a per-stat dispersion fitted by backtest.py.
-  6. Letter = direction + strength. Lean side = Over if P(over) >= P(under), else Under. Edge (pp) = P(lean side)
-     minus the book's break-even, in percentage points:
-       A+ = Over, edge >= +4pp   (excellent Over)            grade_a
-       B = Over,  edge >= 0pp    (lean Over, at/above break-even)  grade_b
-       C = Over,  edge <  0pp    (slight Over lean, below break-even)
-       D = Under, edge <  +3pp   (slight Under lean)
-       F = Under, edge >= +3pp   (take the Under)            grade_f (falls back to grade_b if missing)
-     No plain A and no E (A+ is the top v2 letter; old-grader A+ locks are shown as "A+ (old)").
-     Break-even comes from the line's odds when stored, else the book default.
-     Then a hit-rate override can raise the letter to A+ or B Over: the equal-weight blend of L5 / L10 / L20 /
-     season over-rates vs this line (w_hr_l5 / w_hr_l10 / w_hr_l20 / w_hr_szn, default 0.25 each). A window with
-     0 series is skipped and the rest are renormalized. Season must have hr_szn_min (8) series or the override
-     does not fire (and a low-sample flag is shown). Blend >= hr_upgrade_a (0.80) -> A+ Over; >= hr_upgrade_b
-     (0.70) -> B Over unless the model letter is already A. Below that the model letter is unchanged. This is
-     not w_hr (which stays 0 and does not enter P(over)).
-  7. Filters, shown as a flag next to the letter (the letter itself is not changed, except the hit-rate override
-     above): fewer than 8 earlier series, player not on the line's team,
-     player missed 2+ of his team's last 3 series (stand-in / roster change), thin hit-rate windows.
-  8. Bait flag: true if the player met or beat this exact line (actual >= line) in each of his last 5 Maps 1-2
-     series dated strictly before the match. Needs 5 series with the stat; otherwise false. Display only: it does
-     not change the projection, P(over), or letter.
+How a prop is graded (active grader for new locks)
+  1. v1 projection, same as grader_legacy.py: 35% last 10 Maps 1-2 series, 20% all logged series,
+     20% head-to-head vs the opponent (from the first meeting), 15% vs teams of the same rank tier
+     (ordinal ranks from players.json at grade time), 10% last 3 series. Missing pieces are dropped
+     and the rest are renormalized. Then a small ADR form adjustment (capped at 5%).
+     Only series dated strictly before `before` (the match day when provided) are used.
+  2. Letter from the projection edge pct = (proj - line) / line, live v1 cutoffs (no shadow shift):
+       A+ = pct >= +0.15, B >= +0.05, C >= -0.02, D >= -0.10, else F.
+       Pick = OVER if proj >= line, else UNDER. No plain A, no E, no hit-rate letter override.
+  3. v2 Under break-even rule (does not change the pick): when the v1 pick is Under and the v1 letter
+     is D or F, compute a negative-binomial P(under) from the 1-decimal projection blended 0.7 toward
+     the line (the shipped w_line), vs break-even from stored odds or the book default.
+     F if P(under) - BE >= +3pp (grade_f); else D.
+  4. Filters and the bait flag are display-only; they do not change the letter or pick.
+  Already-locked props keep the letter stored on the lock; this path is for new grades only.
 """
 import re, math, bisect
 
@@ -45,7 +29,7 @@ PARAMS = {"m": 100, "half_life": 8, "n_max": 200, "m_team": 1500, "elo_k": 16, "
           "g_kills": 0.6573, "g_hs": 0.3404, "size_kills": 20.0, "size_hs": 16.0,
           "min_series": 8, "grade_a": 4.0, "grade_b": 0.0, "grade_f": 3.0,
           "w_rank": 0.25, "rank_s": 1.0, "w_maps": 0.25, "k_maps": 6.0, "w_hr": 0.0, "k_hr": 5.0, "w_hr_l5": 0.25, "w_hr_l10": 0.25, "w_hr_l20": 0.25, "w_hr_szn": 0.25,
-          "hr_upgrade_a": 0.8, "hr_upgrade_b": 0.7, "hr_szn_min": 8,
+          "hr_upgrade_a": 0.0, "hr_upgrade_b": 0.0, "hr_szn_min": 8,
           "w_l5": 0.1, "w_l10": 0.05, "w_l20": 0.05, "w_szn": 0.05, "w_kd": 0.1, "k_kd": 40.0,
           "w_hs5": 0.3, "w_hs10": 0.2, "w_hs20": 0.15, "w_hsszn": 0.1,
           "w_khs5": 0.1, "w_khs10": 0.05, "w_khs15": 0.025, "w_khsszn": 0.0, "k_hsp": 30.0, "w_hkd": -0.1}
@@ -85,8 +69,8 @@ PARAMS = {"m": 100, "half_life": 8, "n_max": 200, "m_team": 1500, "elo_k": 16, "
 # Hit-rate letter override (separate from w_hr; w_hr stays 0). w_hr_l5 / w_hr_l10 / w_hr_l20 / w_hr_szn: weights
 #   of the L5 / L10 / L20 / season over-rate vs the current line, averaged (a window with 0 series is skipped).
 #   Default 0.25 each. L20 is computed for this even though prop cards display L15. hr_upgrade_a / hr_upgrade_b:
-#   blend >= 0.80 -> A+ Over; >= 0.70 -> B Over unless the model letter is already A+; else the model letter stays.
-#   hr_szn_min: season needs this many series or the override does not fire (low-sample flag). Thresholds 0 = off.
+#   The letter override is OFF (hr_upgrade_a / hr_upgrade_b are 0). Thresholds 0 = off.
+#   hr_szn_min: season needs this many series or the override does not fire (low-sample flag).
 # Cito features (only active when team_strength.json is present; with no file the grader is exactly as before):
 #   w_rank: weight of the ranking win chance (dated VRS + world points, latest list strictly before the match day)
 #           blended into the Elo win chance. rank_s: exponent in p = pa^s / (pa^s + pb^s).
@@ -101,7 +85,7 @@ PARAMS = {"m": 100, "half_life": 8, "n_max": 200, "m_team": 1500, "elo_k": 16, "
 # as locked v2 picks pile up and lower w_line (here AND in model.js) only if the holdout supports it.
 BOOK_BE = {"prizepicks": 0.577, "underdog": 0.53}   # break-even per pick when no odds are stored
 DEFAULT_BE = 0.577                                  # unknown book / manual line: assume PrizePicks
-MODEL_VERSION = "v2"
+MODEL_VERSION = "v1be"
 
 ALIASES = {"4Z": "EP.-4Z", "Ag1l": "agl"}
 # Book / bo3.gg team-name variants (keys and values are tn() keys). Same table in model.js.
@@ -206,6 +190,44 @@ def letter(pick, epp, P=PARAMS):
     if pick == "OVER":
         return "A+" if epp >= P["grade_a"] else "B" if epp >= P["grade_b"] else "C"
     return "F" if epp >= P.get("grade_f", P["grade_b"]) else "D"
+
+
+# Shipped line blend used only for the Under D/F break-even rule (kept at 0.7 even if PARAMS["w_line"] is overridden).
+V1_UNDER_W_LINE = 0.7
+
+
+def round1(x):
+    """One decimal, half away from zero (same as JS Math.round(x*10)/10).
+    A tiny epsilon absorbs binary-float noise around a *.x5 boundary (e.g. 27.75 stored as 27.749999999999996)."""
+    return math.floor(x * 10 + 0.5 + 1e-8) / 10.0 if x >= 0 else math.ceil(x * 10 - 0.5 - 1e-8) / 10.0
+
+
+def v1_shade(proj, line):
+    """Live v1 cutoffs from grader_legacy.py (GRADER_MODE != "shadow"): letter and pick from (proj-line)/line."""
+    if line is None or (isinstance(line, float) and math.isnan(line)) or float(line) == 0:
+        return None, None
+    edge = proj - float(line)
+    pct = edge / float(line)
+    g = "A+" if pct >= .15 else "B" if pct >= .05 else "C" if pct >= -.02 else "D" if pct >= -.10 else "F"
+    pick = "OVER" if edge >= 0 else "UNDER"
+    return g, pick
+
+
+def under_be_letter(grade, pick, proj, line, st, book, odds, P=None):
+    """When pick is Under and letter is D or F: F if NB P(under)-BE >= +3pp, else D. Pick is unchanged.
+    Mean is the 1-decimal projection blended with V1_UNDER_W_LINE (0.7). Same rule as the lock-time backtest."""
+    P = P or PARAMS
+    if pick != "UNDER" or grade not in ("D", "F"):
+        return grade, pick, None, None, None
+    size = P["size_kills"] if st == "kills" else P["size_hs"]
+    mu = round1(float(proj))
+    mu_f = blend_mean(mu, float(line), size, V1_UNDER_W_LINE)
+    over, eq, under = nb_probs(mu_f, size, float(line))
+    pu = under / max(1e-12, 1 - eq)
+    be = break_even(book, odds)
+    epp_u = (pu - be) * 100
+    g = "F" if epp_u >= float(P.get("grade_f") or 3.0) else "D"
+    return g, pick, epp_u, be, pu
 
 
 HR_BLEND_WINS = (("l5", 5, "w_hr_l5"), ("l10", 10, "w_hr_l10"), ("l20", 20, "w_hr_l20"), ("szn", None, "w_hr_szn"))
@@ -779,29 +801,108 @@ class Grader:
                 "hr_blend": None if blend is None else round(blend, 4), "hr_upgrade": up,
                 "model_grade": model_grade, "model_pick": model_pick}
 
+    def rank_of(self, name):
+        """Ordinal rank from players.json, keyed the same way as grader_legacy (norm of the team name)."""
+        k = norm(name)
+        for t, r in (self.ranks or {}).items():
+            if norm(t) == k:
+                return r
+        return None
+
+    @staticmethod
+    def tier(r):
+        return "t5" if r <= 5 else "t15" if r <= 15 else "t30" if r <= 30 else "t31"
+
+    def v1_project(self, p, st, opp, before="9999"):
+        """v1 projection (grader_legacy.Grader.grade), using only series dated strictly before `before`."""
+        cs = [c for c in self.series(p) if c["date"] < before]
+        nums = lambda rows: [c[st] for c in rows if c.get(st) is not None]
+        v = nums(cs)
+        if not v:
+            return None
+        opp_rank = self.rank_of(opp) if opp else None
+        on = norm(opp)
+        comp = [(0.35, mean(nums(cs[:10]))), (0.20, mean(v))]
+        h = [c for c in cs if norm(c["opp"]) == on] if opp else []
+        comp.append((0.20, mean(nums(h))))
+        same = []
+        if opp_rank is not None:
+            for c in cs:
+                rnk = self.rank_of(c["opp"])
+                if rnk is not None and self.tier(rnk) == self.tier(opp_rank):
+                    same.append(c)
+        comp.append((0.15, mean(nums(same))))
+        comp.append((0.10, mean(nums(cs[:3]))))
+        use = [(w, x) for w, x in comp if x is not None]
+        tw = sum(w for w, _ in use)
+        if not tw:
+            return None
+        proj = sum(x * w for w, x in use) / tw
+        adr5 = mean([c["adr"] for c in cs[:5] if c.get("adr") is not None])
+        adrc = mean([c["adr"] for c in cs if c.get("adr") is not None])
+        if adr5 is not None and adrc:
+            proj *= max(0.95, min(1.05, 1 + 0.5 * (adr5 / adrc - 1)))
+        return proj
+
+    def _v1_result(self, mu, line, st, book, odds, reasons=None):
+        """Shade the v1 projection, apply the Under break-even D/F rule, attach NB display fields."""
+        g, pick = v1_shade(mu, line)
+        if g is None:
+            return None
+        proj = round1(mu)
+        g, pick, epp_u, be_u, pu_u = under_be_letter(g, pick, proj, line, st, book, odds, self.P)
+        size = self.P["size_kills"] if st == "kills" else self.P["size_hs"]
+        mu_f = blend_mean(proj, float(line), size, self.P["w_line"])
+        over, eq, under = nb_probs(mu_f, size, float(line))
+        nopush = max(1e-12, 1 - eq)
+        po, pu = over / nopush, under / nopush
+        be = break_even(book, odds)
+        if epp_u is not None:
+            epp, p_pick = epp_u, (pu_u if pu_u is not None else pu)
+            be = be_u if be_u is not None else be
+        else:
+            p_pick = max(po, pu)
+            epp = (p_pick - be) * 100
+        reasons = list(reasons or [])
+        return {"proj": proj, "mu_model": proj, "mu_blend": round(mu_f, 2), "edge": round(proj - float(line), 1),
+                "grade": g, "pick": pick,
+                "p_over": round(po, 4), "p_push": round(eq, 4), "p_pick": round(p_pick, 4), "be": round(be, 4),
+                "edge_pp": round(epp, 2), "reasons": reasons, "flag": "; ".join(reasons), "model": MODEL_VERSION,
+                "hr_blend": None, "hr_upgrade": None, "model_grade": g, "model_pick": pick}
+
     def grade(self, p, st, line, opp, team=None, book=None, odds=None, before="9999"):
         if line is None or (isinstance(line, float) and math.isnan(line)):
             return None
-        pr = self.project(p, st, opp, team or p.get("team"), before)
-        if not pr:
+        mu = self.v1_project(p, st, opp, before)
+        if mu is None:
+            return None
+        reasons = self.filters(p, team, len([c for c in self.series(p) if c["date"] < before]), before)
+        r = self._v1_result(mu, float(line), st, book, odds, reasons)
+        if not r:
             return None
         hits = self.hitrates(p, st, float(line), opp, before)
-        r = self.finish(pr["mu"], float(line), st, book, odds, self.filters(p, team, pr["n"], before), hr=hits["p"], hits=hits)
         r["hits"] = {k: hits[k] for k in ("l5", "l10", "l15", "l20", "szn", "h2h")}
         r["p_hr"] = round(hits["p"], 4)
-        r["h2h_n"], r["h2h_rate"] = pr["h2h"], (None if pr["h2h_rate"] is None else round(pr["h2h_rate"], 4))
-        r.update({"n": pr["n"], "rounds": round(pr["rounds"], 1), "pwin": round(pr["pwin"], 3), "rate": round(pr["rate"], 4),
-                  "p_rank": None if pr["p_rank"] is None else round(pr["p_rank"], 3),
-                  "rounds_maps": None if pr["rounds_maps"] is None else round(pr["rounds_maps"], 1),
-                  "kd": None if pr["form"]["kd"] is None else round(pr["form"]["kd"], 3),
-                  "kpm": {k: (None if v is None else round(v, 2)) for k, v in pr["form"]["kpm"].items()},
-                  "hsp": {("szn" if k == "szn" else "l" + k): (None if v is None else round(v, 4)) for k, v in pr["hsf"]["raw"].items()}})
+        pr = self.project(p, st, opp, team or p.get("team"), before)
+        empty_kpm = {k: None for k in ("l5", "l10", "l15", "l20", "szn")}
+        empty_hsp = {k: None for k in ("l5", "l10", "l15", "l20", "szn")}
+        if pr:
+            r["h2h_n"], r["h2h_rate"] = pr["h2h"], (None if pr["h2h_rate"] is None else round(pr["h2h_rate"], 4))
+            r.update({"n": pr["n"], "rounds": round(pr["rounds"], 1), "pwin": round(pr["pwin"], 3), "rate": round(pr["rate"], 4),
+                      "p_rank": None if pr["p_rank"] is None else round(pr["p_rank"], 3),
+                      "rounds_maps": None if pr["rounds_maps"] is None else round(pr["rounds_maps"], 1),
+                      "kd": None if pr["form"]["kd"] is None else round(pr["form"]["kd"], 3),
+                      "kpm": {k: (None if v is None else round(v, 2)) for k, v in pr["form"]["kpm"].items()},
+                      "hsp": {("szn" if k == "szn" else "l" + k): (None if v is None else round(v, 4)) for k, v in pr["hsf"]["raw"].items()}})
+        else:
+            n = len([c for c in self.series(p) if c["date"] < before])
+            r.update({"h2h_n": 0, "h2h_rate": None, "n": n, "rounds": None, "pwin": None, "rate": None,
+                      "p_rank": None, "rounds_maps": None, "kd": None, "kpm": empty_kpm, "hsp": empty_hsp})
         r["bait"] = self.bait(p, st, float(line), before)
         return r
 
     def grade_combo(self, name, team, st, line, opp, book=None, odds=None, before="9999"):
-        """Combo prop "A + B + C": sum of each player's projection; teammates move together, so the
-        variance is taken as fully linked (size of one player's distribution, applied to the sum)."""
+        """Combo prop: sum of each player's v1 projection vs the combined line, then the same letters / Under rule."""
         names = [n.strip() for n in str(name).split("+") if n.strip()]
         if len(names) < 2:
             return None
@@ -810,13 +911,16 @@ class Grader:
             p = self.find(n, team)
             if not p:
                 return None
-            pr = self.project(p, st, opp, team or p.get("team"), before)
-            if not pr:
+            pj = self.v1_project(p, st, opp, before)
+            if pj is None:
                 return None
-            mu += pr["mu"]
-            nmin = min(nmin, pr["n"])
-            reasons += [n + ": " + x for x in self.filters(p, team, pr["n"], before)]
-        r = self.finish(mu, float(line), st, book, odds, reasons)
+            mu += pj
+            nser = len([c for c in self.series(p) if c["date"] < before])
+            nmin = min(nmin, nser)
+            reasons += [n + ": " + x for x in self.filters(p, team, nser, before)]
+        r = self._v1_result(mu, float(line), st, book, odds, reasons)
+        if not r:
+            return None
         r["n"] = nmin
         r["bait"] = False
         return r

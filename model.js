@@ -1,23 +1,22 @@
-/* Grader v2 model (browser + node). JS copy of grader.py: keep the two in step (python parity_check.py compares them).
-   Per-round rate (decayed, shrunk to the team) x Elo strength adjustment x expected rounds -> negative binomial P(over),
-   letter = direction + strength, by edge (pp) of the lean side over the book's break-even:
-   A+ = Over >= +4pp, B = Over >= 0pp (at/above break-even), C = Over < 0pp (slight lean), D = Under < +3pp (slight lean), F = Under >= +3pp.
-   Filter reasons are a flag next to the letter; they do not change it.
-   Bait is a separate flag (last 5 Maps 1-2 series all met or beat this line); it does not change the projection, probability, or letter. */
+/* Grader model (browser + node). JS copy of grader.py: keep the two in step (python parity_check.py compares them).
+   Active letters for new grades: v1 projection (35% L10, 20% all series, 20% H2H, 15% same rank tier, 10% L3, then a
+   small ADR adjustment) and v1 cutoffs on (proj-line)/line: A+ >= +0.15, B >= +0.05, C >= -0.02, D >= -0.10, else F.
+   Pick is OVER if proj >= line, else UNDER. When the pick is Under and the letter is D or F, v2 negative-binomial
+   P(under) with a 0.7 line blend vs book break-even decides F (>= +3pp) vs D. No hit-rate letter override, no plain A.
+   Filter reasons and the bait flag do not change the letter or pick. Already-locked props keep their stored letter. */
 (function(root){
 'use strict';
 // PARAMS: tuned by backtest.py on the early slice. MUST match PARAMS in grader.py.
-var PARAMS={"m": 100, "half_life": 8, "n_max": 200, "m_team": 1500, "elo_k": 16, "beta": 0.25, "rd_a": 17.34, "rd_b": 16.18, "h2h_min": 1, "h2h_w": 0.1, "w_line": 0.7, "g_kills": 0.6573, "g_hs": 0.3404, "size_kills": 20.0, "size_hs": 16.0, "min_series": 8, "grade_a": 4.0, "grade_b": 0.0, "grade_f": 3.0, "w_rank": 0.25, "rank_s": 1.0, "w_maps": 0.25, "k_maps": 6.0, "w_hr": 0.0, "k_hr": 5.0, "w_hr_l5": 0.25, "w_hr_l10": 0.25, "w_hr_l20": 0.25, "w_hr_szn": 0.25, "hr_upgrade_a": 0.8, "hr_upgrade_b": 0.7, "hr_szn_min": 8, "w_l5": 0.1, "w_l10": 0.05, "w_l20": 0.05, "w_szn": 0.05, "w_kd": 0.1, "k_kd": 40.0,
+var PARAMS={"m": 100, "half_life": 8, "n_max": 200, "m_team": 1500, "elo_k": 16, "beta": 0.25, "rd_a": 17.34, "rd_b": 16.18, "h2h_min": 1, "h2h_w": 0.1, "w_line": 0.7, "g_kills": 0.6573, "g_hs": 0.3404, "size_kills": 20.0, "size_hs": 16.0, "min_series": 8, "grade_a": 4.0, "grade_b": 0.0, "grade_f": 3.0, "w_rank": 0.25, "rank_s": 1.0, "w_maps": 0.25, "k_maps": 6.0, "w_hr": 0.0, "k_hr": 5.0, "w_hr_l5": 0.25, "w_hr_l10": 0.25, "w_hr_l20": 0.25, "w_hr_szn": 0.25, "hr_upgrade_a": 0.0, "hr_upgrade_b": 0.0, "hr_szn_min": 8, "w_l5": 0.1, "w_l10": 0.05, "w_l20": 0.05, "w_szn": 0.05, "w_kd": 0.1, "k_kd": 40.0,
  "w_hs5": 0.3, "w_hs10": 0.2, "w_hs20": 0.15, "w_hsszn": 0.1, "w_khs5": 0.1, "w_khs10": 0.05, "w_khs15": 0.025, "w_khsszn": 0.0, "k_hsp": 30.0, "w_hkd": -0.1};
 // w_hs* / w_khs* / k_hsp: HS% form inputs for the headshots / kills projection. See grader.py.
 var HS_WIN=["5","10","20","szn"];  // headshots-projection HS% windows
 var KHS_WIN=["5","10","15","szn"];  // kills-projection HS% factor windows (no L20)
 // w_l5..w_szn, w_kd, k_kd: kill-model form inputs (kills props only). See grader.py.
 // w_hr / k_hr: hit rate vs the current line blended into P(over) (0 = shown, not used). See grader.py.
-// w_hr_l5 / w_hr_l10 / w_hr_l20 / w_hr_szn, hr_upgrade_a / hr_upgrade_b / hr_szn_min: letter override from the
-//   equal-weight blend of L5 / L10 / L20 / season over-rates vs this line (L20 is used here even though cards show L15). See grader.py.
+// w_hr_l5 / w_hr_l10 / w_hr_l20 / w_hr_szn, hr_upgrade_a / hr_upgrade_b / hr_szn_min: letter override (shipped OFF, thresholds 0). See grader.py.
 // Cito features (w_rank, rank_s, w_maps, k_maps): only active when team_strength.json is loaded; see grader.py for the meaning.
-var BOOK_BE={"prizepicks":0.577,"underdog":0.53},DEFAULT_BE=0.577,VERSION='v2';
+var BOOK_BE={"prizepicks":0.577,"underdog":0.53},DEFAULT_BE=0.577,VERSION='v1be';
 var TEAM_ALIASES={"betm33": "33", "wraithpcific": "pcific", "lowcortisolbr": "lowcortisol", "lifesagame": "lag"};
 var SKIP={team:1,esports:1,esport:1,gaming:1,club:1};
 function norm(s){return String(s||'').toLowerCase().replace(/[^a-z0-9]/g,'')}
@@ -35,9 +34,9 @@ function pOverNP(mu,size,line){var r=nbProbs(mu,size,line);return r[0]/Math.max(
 function lineMean(line,size){var lo=0,hi=2*line+10;for(var i=0;i<50;i++){var mid=(lo+hi)/2;if(pOverNP(mid,size,line)<0.5)lo=mid;else hi=mid}return(lo+hi)/2}
 function blendMean(mu,line,size,w){return w<=0?mu:w*lineMean(line,size)+(1-w)*mu}
 function lowerBound(a,x){var lo=0,hi=a.length;while(lo<hi){var m=(lo+hi)>>1;if(a[m]<x)lo=m+1;else hi=m}return lo}
-function combos(p){var by={},order=[];(p.logs||[]).forEach(function(l){if((l.n===1||l.n===2)&&l.mid!=null){var g=by[l.mid];if(!g){g=by[l.mid]={mid:l.mid,date:l.date,opp:l.opp,m:{},kills:0,hs:0,hsOk:true,rd:0,rdOk:true,d:0,dOk:true};order.push(l.mid)}
-  g.m[l.n]=l.map||'';g.kills+=Number(l.kills)||0;if(l.hs==null)g.hsOk=false;else g.hs+=Number(l.hs)||0;if(l.d==null)g.dOk=false;else g.d+=Number(l.d)||0;if(l.rd==null||l.rd<13)g.rdOk=false;else g.rd+=Number(l.rd)}});
- var out=[];order.forEach(function(m){var g=by[m];if(g.m[1]!=null&&g.m[2]!=null)out.push({mid:String(g.mid),date:g.date||'',opp:g.opp,kills:g.kills,hs:g.hsOk?g.hs:null,rd:g.rdOk?g.rd:null,deaths:g.dOk?g.d:null})});
+function combos(p){var by={},order=[];(p.logs||[]).forEach(function(l){if((l.n===1||l.n===2)&&l.mid!=null){var g=by[l.mid];if(!g){g=by[l.mid]={mid:l.mid,date:l.date,opp:l.opp,m:{},kills:0,hs:0,hsOk:true,rd:0,rdOk:true,d:0,dOk:true,adr:[]};order.push(l.mid)}
+  g.m[l.n]=l.map||'';g.kills+=Number(l.kills)||0;if(l.hs==null)g.hsOk=false;else g.hs+=Number(l.hs)||0;if(l.d==null)g.dOk=false;else g.d+=Number(l.d)||0;if(l.rd==null||l.rd<13)g.rdOk=false;else g.rd+=Number(l.rd);if(l.adr!=null)g.adr.push(Number(l.adr))}});
+ var out=[];order.forEach(function(m){var g=by[m];if(g.m[1]!=null&&g.m[2]!=null)out.push({mid:String(g.mid),date:g.date||'',opp:g.opp,kills:g.kills,hs:g.hsOk?g.hs:null,rd:g.rdOk?g.rd:null,deaths:g.dOk?g.d:null,adr:g.adr.length?g.adr.reduce(function(s,x){return s+x},0)/g.adr.length:null})});
  out.sort(function(a,b){if(a.date!==b.date)return a.date<b.date?1:-1;return a.mid===b.mid?0:(a.mid<b.mid?1:-1)});return out}
 // team_strength.json (cito_update.py): dated ranking lists and team map stats. Same as prep_strength in grader.py.
 // players.json fmt 2 (compact, see encode_players in grader.py) -> plain {players:[{name,team,logs:[{...}]}]}. Plain data is returned as is.
@@ -66,8 +65,8 @@ function mapRounds(ctx,team,opp,before,base){var sa=latest(ctx.S.maps[tn(team)],
  function pickE(sn){var names=Object.keys(sn).sort(),w=names.map(function(m){return sn[m][2]}),tw=w.reduce(function(u,v){return u+v},0);
   if(tw<=0){w=names.map(function(m){return sn[m][0]});tw=w.reduce(function(u,v){return u+v},0)}if(tw<=0)return null;var t=0;names.forEach(function(m,i){t+=w[i]*rdm(m)});return t/tw}
  var es=[sa?pickE(sa):null,sb?pickE(sb):null].filter(function(e){return e!=null});return es.length?es.reduce(function(u,v){return u+v},0)/es.length:null}
-function build(players,params,strength){var P={},k;for(k in PARAMS)P[k]=PARAMS[k];if(params)for(k in params)P[k]=params[k];
- var ctx={P:P,players:players,ser:new Map(),eloHist:{},teamCum:{},teamMids:{},S:prepStrength(strength)};
+function build(players,params,strength,ranks){var P={},k;for(k in PARAMS)P[k]=PARAMS[k];if(params)for(k in params)P[k]=params[k];
+ var ctx={P:P,players:players,ranks:ranks||{},ser:new Map(),eloHist:{},teamCum:{},teamMids:{},S:prepStrength(strength)};
  var maps=[],seen={},teamRows={};
  players.forEach(function(p){var t=tn(p.team);(p.logs||[]).forEach(function(l){var rd=l.rd,rw=l.rw,key=String(l.mid)+'|'+String(l.n);
    if(typeof rd==='number'&&typeof rw==='number'&&rd>=13&&rw*2!==rd&&!seen[key]){seen[key]=1;maps.push([l.date||'',Number(l.mid)||0,Number(l.n)||0,t,tn(l.opp),rw*2>rd?1:0])}});
@@ -140,14 +139,47 @@ function finish(ctx,mu,line,st,book,odds,reasons,hr,hits){var P=ctx.P,size=st===
  if(hu.upgrade==='A+'||(hu.upgrade==='B'&&g!=='A+')){if(modelPick==='UNDER')reasons.push('model leans Under; hit-rate grade is Over');pick='OVER';g=hu.upgrade}
  return{proj:mu,muBlend:muF,edge:mu-line,grade:g,pick:pick,pOver:po,pPush:r[1],pPick:pp,be:be,edgePP:epp,reasons:reasons,flag:reasons.join('; '),model:VERSION,
   hrBlend:hu.blend,hrUpgrade:hu.upgrade,modelGrade:modelGrade,modelPick:modelPick}}
-function grade(ctx,p,st,line,opp,o){o=o||{};if(line==null||isNaN(line))return null;var pr=project(ctx,p,st,opp,o.team||p.team,o.before);if(!pr)return null;
- var hits=hitrates(ctx,p,st,+line,opp,o.before),r=finish(ctx,pr.mu,+line,st,o.book,o.odds,filters(ctx,p,o.team,pr.n,o.before),hits.p,hits);
- r.hits={l5:hits.l5,l10:hits.l10,l15:hits.l15,l20:hits.l20,szn:hits.szn,h2h:hits.h2h};r.pHr=hits.p;r.h2hN=pr.h2h;r.h2hRate=pr.h2hRate;r.n=pr.n;r.rounds=pr.rounds;r.roundsElo=pr.roundsElo;r.roundsMaps=pr.roundsMaps;r.pRank=pr.pRank;r.kd=pr.form.kd;r.kpm=pr.form.kpm;r.formN=pr.form.n;r.hsp={l5:pr.hsf.raw['5'],l10:pr.hsf.raw['10'],l15:pr.hsf.raw['15'],l20:pr.hsf.raw['20'],szn:pr.hsf.raw.szn};r.hspN={l5:pr.hsf.n['5'],l10:pr.hsf.n['10'],l15:pr.hsf.n['15'],l20:pr.hsf.n['20'],szn:pr.hsf.n.szn};r.pwin=pr.pwin;r.rate=pr.rate;r.prior=pr.prior;r.adj=pr.adj;r.cs=pr.cs;r.nRate=pr.nRate;r.bait=isBait(ctx,p,st,+line,o.before);return r}
+function round1(x){return Math.round(x*10+(x>=0?1e-8:-1e-8))/10}
+function avg(a){return a.length?a.reduce(function(s,x){return s+x},0)/a.length:null}
+function rankOf(ctx,name){var k=norm(name),r=ctx.ranks||{},t;for(t in r){if(norm(t)===k)return r[t]}return null}
+function tier(r){return r<=5?'t5':r<=15?'t15':r<=30?'t30':'t31'}
+var V1_UNDER_W_LINE=0.7;
+function v1Shade(proj,line){if(line==null||isNaN(line)||+line===0)return null;var edge=proj-+line,pct=edge/+line;
+ var g=pct>=0.15?'A+':pct>=0.05?'B':pct>=-0.02?'C':pct>=-0.10?'D':'F',pick=edge>=0?'OVER':'UNDER';return{grade:g,pick:pick}}
+function underBeLetter(grade,pick,proj,line,st,book,odds,P){if(pick!=='UNDER'||(grade!=='D'&&grade!=='F'))return{grade:grade,pick:pick,epp:null,be:null,pu:null};
+ var size=st==='kills'?P.size_kills:P.size_hs,mu=round1(proj),muF=blendMean(mu,+line,size,V1_UNDER_W_LINE),r=nbProbs(muF,size,+line),pu=r[2]/Math.max(1e-12,1-r[1]),be=breakEven(book,odds),epp=(pu-be)*100;
+ return{grade:epp>=(P.grade_f!=null?P.grade_f:3)?'F':'D',pick:pick,epp:epp,be:be,pu:pu}}
+function v1Project(ctx,p,st,opp,before){before=before||'9999';var cs=series(ctx,p).filter(function(c){return c.date<before});
+ function nums(rows){return rows.map(function(c){return c[st]}).filter(function(x){return x!=null})}
+ var v=nums(cs);if(!v.length)return null;var oppRank=opp?rankOf(ctx,opp):null,on=norm(opp);
+ var comp=[[0.35,avg(nums(cs.slice(0,10)))],[0.20,avg(v)]];
+ var h=opp?cs.filter(function(c){return norm(c.opp)===on}):[];comp.push([0.20,avg(nums(h))]);
+ var same=[];if(oppRank!=null){var tr=tier(oppRank);cs.forEach(function(c){var r=rankOf(ctx,c.opp);if(r!=null&&tier(r)===tr)same.push(c)})}
+ comp.push([0.15,avg(nums(same))]);comp.push([0.10,avg(nums(cs.slice(0,3)))]);
+ var use=comp.filter(function(x){return x[1]!=null}),tw=use.reduce(function(s,x){return s+x[0]},0);if(!tw)return null;
+ var proj=use.reduce(function(s,x){return s+x[1]*x[0]},0)/tw;
+ var adr5=avg(cs.slice(0,5).map(function(c){return c.adr}).filter(function(x){return x!=null}));
+ var adrc=avg(cs.map(function(c){return c.adr}).filter(function(x){return x!=null}));
+ if(adr5!=null&&adrc)proj*=Math.max(0.95,Math.min(1.05,1+0.5*(adr5/adrc-1)));
+ return proj}
+function v1Result(ctx,mu,line,st,book,odds,reasons){var sh=v1Shade(mu,line);if(!sh)return null;var proj=round1(mu),ub=underBeLetter(sh.grade,sh.pick,proj,line,st,book,odds,ctx.P);
+ var size=st==='kills'?ctx.P.size_kills:ctx.P.size_hs,muF=blendMean(proj,+line,size,ctx.P.w_line),r=nbProbs(muF,size,+line),np=Math.max(1e-12,1-r[1]),po=r[0]/np,pu=r[2]/np,be=breakEven(book,odds),pPick,epp;
+ if(ub.epp!=null){epp=ub.epp;pPick=ub.pu;be=ub.be}else{pPick=Math.max(po,pu);epp=(pPick-be)*100}
+ reasons=(reasons||[]).slice();
+ return{proj:proj,muBlend:muF,edge:proj-+line,grade:ub.grade,pick:ub.pick,pOver:po,pPush:r[1],pPick:pPick,be:be,edgePP:epp,reasons:reasons,flag:reasons.join('; '),model:VERSION,hrBlend:null,hrUpgrade:null,modelGrade:ub.grade,modelPick:ub.pick}}
+function grade(ctx,p,st,line,opp,o){o=o||{};if(line==null||isNaN(line))return null;var mu=v1Project(ctx,p,st,opp,o.before);if(mu==null)return null;
+ var nV1=series(ctx,p).filter(function(c){return c.date<(o.before||'9999')}).length;
+ var r=v1Result(ctx,mu,+line,st,o.book,o.odds,filters(ctx,p,o.team,nV1,o.before));if(!r)return null;
+ var hits=hitrates(ctx,p,st,+line,opp,o.before);r.hits={l5:hits.l5,l10:hits.l10,l15:hits.l15,l20:hits.l20,szn:hits.szn,h2h:hits.h2h};r.pHr=hits.p;
+ var pr=project(ctx,p,st,opp,o.team||p.team,o.before);
+ if(pr){r.h2hN=pr.h2h;r.h2hRate=pr.h2hRate;r.n=pr.n;r.rounds=pr.rounds;r.roundsElo=pr.roundsElo;r.roundsMaps=pr.roundsMaps;r.pRank=pr.pRank;r.kd=pr.form.kd;r.kpm=pr.form.kpm;r.formN=pr.form.n;r.hsp={l5:pr.hsf.raw['5'],l10:pr.hsf.raw['10'],l15:pr.hsf.raw['15'],l20:pr.hsf.raw['20'],szn:pr.hsf.raw.szn};r.hspN={l5:pr.hsf.n['5'],l10:pr.hsf.n['10'],l15:pr.hsf.n['15'],l20:pr.hsf.n['20'],szn:pr.hsf.n.szn};r.pwin=pr.pwin;r.rate=pr.rate;r.prior=pr.prior;r.adj=pr.adj;r.cs=pr.cs;r.nRate=pr.nRate}
+ else{r.h2hN=0;r.h2hRate=null;r.n=nV1;r.rounds=null;r.roundsElo=null;r.roundsMaps=null;r.pRank=null;r.kd=null;r.kpm={l5:null,l10:null,l15:null,l20:null,szn:null};r.formN={l5:0,l10:0,l15:0,l20:0,szn:0};r.hsp={l5:null,l10:null,l15:null,l20:null,szn:null};r.hspN={l5:0,l10:0,l15:0,l20:0,szn:0};r.pwin=null;r.rate=null;r.prior=null;r.adj=null;r.cs=null;r.nRate=null}
+ r.bait=isBait(ctx,p,st,+line,o.before);return r}
 function gradeCombo(ctx,ps,names,st,line,opp,o){o=o||{};var mu=0,reasons=[],nmin=999,parts=[];
- for(var i=0;i<ps.length;i++){var p=ps[i],pr=project(ctx,p,st,opp,o.team||p.team,o.before);if(!pr)return null;mu+=pr.mu;nmin=Math.min(nmin,pr.n);parts.push({name:p.name,proj:pr.mu,n:pr.n});
-  filters(ctx,p,o.team,pr.n,o.before).forEach(function(x){reasons.push(names[i]+': '+x)})}
- var r=finish(ctx,mu,+line,st,o.book,o.odds,reasons);r.n=nmin;r.parts=parts;r.bait=false;return r}
+ for(var i=0;i<ps.length;i++){var p=ps[i],pj=v1Project(ctx,p,st,opp,o.before);if(pj==null)return null;mu+=pj;var nser=series(ctx,p).filter(function(c){return c.date<(o.before||'9999')}).length;nmin=Math.min(nmin,nser);parts.push({name:p.name,proj:pj,n:nser});
+  filters(ctx,p,o.team,nser,o.before).forEach(function(x){reasons.push(names[i]+': '+x)})}
+ var r=v1Result(ctx,mu,+line,st,o.book,o.odds,reasons);if(!r)return null;r.n=nmin;r.parts=parts;r.bait=false;return r}
 var api={PARAMS:PARAMS,VERSION:VERSION,TEAM_ALIASES:TEAM_ALIASES,tn:tn,teq:teq,norm:norm,breakEven:breakEven,americanBe:americanBe,nbProbs:nbProbs,lineMean:lineMean,
- build:build,decodePlayers:decodePlayers,hitrates:hitrates,isBait:isBait,prepStrength:prepStrength,pRank:pRank,pwin:pwin,mapRounds:mapRounds,series:series,elo:elo,project:project,filters:filters,finish:finish,grade:grade,gradeCombo:gradeCombo};
+ build:build,decodePlayers:decodePlayers,hitrates:hitrates,isBait:isBait,prepStrength:prepStrength,pRank:pRank,pwin:pwin,mapRounds:mapRounds,series:series,elo:elo,project:project,v1Project:v1Project,filters:filters,finish:finish,grade:grade,gradeCombo:gradeCombo};
 if(typeof module!=='undefined'&&module.exports)module.exports=api;else root.GPModel=api;
 })(typeof window!=='undefined'?window:this);
