@@ -1,12 +1,25 @@
 (function(){
 'use strict';
 var $=function(i){return document.getElementById(i)};
-// GRADER_MODE: 'shadow' = new grades (projection pulled 60% back to the line, +4% bias shift). Change to 'live' to go back to the old grades. Locked picks never change.
-var GRADER_MODE='shadow',SH_K=0.4,SH_B=0.04;
-function shGrade(pct){ // returns [grade,pick]
- if(GRADER_MODE!=='shadow'){return [pct>=.15?'A+':pct>=.05?'B':pct>=-.02?'C':pct>=-.10?'D':'F',null]}
- var pc=SH_K*pct+SH_B;return [pc>=.08?'A+':pc>=.05?'B':pc>=0?'C':pc>=-.04?'D':'F',pc>=0?'OVER':'UNDER']}
-var DB=[],RANK={},GAMES=[],LINES=[],HIST=null,META={updated:'',lines_at:'',games_at:'',games_iso:''};
+// Grades come from model.js (GPModel, grader v2): probability of the pick vs the book's break-even.
+// Letter = direction + strength, from the lean side's chance vs the book break-even (edge in percentage points):
+//   A = Over +6pp or more (excellent Over) · B = Over +3pp (lean Over) · C = Over under +3pp (slight Over lean)
+//   D = Under under +3pp (slight Under lean) · F = Under +3pp or more (take the Under). No A+, no E.
+// Filter reasons (few series, team mismatch, stand-in) show as a flag next to the letter. The old +4% Over shift is gone.
+// Locked picks never change; old-grader locks show as e.g. "A+ (old)".
+var GLABEL={'A':'Excellent Over','B':'Lean Over','C':'Slight Over lean','D':'Slight Under lean','F':'Take the Under'};
+var GRADE_LEGEND='Grades (chance of the lean side minus the book break-even): A = Over +6pp or more, B = Over +3pp or more, C = slight Over lean (under +3pp), D = slight Under lean (under +3pp), F = Under +3pp or more. A flag means a filter fired (few series, team mismatch, stand-in).';
+function isPlay(g){return !!g&&(g.grade==='A'||g.grade==='B'||g.grade==='F')&&!(g.reasons&&g.reasons.length)}
+// hit-rate boxes vs the current line (x/n series over, earlier Maps 1-2 series only): green above 50%, red below
+function hitBoxes(h){if(!h)return '';return '<div class="hbs">'+[['L5','l5'],['L10','l10'],['L20','l20'],['H2H','h2h'],['SZN','szn']].map(function(a){var v=h[a[1]]||[0,0],x=v[0],n=v[1],c=n?(x/n>0.5?' g':x/n<0.5?' r':''):' na';return '<span class="hb'+c+'" title="'+a[0]+': went over this line in '+x+' of '+n+' series"><i>'+a[0]+'</i>'+(n?x+'/'+n:'–')+'</span>'}).join('')+'</div>'}
+function pillTxt(g){return g.grade+' '+g.pick+(g.reasons&&g.reasons.length?' ⚑':'')}
+function glabel(m){return GLABEL[m.grade]+' · '+m.pick+' '+pc1(m.pPick)+(m.reasons&&m.reasons.length?' · ⚑ '+m.reasons.join('; '):'')}
+function oldG(lk){return !lk?'':lk.model==='v2'?lk.grade:lk.grade+' (old)'} // old-grader letters meant something else: keep them apart
+function gradesIn(rows){var all=['A','B','C','D','F','A+ (old)','B (old)','C (old)','D (old)','F (old)'];rows.forEach(function(x){if(all.indexOf(x.grade)<0)all.push(x.grade)});return all.filter(function(G){return rows.some(function(x){return x.grade===G})})}
+var MCTX=null,MCTXN=-1;
+function mctx(){if(!MCTX||MCTXN!==DB.length){MCTX=GPModel.build(DB,null,STRENGTH);MCTXN=DB.length}return MCTX} // STRENGTH = team_strength.json (Cito-derived), null if absent
+function pc1(x){return x==null||isNaN(x)?'–':(x*100).toFixed(1)+'%'}
+var STRENGTH=null,DB=[],RANK={},GAMES=[],LINES=[],HIST=null,META={updated:'',lines_at:'',games_at:'',games_iso:''};
 var TABS=[['dash','⌂','Dashboard'],['games','▦','Games'],['lines','↗','Lines'],['grader','⚡','Grader'],['slip','◎','Slip'],['players','☰','Players']];
 var tab='dash',slip=[],manual=[],sel={player:'',stat:'kills',line:'',opp:''};
 function load(k,d){try{var v=localStorage.getItem(k);return v?JSON.parse(v):d}catch(e){return d}}
@@ -33,7 +46,7 @@ function tier(r){return r<=5?'Top 5':r<=15?'Top 6-15':r<=30?'Top 16-30':'Top 31+
 function cday(iso){var d=iso?new Date(iso):new Date();if(isNaN(d))return '';var o={};new Intl.DateTimeFormat('en-US',{timeZone:'America/Chicago',year:'numeric',month:'2-digit',day:'2-digit'}).formatToParts(d).forEach(function(p){o[p.type]=p.value});return o.year+'-'+o.month+'-'+o.day}
 function addDays(ymd,n){var d=new Date(ymd+'T12:00:00Z');d.setUTCDate(d.getUTCDate()+n);return d.toISOString().slice(0,10)}
 function dayLabel(ymd){var t=cday();if(ymd===t)return 'Today';if(ymd===addDays(t,1))return 'Tomorrow';return new Intl.DateTimeFormat('en-US',{timeZone:'UTC',weekday:'short',month:'short',day:'numeric'}).format(new Date(ymd+'T12:00:00Z'))}
-function tn(s){var skip={team:1,esports:1,esport:1,gaming:1,club:1};return String(s||'').toLowerCase().split(/[^a-z0-9]+/).filter(function(w){return w&&!skip[w]}).join('')}
+function tn(s){return GPModel.tn(s)} // team key with book/bo3.gg aliases (model.js TEAM_ALIASES)
 function teq(a,b){a=tn(a);b=tn(b);return !!a&&a===b}
 function NOW(){return Date.now()}
 function boN(b){var n=parseInt(String(b==null?'':b).replace(/\D/g,''),10);return isNaN(n)?null:n}
@@ -58,57 +71,52 @@ function pickBest(a){return a.slice().sort(function(x,y){return nlogs(y)-nlogs(x
 function find(name,team){
  var ix=pIndex(),k=norm(name),mk=k+'|'+norm(team||'');if(mk in FM)return FM[mk];
  var r=null,ex=ix.exact[k];
- if(ex){r=(team&&ex.filter(function(p){return teq(p.team,team)})[0])||pickBest(ex)}
- if(!r&&ALIASES[name]){var a=ix.exact[norm(ALIASES[name])];if(a)r=pickBest(a)}
+ var onTeam=function(a){return team?(a||[]).filter(function(p){return teq(p.team,team)}):(a||[])};
+ if(ex){var exT=onTeam(ex);if(exT.length)r=pickBest(exT)}
+ if(!r&&ALIASES[name]){var a=onTeam(ix.exact[norm(ALIASES[name])]);if(a.length)r=pickBest(a)}
  if(!r&&k.length>=3){
   var cs=ix.canon[canon(name)];
-  if(cs){var same=team?cs.filter(function(p){return teq(p.team,team)}):[];var pool=same.length?same:cs;if(pool.length===1||same.length===1)r=pool[0]}
+  if(cs){var pool=onTeam(cs);if(pool.length===1)r=pool[0]}
  }
  if(!r&&team){ // same team only: one name contained in the other (tags like "EP.-4Z"), real history required
   var c=canon(name),cand=DB.filter(function(p){if(!teq(p.team,team)||nlogs(p)<6)return false;var d=canon(p.name),sh=d.length<c.length?d:c,lo=d.length<c.length?c:d;return sh.length>=4&&lo.indexOf(sh)>-1});
   if(cand.length===1)r=cand[0]}
  FM[mk]=r||undefined;return FM[mk]}
-// ---- grader: 35% recent 10, 20% career (all logged), 20% H2H, 15% vs same rank tier, 10% form/context (last 3)
-function grade(p,st,line,opp){var cs=combos(p);var v=nums(cs,st);if(!v.length||isNaN(line))return null;
- var oppRank=opp?rankOf(opp):null,oppN=norm(opp);
- var comp=[{k:'Recent (last 10)',w:.35,v:mean(nums(cs.slice(0,10),st)),n:Math.min(10,v.length)},
-  {k:'Career (all logged)',w:.20,v:mean(v),n:v.length}];
- var h=opp?cs.filter(function(c){return norm(c.opp)===oppN}):[];comp.push({k:'H2H vs '+(opp||'opponent'),w:.20,v:mean(nums(h,st)),n:nums(h,st).length});
- var same=oppRank?cs.filter(function(c){var r=rankOf(c.opp);return r&&tier(r)===tier(oppRank)}):[];comp.push({k:'Vs same rank'+(oppRank?' ('+tier(oppRank)+')':''),w:.15,v:mean(nums(same,st)),n:nums(same,st).length});
- comp.push({k:'Form (last 3)',w:.10,v:mean(nums(cs.slice(0,3),st)),n:Math.min(3,v.length)});
- var use=comp.filter(function(c){return c.v!=null}),tw=use.reduce(function(a,c){return a+c.w},0);
- var proj=use.reduce(function(a,c){return a+c.v*c.w/tw},0);
- var ar=mean(cs.slice(0,5).map(function(c){return c.adr}).filter(function(x){return x!=null})),ac=mean(cs.map(function(c){return c.adr}).filter(function(x){return x!=null})),ff=1;
- if(ar!=null&&ac){ff=Math.max(.95,Math.min(1.05,1+0.5*(ar/ac-1)));proj*=ff}
- var adjNote=ar!=null&&ac?'Form factor from ADR (last 5 '+ar.toFixed(0)+' vs career '+ac.toFixed(0)+'): x'+ff.toFixed(3)+', capped at +/-5%':'No ADR in the data yet, so no form factor applied';
- var edge=proj-line,pct=edge/line;
- var sg=shGrade(pct),g=sg[0];
+// ---- grader v2 (model.js): decayed per-round rate shrunk to the team, Elo strength + expected rounds, negative binomial P(over)
+// o = {team, book, odds, before}; before = 'YYYY-MM-DD' grades with data from before that day only (track record)
+function grade(p,st,line,opp,o){o=o||{};var cs=combos(p);var v=nums(cs,st);if(!v.length||isNaN(line))return null;
+ var m=GPModel.grade(mctx(),p,st,line,opp,{team:o.team||'',book:o.book,odds:o.odds,before:o.before});if(!m)return null;
  var last=nums(cs.slice(0,10),st),over=last.filter(function(x){return x>line}).length;
- var label={'A+':'Excellent Over','B':'Lean Over','C':'Risk Lean Over','D':'Lean Under','F':'Terrible Take Under'}[g];
- return{player:p.name,team:p.team,stat:st,line:line,opp:opp||'',proj:+proj.toFixed(1),edge:+edge.toFixed(1),grade:g,label:label,pick:sg[1]||(edge>=0?'OVER':'UNDER'),comp:comp,over:over,of:last.length,sd:+sd(last).toFixed(1),cs:cs,adj:adjNote}}
+ var comp=[{k:'Per-round rate (decayed, shrunk to team)',v:m.rate,n:m.nRate,f:3},{k:'Team prior per round',v:m.prior,n:null,f:3},{k:'Win chance vs '+(opp||'opponent')+' (Elo)',v:m.pwin*100,n:null,f:1,u:'%'},
+  {k:'Strength adjustment',v:m.adj,n:null,f:3,u:'x'},{k:'Expected rounds, Maps 1-2',v:m.rounds,n:null,f:1}];
+ if(m.pRank!=null)comp.splice(3,0,{k:'Win chance from VRS / world ranking (Cito, blended in)',v:m.pRank*100,n:null,f:1,u:'%'});
+ if(m.roundsMaps!=null)comp.push({k:'Expected rounds from team map stats (Cito, blended in)',v:m.roundsMaps,n:null,f:1});
+ var adj='Projection '+m.proj.toFixed(1)+' = rate x adjustment x expected rounds. P(over) '+pc1(m.pOver)+(m.pPush>0.0005?' (push '+pc1(m.pPush)+')':'')+'. Break-even '+pc1(m.be)+(o.book?' ('+o.book+')':' (PrizePicks default)')+'. Edge '+(m.edgePP>=0?'+':'')+m.edgePP.toFixed(1)+'pp'+(m.reasons.length?'. No play: '+m.reasons.join('; '):'');
+ var label=glabel(m);
+ return{player:p.name,team:p.team,stat:st,line:line,opp:opp||'',proj:+m.proj.toFixed(1),edge:+m.edge.toFixed(1),grade:m.grade,label:label,pick:m.pick,pOver:m.pOver,pPick:m.pPick,be:m.be,edgePP:m.edgePP,reasons:m.reasons,comp:comp,over:over,of:last.length,sd:+sd(last).toFixed(1),cs:cs,adj:adj,book:o.book||'',hits:m.hits||null}}
 // ---- combo props ("A + B + C"): sum of each player's own projection vs the combined line
 function isCombo(n){return String(n||'').indexOf('+')>-1}
-function gradeCombo(name,team,st,line,opp){
+function gradeCombo(name,team,st,line,opp,o){o=o||{};
  var names=String(name).split('+').map(function(x){return x.trim()}).filter(Boolean);if(names.length<2||isNaN(line))return null;
- var parts=[],proj=0,series=[];
- for(var i=0;i<names.length;i++){var p=find(names[i],team);if(!p)return{missing:names[i]};var g=grade(p,st,1,opp);if(!g)return{missing:names[i]};
-  parts.push({name:p.name,proj:g.proj,n:g.cs.length});proj+=g.proj;series.push(g.cs)}
+ var ps=[],series=[];
+ for(var i=0;i<names.length;i++){var p=find(names[i],team);if(!p)return{missing:names[i]};ps.push(p);series.push(combos(p))}
+ var m=GPModel.gradeCombo(mctx(),ps,names,st,line,opp,{team:team||'',book:o.book,odds:o.odds,before:o.before});if(!m)return{missing:names[0]};
+ var parts=m.parts.map(function(x){return{name:x.name,proj:+x.proj.toFixed(1),n:x.n}}),proj=m.proj;
  var joint=[];if(series.length){series[0].forEach(function(c0){var rows=[c0],ok=true;for(var j=1;j<series.length;j++){var m=series[j].filter(function(c){return String(c.mid)===String(c0.mid)})[0];if(!m){ok=false;break}rows.push(m)}
   if(!ok||rows.some(function(r){return r[st]==null}))return;joint.push({mid:c0.mid,date:c0.date,opp:c0.opp,maps:c0.maps,kills:rows.reduce(function(a,r){return a+r.kills},0),hs:rows.every(function(r){return r.hs!=null})?rows.reduce(function(a,r){return a+r.hs},0):null})})}
- proj=+proj.toFixed(1);var edge=proj-line,pct=edge/line;
- var sg=shGrade(pct),gr=sg[0];
- var label={'A+':'Excellent Over','B':'Lean Over','C':'Risk Lean Over','D':'Lean Under','F':'Terrible Take Under'}[gr];
+ proj=+proj.toFixed(1);var edge=proj-line;
+ var label=glabel(m);
  var last=nums(joint.slice(0,10),st),over=last.filter(function(x){return x>line}).length;
- return{player:name,team:team||'',stat:st,line:line,opp:opp||'',proj:proj,edge:+edge.toFixed(1),grade:gr,label:label,pick:sg[1]||(edge>=0?'OVER':'UNDER'),
-  comp:parts.map(function(x){return{k:x.name+' projection',w:null,v:x.proj,n:x.n}}),over:over,of:last.length,sd:+sd(last).toFixed(1),cs:joint,
-  adj:'Combo: the sum of each player\'s own projection ('+parts.map(function(x){return x.name+' '+x.proj}).join(' + ')+'). Chart and over count use only series where all '+names.length+' played together'+(joint.length?' ('+joint.length+' found)':' (none found yet)')}}
-function gradeFor(name,team,st,line,opp){if(isCombo(name))return gradeCombo(name,team,st,line,opp);var p=find(name,team);return p?grade(p,st,line,opp):null}
-function gclass(g){return g==='A+'||g==='B'?'':g==='C'?' mid':' low'}
+ return{player:name,team:team||'',stat:st,line:line,opp:opp||'',proj:proj,edge:+edge.toFixed(1),grade:m.grade,label:label,pick:m.pick,pOver:m.pOver,pPick:m.pPick,be:m.be,edgePP:m.edgePP,reasons:m.reasons,
+  comp:parts.map(function(x){return{k:x.name+' projection',v:x.proj,n:x.n,f:1}}),over:over,of:last.length,sd:+sd(last).toFixed(1),cs:joint,book:o.book||'',
+  adj:'Combo: the sum of each player\'s own projection ('+parts.map(function(x){return x.name+' '+x.proj}).join(' + ')+'), P(over) '+pc1(m.pOver)+', break-even '+pc1(m.be)+', edge '+(m.edgePP>=0?'+':'')+m.edgePP.toFixed(1)+'pp'+(m.reasons.length?'. No play: '+m.reasons.join('; '):'')+'. Chart and over count use only series where all '+names.length+' played together'+(joint.length?' ('+joint.length+' found)':' (none found yet)')}}
+function gradeFor(name,team,st,line,opp,o){o=o||{};if(isCombo(name))return gradeCombo(name,team,st,line,opp,o);var p=find(name,team);return p?grade(p,st,line,opp,{team:team||'',book:o.book,odds:o.odds,before:o.before}):null}
+function gclass(g){return g==='A'||g==='B'||g==='F'?'':g==='C'||g==='D'?' mid':' low'}
 function sname(s){return s==='hs'?'Headshots Maps 1-2':'Kills Maps 1-2'}
 function normStat(s){s=String(s||'').toLowerCase();return s.indexOf('head')>-1||s==='hs'?'hs':s.indexOf('kill')>-1?'kills':null}
 // ---- all lines = feed + manual
 function allLines(){var out=[];LINES.concat(manual).forEach(function(l,i){var st=normStat(l.stat);if(!st)return;var per=String(l.period||'Maps 1-2');if(per.replace(/\s/g,'').toLowerCase().indexOf('maps1-2')<0&&per.indexOf('1-2')<0&&l.src!=='manual')return;
- var combo=isCombo(l.player),p=combo?null:find(l.player,l.team);var o={player:l.player,team:l.team||(p&&p.team)||'',stat:st,line:+l.line,opp:l.opponent||'',src:l.src||'feed',idx:i,book:l.book||'',start:l.starts_at||''};var G=gradeFor(l.player,l.team,st,o.line,o.opp);o.g=G&&!G.missing?G:null;o.miss=G&&G.missing?G.missing:'';out.push(o)});return out}
+ var combo=isCombo(l.player),p=combo?null:find(l.player,l.team);var o={player:l.player,team:l.team||(p&&p.team)||'',stat:st,line:+l.line,opp:l.opponent||'',src:l.src||'feed',idx:i,book:l.book||'',odds:l.odds,start:l.starts_at||''};var G=gradeFor(l.player,l.team,st,o.line,o.opp,{book:o.book,odds:o.odds});o.g=G&&!G.missing?G:null;o.miss=G&&G.missing?G.missing:'';out.push(o)});return out}
 // ---- views
 function chips(){var c=[];c.push('<span class="chip g">'+DB.length+' players</span>');c.push('<span class="chip">Stats updated '+esc(META.updated||'—')+'</span>');
  c.push('<span class="chip'+(liveGames().length?' g':'')+'">Games: '+(GAMES.length?liveGames().length+' live · '+upGames().length+' upcoming':'none loaded')+'</span>');c.push('<span class="chip">Lines: '+(LINES.length?LINES.length+' feed':'manual')+'</span>');c.push('<span class="chip">Opened '+ftime()+'</span>');$('chips').innerHTML=c.join('')}
@@ -117,10 +125,10 @@ function roster(team){return DB.filter(function(p){return teq(p.team,team)}).map
 function gameCard(g,full){var a=roster(g.team1),b=roster(g.team2);return '<div class="card"><div class="muted">'+esc(g.tournament||'')+' · '+esc(fmt(g.start))+(g.bo?' · Bo'+esc(g.bo):'')+'</div><div class="big">'+esc(g.team1)+' <span class="vs">vs</span> '+esc(g.team2)+'</div>'+
  (full?'<div class="muted">'+esc(g.team1)+(rankOf(g.team1)?' #'+rankOf(g.team1):'')+': '+(a.join(', ')||'no roster data')+'</div><div class="muted">'+esc(g.team2)+(rankOf(g.team2)?' #'+rankOf(g.team2):'')+': '+(b.join(', ')||'no roster data')+'</div>':'')+'<div class="btns"><button class="g" data-act="gamegrade" data-i="'+g.id+'">See props</button></div></div>'}
 function recents(){return load('gp_recent',[])}
-function viewDash(){var ls=allLines().filter(function(l){return l.g}).sort(function(a,b){return Math.abs(b.g.edge/b.line)-Math.abs(a.g.edge/a.line)}).slice(0,5),rc=recents(),dg=liveGames().concat(upGames());
+function viewDash(){var ls=allLines().filter(function(l){return l.g}).sort(function(a,b){return b.g.edgePP-a.g.edgePP}).slice(0,5),rc=recents(),dg=liveGames().concat(upGames());
  var h='<div class="card"><h2>Player search</h2><div class="row"><input id="ds" list="plist" placeholder="Search a player, e.g. donk"><button class="b" style="flex:0 0 auto;margin:0" data-act="dsearch">Stats</button></div>'+(rc.length?'<div class="btns" style="margin-top:6px"><span class="muted" style="align-self:center">Recent:</span>'+rc.map(function(n){return '<button class="g" data-act="plview" data-p="'+esc(n)+'">'+esc(n)+'</button>'}).join('')+'<button class="g" data-act="rclear">Clear</button></div>':'')+'</div>';
  h+='<div class="grid c2"><div class="card"><h2>Live + upcoming games · '+dg.length+'</h2>'+(dg.length?'<div class="scroll" style="max-height:560px;overflow-y:auto">'+dg.map(function(g){return '<div class="item"><div><b>'+esc(g.team1)+' <span class="vs">vs</span> '+esc(g.team2)+'</b>'+(g.status==='live'?' <span class="pill">LIVE</span>':'')+'<br><span class="muted">'+esc(g.tournament||'')+' · '+esc(fmt(g.start))+'</span></div><button class="g" style="margin:0" data-act="gamegrade" data-i="'+g.id+'">Props</button></div>'}).join('')+'</div>':'<div class="warn">No schedule loaded yet. Run the "Update CS2 games" workflow.</div>')+'</div>';
- h+='<div><div class="card"><h2>Top graded lines</h2>'+(ls.length?ls.map(function(l){return '<div class="item"><div><b>'+esc(l.player)+'</b> <span class="muted">'+esc(l.team)+'</span><br><span class="muted">'+sname(l.stat)+' · line '+l.line+' · proj '+l.g.proj+'</span></div><div><span class="pill '+(l.g.pick==='UNDER'?'u':'')+'">'+l.g.grade+' '+l.g.pick+'</span></div></div>'}).join(''):'<div class="warn">No lines yet. Add a PrizePicks line in the Lines tab.</div>')+'</div>';
+ h+='<div><div class="card"><h2>Top graded lines</h2>'+(ls.length?ls.map(function(l){return '<div class="item"><div><b>'+esc(l.player)+'</b> <span class="muted">'+esc(l.team)+'</span><br><span class="muted">'+sname(l.stat)+' · line '+l.line+' · proj '+l.g.proj+'</span></div><div><span class="pill '+(l.g.pick==='UNDER'?'u':'')+'">'+pillTxt(l.g)+'</span></div></div>'}).join(''):'<div class="warn">No lines yet. Add a PrizePicks line in the Lines tab.</div>')+'</div>';
  h+='<div class="card"><h2>Quick actions</h2><div class="btns"><button class="b" data-act="go" data-t="grader">Grade a prop</button><button class="g" data-act="go" data-t="lines">Lines</button><button class="g" data-act="go" data-t="slip">Slip ('+slip.length+')</button><button class="g" data-act="reload">Reload data</button></div></div></div></div>';return h+recordCard()+opts()}
 function liveCard(g){var sc=(g.s1!=null&&g.s2!=null)?' <span style="color:var(--green);margin-left:8px">'+g.s1+' – '+g.s2+'</span>':'';
  var ws=(g.streams||[]).filter(function(u){return /^https:\/\//.test(u)});
@@ -143,9 +151,9 @@ function viewLines(){var ls=allLines(),days=lineDays(ls),cnt={},t0=cday();
  var d=sel.ld;if(!d||(d!=='all'&&days.indexOf(d)<0))d=cnt[t0]?t0:(days.filter(function(x){return cnt[x]})[0]||'all');
  var h='<div class="btns" style="margin-bottom:8px">'+days.map(function(x){return '<button class="'+(d===x?'b':'g')+'" data-act="lday" data-d="'+x+'">'+esc(dayLabel(x))+' · '+(cnt[x]||0)+'</button>'}).join('')+'<button class="'+(d==='all'?'b':'g')+'" data-act="lday" data-d="all">All · '+ls.length+'</button></div>';
  var vis=[];ls.forEach(function(l,i){var k=l.start?cday(l.start):t0;if(d==='all'||k===d)vis.push([l,i])});
- vis.sort(function(a,b){var x=a[0].start||'9',y=b[0].start||'9';if(x!==y)return x<y?-1:1;var ea=a[0].g?Math.abs(a[0].g.edge/a[0].line):0,eb=b[0].g?Math.abs(b[0].g.edge/b[0].line):0;return eb-ea});
+ vis.sort(function(a,b){var x=a[0].start||'9',y=b[0].start||'9';if(x!==y)return x<y?-1:1;var ea=a[0].g?a[0].g.edgePP:-999,eb=b[0].g?b[0].g.edgePP:-999;return eb-ea});
  h+='<div class="grid c2"><div class="card"><h2>'+(d==='all'?'All lines':esc(dayLabel(d))+' lines')+' · PrizePicks + Underdog · Maps 1-2</h2>'+(LINES.length?'<div class="muted">Feed observed '+esc(META.lines_at||'')+'. Refreshes about every hour. Times are Central.</div>':'<div class="warn">No lines feed is connected yet, so lines are manual. PrizePicks is the source of truth: type the line you see in the app.</div>')+
- (vis.length?vis.map(function(a){var l=a[0],i=a[1],g=l.g,live=l.team&&liveFor(l.team),started=l.start&&new Date(l.start).getTime()<NOW();return '<div class="item"><div><b>'+esc(l.player)+'</b> <span class="muted">'+esc(l.team)+(l.opp?' vs '+esc(l.opp):'')+'</span>'+(live?' <span class="pill">LIVE</span>':(started?' <span class="muted">· started</span>':''))+'<br><span class="muted">'+(l.book?esc(l.book)+' · ':'')+sname(l.stat)+(l.start?' · '+esc(fmt(l.start)):'')+' · </span><b>'+l.line+'</b>'+(g?'<span class="muted"> · proj '+g.proj+' · over '+g.over+'/'+g.of+'</span>':'<span class="muted"> · Can\'t grade this one. '+(rp(l)?'Research the player in the Players tab':'Research needed')+'</span>')+'</div><div style="text-align:right">'+(g?'<span class="pill '+(g.pick==='UNDER'?'u':'')+'">'+g.grade+' '+g.pick+'</span><br>':'')+(g||!rp(l)?'<button class="g" data-act="lg" data-i="'+i+'">Grade</button> <button class="g" data-act="ladd" data-i="'+i+'">+ Slip</button>':'<button class="g" data-act="plview" data-p="'+esc(rp(l))+'">Research</button>')+(l.src==='manual'?' <button class="g" data-act="ldel" data-i="'+l.idx+'">✕</button>':'')+'</div></div>'}).join(''):'<div class="muted">No lines for this day yet. New lines appear as the books post them.</div>')+'</div>';
+ (vis.length?vis.map(function(a){var l=a[0],i=a[1],g=l.g,live=l.team&&liveFor(l.team),started=l.start&&new Date(l.start).getTime()<NOW();return '<div class="item"><div><b>'+esc(l.player)+'</b> <span class="muted">'+esc(l.team)+(l.opp?' vs '+esc(l.opp):'')+'</span>'+(live?' <span class="pill">LIVE</span>':(started?' <span class="muted">· started</span>':''))+'<br><span class="muted">'+(l.book?esc(l.book)+' · ':'')+sname(l.stat)+(l.start?' · '+esc(fmt(l.start)):'')+' · </span><b>'+l.line+'</b>'+(g?'<span class="muted"> · proj '+g.proj+'</span>'+hitBoxes(g.hits):'<span class="muted"> · Can\'t grade this one. '+(rp(l)?'Research the player in the Players tab':'Research needed')+'</span>')+'</div><div style="text-align:right">'+(g?'<span class="pill '+(g.pick==='UNDER'?'u':'')+'">'+pillTxt(g)+'</span><br>':'')+(g||!rp(l)?'<button class="g" data-act="lg" data-i="'+i+'">Grade</button> <button class="g" data-act="ladd" data-i="'+i+'">+ Slip</button>':'<button class="g" data-act="plview" data-p="'+esc(rp(l))+'">Research</button>')+(l.src==='manual'?' <button class="g" data-act="ldel" data-i="'+l.idx+'">✕</button>':'')+'</div></div>'}).join(''):'<div class="muted">No lines for this day yet. New lines appear as the books post them.</div>')+'</div>';
  h+='<div class="card"><h2>Add / edit a line</h2><label>Player</label><input id="mp" list="plist" placeholder="Start typing a player"><label>Stat</label><select id="ms"><option value="kills">Kills Maps 1-2</option><option value="hs">Headshots Maps 1-2</option></select><label>Opponent (optional)</label><input id="mo" list="tlist" placeholder="Team name"><label>Line</label><input id="ml" type="number" step="0.5" placeholder="e.g. 34.5"><button class="b" data-act="madd">Save line</button></div></div>';return h}
 // ---- track record: every saved line is graded with stats from BEFORE its match date, then checked against the real result
 var TS_CACHE={};
@@ -153,9 +161,10 @@ function teamSeries(team){var k=tn(team);if(TS_CACHE[k])return TS_CACHE[k];var b
 function avgRounds(team,before){var a=teamSeries(team).filter(function(x){return x.date<before}).slice(0,10);return a.length>=4?mean(a.map(function(x){return x.rounds})):null}
 // rounds model: the player's kills (or headshots) per round over his last 10 Map 1+2 series x expected rounds for this matchup (average of both teams' recent Map 1+2 round totals)
 function roundsProj(past,st,opp,team,date){var cs=combos(past).filter(function(c){return c.rounds&&c[st]!=null}).slice(0,10);if(cs.length<4)return null;var k=0,r=0;cs.forEach(function(c){k+=c[st];r+=c.rounds});var e1=avgRounds(team,date),e2=opp?avgRounds(opp,date):null;if(e1==null&&e2==null)return null;var E=e1==null?e2:e2==null?e1:(e1+e2)/2;return Math.round(k/r*E*10)/10}
-function recordData(){TS_CACHE={};var rows=[],pending=0,nodata=0,seen={};
+function recordData(){TS_CACHE={};var rows=[],pending=0,nodata=0,seen={},pushes=0,voids=0;
  (HIST||[]).forEach(function(e){var st=normStat(e.stat);if(!st||!e.start)return;var t=new Date(e.start).getTime();if(isNaN(t))return;
   if(t>NOW()-5*3600000){pending++;return}
+  var rs=e.result||null;if(rs&&rs.outcome==='void'){voids++;return}
   if(isCombo(e.player)){ // combo: needs the locked pick, and every player's result for that match added up
    if(!(e.lock&&e.lock.grade)){nodata++;return}
    var d1=cday(e.start),k1=norm(e.player)+st+d1;if(seen[k1])return;var tot=0,okc=true;
@@ -163,19 +172,19 @@ function recordData(){TS_CACHE={};var rows=[],pending=0,nodata=0,seen={};
     combos(pc).forEach(function(c){if(!c.date||!teq(c.opp,e.opponent))return;var dd=Math.abs((new Date(c.date+'T12:00:00Z')-new Date(d1+'T12:00:00Z'))/864e5);if(dd<=1&&(!bc||dd<bc.dd))bc={c:c,dd:dd}});
     if(!bc||bc.c[st]==null)okc=false;else tot+=bc.c[st]});
    if(!okc){nodata++;return}
-   var lc=+e.lock.line;if(tot===lc)return;seen[k1]=1;
-   rows.push({team:e.team,opp:e.opponent,player:e.player,stat:st,line:lc,act:tot,pick:e.lock.pick,grade:e.lock.grade,proj:e.lock.proj,locked:true,lat:e.lock.at||'',hit:e.lock.pick==='OVER'?tot>lc:tot<lc,start:e.start});return}
+   var lc=+e.lock.line;if(tot===lc){if(!seen[k1])pushes++;seen[k1]=1;return}seen[k1]=1;
+   rows.push({team:e.team,opp:e.opponent,player:e.player,stat:st,line:lc,act:tot,pick:e.lock.pick,grade:oldG(e.lock),proj:e.lock.proj,locked:true,lat:e.lock.at||'',hit:e.lock.pick==='OVER'?tot>lc:tot<lc,start:e.start});return}
   var p=find(e.player,e.team);if(!p){nodata++;return}
   var d0=cday(e.start),key=norm(e.player)+st+d0;if(seen[key])return;
   var best=null;combos(p).forEach(function(c){if(!c.date||!teq(c.opp,e.opponent))return;var dd=Math.abs((new Date(c.date+'T12:00:00Z')-new Date(d0+'T12:00:00Z'))/864e5);if(dd<=1&&(!best||dd<best.dd))best={c:c,dd:dd}});
   if(!best||best.c[st]==null){nodata++;return}
   var past={name:p.name,team:p.team,logs:(p.logs||[]).filter(function(l){return l.date&&l.date<best.c.date})};
   var lk=e.lock&&e.lock.grade?e.lock:null; // locked in when the line was first seen: the exact grade, projection and pick the app gave then
-  var line=lk?+lk.line:+e.line,g=lk?{grade:lk.grade,proj:lk.proj,pick:lk.pick}:grade(past,st,line,e.opponent);if(!g){nodata++;return}
-  var act=best.c[st];if(act===line)return;seen[key]=1;
+  var line=lk?+lk.line:+e.line,g=lk?{grade:oldG(lk),proj:lk.proj,pick:lk.pick}:grade(p,st,line,e.opponent,{team:e.team,book:e.book,odds:e.odds,before:best.c.date});if(!g){nodata++;return}
+  var act=best.c[st];if(act===line){pushes++;seen[key]=1;return}seen[key]=1;
   var pick=lk?lk.pick:(g.pick||((g.grade==='D'||g.grade==='F')?'UNDER':'OVER'));
-  rows.push({team:e.team,opp:e.opponent,player:e.player,stat:st,line:line,act:act,rproj:roundsProj(past,st,e.opponent,p.team,best.c.date),pick:pick,grade:g.grade,proj:g.proj,locked:!!lk,lat:lk?(lk.at||''):'',hit:pick==='OVER'?act>line:act<line,start:e.start})});
- rows.forEach(function(r){r.day=cday(r.start)});rows.sort(function(a,b){return a.start<b.start?1:-1});return{rows:rows,pending:pending,nodata:nodata,total:(HIST||[]).length}}
+  rows.push({team:e.team,opp:e.opponent,player:e.player,stat:st,line:line,act:act,rproj:roundsProj(past,st,e.opponent,p.team,best.c.date),pick:pick,grade:g.grade,proj:g.proj,locked:!!lk,lat:lk?(lk.at||''):'',hit:pick==='OVER'?act>line:act<line,model:lk?(lk.model||'v1'):'v2',pOver:lk?lk.p_over:g.pOver,start:e.start})});
+ rows.forEach(function(r){r.day=cday(r.start)});rows.sort(function(a,b){return a.start<b.start?1:-1});return{rows:rows,pending:pending,nodata:nodata,pushes:pushes,voids:voids,total:(HIST||[]).length}}
 function recordCard(){if(HIST==null)return '';var h='<div class="card" style="margin-top:12px"><h2>Track record</h2>';
  if(HIST==null)return h+'<div class="warn">No line history yet. It starts saving after the next "Update CS2 lines" run with the new script.</div></div>';
  var R=recordData(),rows=R.rows;
@@ -185,32 +194,25 @@ function recordCard(){if(HIST==null)return '';var h='<div class="card" style="ma
  var hits=vis.filter(function(r){return r.hit}).length,err=vis.map(function(r){return r.proj-r.act});
  h+='<h2>By day</h2><div class="scroll"><table><tr><th>Date</th><th>Picks</th><th>Record</th><th>Hit rate</th><th></th></tr>'+dl.map(function(d){var r=dm[d],w=r.filter(function(x){return x.hit}).length;return '<tr'+(D===d?' style="outline:1px solid var(--green)"':'')+'><td>'+esc(dayLabel(d))+'</td><td>'+r.length+'</td><td>'+w+'-'+(r.length-w)+'</td><td>'+Math.round(w/r.length*100)+'%</td><td><button class="'+(D===d?'b':'g')+'" data-act="rday" data-d="'+d+'">View</button></td></tr>'}).join('')+'</table></div><div class="btns" style="margin:8px 0"><button class="'+(D==='all'?'b':'g')+'" data-act="rday" data-d="all">All days · '+rows.length+'</button></div>';
  h+='<h2 style="margin-top:8px">'+(D==='all'?'All days':esc(dayLabel(D)))+'</h2><div class="stats"><div class="st"><b>'+hits+'-'+(vis.length-hits)+'</b><span>Record ('+Math.round(hits/vis.length*100)+'%)</span></div><div class="st"><b>'+vis.length+'</b><span>Graded picks</span></div><div class="st"><b>'+fv(mean(err.map(Math.abs)))+'</b><span>Avg miss (kills/HS)</span></div><div class="st"><b>'+(mean(err)>=0?'+':'')+fv(mean(err))+'</b><span>Projection bias</span></div></div>';
- h+='<div class="scroll"><table><tr><th>Grade</th><th>Picks</th><th>Hit rate</th></tr>'+['A+','B','C','D','F'].map(function(G){var r=vis.filter(function(x){return x.grade===G}),hh=r.filter(function(x){return x.hit}).length;return '<tr><td>'+G+'</td><td>'+r.length+'</td><td>'+(r.length?Math.round(hh/r.length*100)+'% ('+hh+'-'+(r.length-hh)+')':'–')+'</td></tr>'}).join('')+'</table></div>';
+ h+='<div class="scroll"><table><tr><th>Grade</th><th>Picks</th><th>Hit rate</th></tr>'+gradesIn(vis).map(function(G){var r=vis.filter(function(x){return x.grade===G}),hh=r.filter(function(x){return x.hit}).length;return '<tr><td>'+G+'</td><td>'+r.length+'</td><td>'+(r.length?Math.round(hh/r.length*100)+'% ('+hh+'-'+(r.length-hh)+')':'–')+'</td></tr>'}).join('')+'</table></div>';
  function wl(r){var w=r.filter(function(x){return x.hit}).length;return r.length?w+'-'+(r.length-w)+' ('+Math.round(w/r.length*100)+'%)':'–'}
  var sp=function(f){return vis.filter(f)};
- h+='<h2 style="margin-top:12px">Where picks win and lose</h2><div class="scroll"><table><tr><th>Grade</th><th>Kills</th><th>Headshots</th><th>Over</th><th>Under</th></tr>'+['A+','B','C','D','F'].map(function(G){return '<tr><td>'+G+'</td><td>'+wl(sp(function(x){return x.grade===G&&x.stat==='kills'}))+'</td><td>'+wl(sp(function(x){return x.grade===G&&x.stat==='hs'}))+'</td><td>'+wl(sp(function(x){return x.grade===G&&x.pick==='OVER'}))+'</td><td>'+wl(sp(function(x){return x.grade===G&&x.pick==='UNDER'}))+'</td></tr>'}).join('')+'<tr><td>All</td><td>'+wl(sp(function(x){return x.stat==='kills'}))+'</td><td>'+wl(sp(function(x){return x.stat==='hs'}))+'</td><td>'+wl(sp(function(x){return x.pick==='OVER'}))+'</td><td>'+wl(sp(function(x){return x.pick==='UNDER'}))+'</td></tr></table></div>';
+ h+='<h2 style="margin-top:12px">Where picks win and lose</h2><div class="scroll"><table><tr><th>Grade</th><th>Kills</th><th>Headshots</th><th>Over</th><th>Under</th></tr>'+gradesIn(vis).map(function(G){return '<tr><td>'+G+'</td><td>'+wl(sp(function(x){return x.grade===G&&x.stat==='kills'}))+'</td><td>'+wl(sp(function(x){return x.grade===G&&x.stat==='hs'}))+'</td><td>'+wl(sp(function(x){return x.grade===G&&x.pick==='OVER'}))+'</td><td>'+wl(sp(function(x){return x.grade===G&&x.pick==='UNDER'}))+'</td></tr>'}).join('')+'<tr><td>All</td><td>'+wl(sp(function(x){return x.stat==='kills'}))+'</td><td>'+wl(sp(function(x){return x.stat==='hs'}))+'</td><td>'+wl(sp(function(x){return x.pick==='OVER'}))+'</td><td>'+wl(sp(function(x){return x.pick==='UNDER'}))+'</td></tr></table></div>';
  var bk=[[0,.05,'Under 5%'],[.05,.10,'5-10%'],[.10,.15,'10-15%'],[.15,.20,'15-20%'],[.20,.30,'20-30%'],[.30,9,'30%+']];
  h+='<h2 style="margin-top:12px">Hit rate by edge size</h2><div class="scroll"><table><tr><th>Projection vs line</th><th>Picks</th><th>Record</th></tr>'+bk.map(function(b){var r=sp(function(x){var e=Math.abs(x.proj-x.line)/x.line;return e>=b[0]&&e<b[1]});return '<tr><td>'+b[2]+'</td><td>'+r.length+'</td><td>'+wl(r)+'</td></tr>'}).join('')+'</table></div><div class="muted" style="margin-top:6px">Locked picks only: '+wl(sp(function(x){return x.locked}))+'. All picks: '+wl(vis)+'.</div>';
- // ---- shadow test: same frozen projection and line, shrunk toward the line and bias-corrected. Does not change any live grade.
- var SK=0.4,SB=0.04;
- function sh(r){var pc=SK*((r.proj-r.line)/r.line)+SB,m=Math.abs(pc),t=m>=.08?'Strong':m>=.05?'Good':m>=.025?'Lean':m>=.01?'Weak':'Toss-up',pk=pc>=0?'OVER':'UNDER';return{pc:pc,m:m,tier:t,pick:pk,hit:pk==='OVER'?r.act>r.line:r.act<r.line}}
- var sv=vis.map(function(r){return{r:r,s:sh(r)}});
+ // (the old 'shadow test' table applied a +4% Over shift and was removed with grader v2)
  function wls(a){var w=a.filter(function(x){return x}).length;return a.length?w+'-'+(a.length-w)+' ('+Math.round(w/a.length*100)+'%)':'–'}
- var flips=sv.filter(function(x){return x.s.pick!==x.r.pick}),nT=Math.ceil(sv.length/3);
- var topL=sv.slice().sort(function(a,b){return Math.abs((b.r.proj-b.r.line)/b.r.line)-Math.abs((a.r.proj-a.r.line)/a.r.line)}).slice(0,nT),topS=sv.slice().sort(function(a,b){return b.s.m-a.s.m}).slice(0,nT);
- h+='<h2 style="margin-top:12px">Shadow test</h2><div class="muted" style="margin-bottom:6px">Same frozen line and projection, but the projection is pulled '+Math.round((1-SK)*100)+'% of the way back to the line and shifted up '+Math.round(SB*100)+'% to correct the low bias. Shadow tiers show confidence in either direction. Live grades are untouched.</div><div class="scroll"><table><tr><th>Shadow tier</th><th>Picks</th><th>Shadow record</th><th>Over / Under</th></tr>'+['Strong','Good','Lean','Weak','Toss-up'].map(function(T){var q=sv.filter(function(x){return x.s.tier===T});return '<tr><td>'+T+'</td><td>'+q.length+'</td><td>'+wls(q.map(function(x){return x.s.hit}))+'</td><td>'+q.filter(function(x){return x.s.pick==='OVER'}).length+' / '+q.filter(function(x){return x.s.pick==='UNDER'}).length+'</td></tr>'}).join('')+'</table></div><div class="scroll" style="margin-top:8px"><table><tr><th>Your most confident third ('+nT+' picks)</th><th>Record</th></tr><tr><td>Live grader (biggest edges)</td><td>'+wls(topL.map(function(x){return x.r.hit}))+'</td></tr><tr><td>Shadow (biggest shadow edges)</td><td>'+wls(topS.map(function(x){return x.s.hit}))+'</td></tr></table></div><div class="muted" style="margin-top:6px">All picks: live '+wls(sv.map(function(x){return x.r.hit}))+', shadow '+wls(sv.map(function(x){return x.s.hit}))+'. The shadow flips '+flips.length+' picks (Over to Under or the reverse); on those, live '+wls(flips.map(function(x){return x.r.hit}))+' and shadow '+wls(flips.map(function(x){return x.s.hit}))+'. Locked picks only: live '+wls(sv.filter(function(x){return x.r.locked}).map(function(x){return x.r.hit}))+', shadow '+wls(sv.filter(function(x){return x.r.locked}).map(function(x){return x.s.hit}))+'. Wait for about 100 locked picks before switching anything.</div>';
  // ---- rounds model (shadow 2): per-round rate x expected rounds. Needs round counts in the data (saved by the daily update from now on).
  var rv=vis.filter(function(r){return r.rproj!=null&&r.proj!=null});
  function rt(r){var pc=(r.rproj-r.line)/r.line,m=Math.abs(pc),t=m>=.10?'Strong':m>=.06?'Good':m>=.03?'Lean':m>=.01?'Weak':'Toss-up',pk=pc>=0?'OVER':'UNDER';return{m:m,tier:t,pick:pk,hit:pk==='OVER'?r.act>r.line:r.act<r.line}}
- var rr=rv.map(function(r){return{r:r,q:rt(r),s:sh(r)}});
+ var rr=rv.map(function(r){return{r:r,q:rt(r)}});
  h+='<h2 style="margin-top:12px">Rounds model</h2>';
  if(rr.length<10)h+='<div class="muted">Only '+rr.length+' of '+vis.length+' picks have round data so far. Round counts are saved by the daily update and the 5-hour results job, so this fills in as new matches finish.</div>';
- else{var nR=Math.ceil(rr.length/3),tl=rr.slice().sort(function(a,b){return Math.abs((b.r.proj-b.r.line)/b.r.line)-Math.abs((a.r.proj-a.r.line)/a.r.line)}).slice(0,nR),ts=rr.slice().sort(function(a,b){return b.s.m-a.s.m}).slice(0,nR),tr=rr.slice().sort(function(a,b){return b.q.m-a.q.m}).slice(0,nR);
+ else{var nR=Math.ceil(rr.length/3),tl=rr.slice().sort(function(a,b){return Math.abs((b.r.proj-b.r.line)/b.r.line)-Math.abs((a.r.proj-a.r.line)/a.r.line)}).slice(0,nR),tr=rr.slice().sort(function(a,b){return b.q.m-a.q.m}).slice(0,nR);
   var mae=function(f){return fv(mean(rr.map(function(x){return Math.abs(f(x.r)-x.r.act)})))},bias=function(f){var b=mean(rr.map(function(x){return f(x.r)-x.r.act}));return (b>=0?'+':'')+fv(b)};
   h+='<div class="muted" style="margin-bottom:6px">Projection = the player\'s kills (or headshots) per round over his last 10 Map 1+2 series, times the expected rounds for this matchup (the average of both teams\' recent Map 1+2 round totals). Only picks with enough round data ('+rr.length+' of '+vis.length+'). Live grades are untouched.</div><div class="scroll"><table><tr><th>Rounds tier</th><th>Picks</th><th>Record</th><th>Over / Under</th></tr>'+['Strong','Good','Lean','Weak','Toss-up'].map(function(T){var q=rr.filter(function(x){return x.q.tier===T});return '<tr><td>'+T+'</td><td>'+q.length+'</td><td>'+wls(q.map(function(x){return x.q.hit}))+'</td><td>'+q.filter(function(x){return x.q.pick==='OVER'}).length+' / '+q.filter(function(x){return x.q.pick==='UNDER'}).length+'</td></tr>'}).join('')+'</table></div>'
    +'<div class="scroll" style="margin-top:8px"><table><tr><th>Same '+rr.length+' picks</th><th>Most confident third</th><th>All picks</th><th>Avg miss</th><th>Bias</th></tr>'
    +'<tr><td>Live grader</td><td>'+wls(tl.map(function(x){return x.r.hit}))+'</td><td>'+wls(rr.map(function(x){return x.r.hit}))+'</td><td>'+mae(function(r){return r.proj})+'</td><td>'+bias(function(r){return r.proj})+'</td></tr>'
-   +'<tr><td>Shadow</td><td>'+wls(ts.map(function(x){return x.s.hit}))+'</td><td>'+wls(rr.map(function(x){return x.s.hit}))+'</td><td>–</td><td>–</td></tr>'
    +'<tr><td>Rounds model</td><td>'+wls(tr.map(function(x){return x.q.hit}))+'</td><td>'+wls(rr.map(function(x){return x.q.hit}))+'</td><td>'+mae(function(r){return r.rproj})+'</td><td>'+bias(function(r){return r.rproj})+'</td></tr>'
    +'<tr><td>Book line itself</td><td>–</td><td>–</td><td>'+mae(function(r){return r.line})+'</td><td>'+bias(function(r){return r.line})+'</td></tr>'
    +'<tr><td>Blend (line 50%, live 25%, rounds 25%)</td><td>–</td><td>–</td><td>'+mae(function(r){return .5*r.line+.25*r.proj+.25*r.rproj})+'</td><td>'+bias(function(r){return .5*r.line+.25*r.proj+.25*r.rproj})+'</td></tr></table></div><div class="muted" style="margin-top:6px">Avg miss is how far the projection is from the real result on average (smaller is better). Bias is projection minus result (0 is best). The Book line row is the benchmark: a projection only has an edge if its miss is smaller than the line\'s own miss.</div>'}
@@ -229,15 +231,15 @@ function recordCard(){if(HIST==null)return '';var h='<div class="card" style="ma
  var bsRows=[['Kills, all',kR],['Kills, projected 5%+ over the line',big(kR)],['Kills, new grader picks only',nw(kR)],['Headshots, all',hR],['Headshots, projected 5%+ over the line',big(hR)],['Headshots, new grader picks only',nw(hR)]];
  h+='<h2 style="margin-top:12px">By stat: is our projection real?</h2><div class="muted" style="margin-bottom:6px">Hit rate is for the pick as graded. Over rate is how often the real result beat the line. Proj and Actual are the average distance from the line. Edge real is 1.00 if all of our projected edge shows up in real results and 0 or less if none of it does (needs 15+ picks). New grader picks are the ones locked since the shadow grader went live.</div><div class="scroll"><table><tr><th>Group</th><th>Picks</th><th>Hit rate</th><th>Over rate</th><th>Proj vs line</th><th>Actual vs line</th><th>Edge real</th></tr>'+bsRows.map(function(x){var q=bs(x[1]);return '<tr><td>'+esc(x[0])+'</td><td>'+q[0]+'</td><td>'+q[1]+'</td><td>'+q[2]+'</td><td>'+q[3]+'</td><td>'+q[4]+'</td><td>'+q[5]+'</td></tr>'}).join('')+'</table></div>';
  function av(a){return a.length?(mean(a)>=0?'+':'')+mean(a).toFixed(1):'–'}
- h+='<h2 style="margin-top:12px">Projection vs reality</h2><div class="scroll"><table><tr><th>Grade</th><th>Picks</th><th>Proj minus line</th><th>Actual minus line</th></tr>'+['A+','B','C','D','F'].map(function(G){var r=sp(function(x){return x.grade===G});return '<tr><td>'+G+'</td><td>'+r.length+'</td><td>'+av(r.map(function(x){return x.proj-x.line}))+'</td><td>'+av(r.map(function(x){return x.act-x.line}))+'</td></tr>'}).join('')+'</table></div><div class="muted" style="margin-top:6px">If a grade\'s projection sits above the line but the actual result sits below it (or the reverse), the projection is pointing the wrong way for that grade.</div>';
+ h+='<h2 style="margin-top:12px">Projection vs reality</h2><div class="scroll"><table><tr><th>Grade</th><th>Picks</th><th>Proj minus line</th><th>Actual minus line</th></tr>'+gradesIn(vis).map(function(G){var r=sp(function(x){return x.grade===G});return '<tr><td>'+G+'</td><td>'+r.length+'</td><td>'+av(r.map(function(x){return x.proj-x.line}))+'</td><td>'+av(r.map(function(x){return x.act-x.line}))+'</td></tr>'}).join('')+'</table></div><div class="muted" style="margin-top:6px">If a grade\'s projection sits above the line but the actual result sits below it (or the reverse), the projection is pointing the wrong way for that grade.</div>';
  var mm={},ml=[];vis.forEach(function(r){var k=[tn(r.team),tn(r.opp)].sort().join('|');if(!mm[k]){mm[k]={n:(r.team||'?')+' vs '+(r.opp||'?'),r:[]};ml.push(mm[k])}mm[k].r.push(r)});
  ml.sort(function(a,b){return b.r.length-a.r.length});
  h+='<h2 style="margin-top:12px">By match</h2><div class="scroll"><table><tr><th>Match</th><th>Picks</th><th>Record</th></tr>'+ml.slice(0,30).map(function(m){return '<tr><td>'+esc(m.n)+'</td><td>'+m.r.length+'</td><td>'+wl(m.r)+'</td></tr>'}).join('')+'</table></div>';
  h+='<h2 style="margin-top:12px">'+(D==='all'?'Latest results':'All picks that day')+'</h2>'+(D==='all'?vis.slice(0,15):vis).map(function(r){return '<div class="item"><div><b>'+esc(r.player)+'</b> <span class="muted">'+sname(r.stat)+' · '+r.pick+' '+r.line+' · got '+r.act+' · proj '+r.proj+(r.locked?' · locked':'')+'</span></div><div><span class="pill '+(r.hit?'':'u')+'">'+(r.hit?'HIT':'MISS')+' · '+r.grade+'</span></div></div>'}).join('');
- return h+'<div class="muted" style="margin-top:8px">'+rows.filter(function(r){return r.locked}).length+' of '+rows.length+' picks are locked in: the exact line, grade, projection and pick the app gave when the line first appeared. Older ones were re-graded afterwards with stats from before their match. Pushes are skipped. '+R.pending+' pending, '+R.nodata+' not matched yet. Small samples mean little: wait for a few hundred picks before changing any weights.</div></div>'}
+ return h+'<div class="muted" style="margin-top:8px">'+rows.filter(function(r){return r.locked}).length+' of '+rows.length+' picks are locked in: the exact line, grade, projection and pick the app gave when the line first appeared. Older ones were re-graded afterwards with stats from before their match. Pushes ('+R.pushes+') and voids ('+R.voids+', match not played or only one map) are left out of the hit rate. Grades A, B, C (Over) and D, F (Under) are grader v2; grades marked (old) were locked by the old grader and mean something else. '+R.pending+' pending, '+R.nodata+' not matched yet. Small samples mean little: wait for a few hundred picks before changing any weights.</div></div>'}
 function opts(){var t={};DB.forEach(function(p){t[p.team]=1});return '<datalist id="plist">'+DB.map(function(p){return '<option value="'+esc(p.name)+'">'+esc(p.team)}).join('')+'</datalist><datalist id="tlist">'+Object.keys(t).sort().map(function(x){return '<option value="'+esc(x)+'">'}).join('')+'</datalist>'}
-function viewGrader(){var combo=isCombo(sel.player),p=combo?{name:sel.player}:find(sel.player,sel.team),line=parseFloat(sel.line),g=p&&!isNaN(line)?gradeFor(sel.player,sel.team||'',sel.stat,line,sel.opp):null,miss='';if(g&&g.missing){miss=g.missing;g=null}
- var h='<div class="grid c2"><div class="card"><h2>Prop grader</h2><label>Player</label><input id="gp" list="plist" value="'+esc(sel.player)+'" placeholder="Start typing a player"><div class="row"><div><label>Stat</label><select id="gs"><option value="kills"'+(sel.stat==='kills'?' selected':'')+'>Kills Maps 1-2</option><option value="hs"'+(sel.stat==='hs'?' selected':'')+'>Headshots Maps 1-2</option></select></div><div><label>Line</label><input id="gl" type="number" step="0.5" value="'+esc(sel.line)+'"></div></div><label>Opponent</label><input id="go" list="tlist" value="'+esc(sel.opp)+'" placeholder="Team name"><div class="btns"><button class="b" data-act="grade">Grade it</button></div></div>';
+function viewGrader(){var combo=isCombo(sel.player),p=combo?{name:sel.player}:find(sel.player,sel.team),line=parseFloat(sel.line),g=p&&!isNaN(line)?gradeFor(sel.player,sel.team||'',sel.stat,line,sel.opp,{book:sel.book||'PrizePicks',odds:sel.odds}):null,miss='';if(sel.odds!=null&&sel.oddsLine==null)sel.oddsLine=String(line);if(g&&g.missing){miss=g.missing;g=null}
+ var h='<div class="grid c2"><div class="card"><h2>Prop grader</h2><label>Player</label><input id="gp" list="plist" value="'+esc(sel.player)+'" placeholder="Start typing a player"><div class="row"><div><label>Stat</label><select id="gs"><option value="kills"'+(sel.stat==='kills'?' selected':'')+'>Kills Maps 1-2</option><option value="hs"'+(sel.stat==='hs'?' selected':'')+'>Headshots Maps 1-2</option></select></div><div><label>Line</label><input id="gl" type="number" step="0.5" value="'+esc(sel.line)+'"></div></div><label>Opponent</label><input id="go" list="tlist" value="'+esc(sel.opp)+'" placeholder="Team name"><label>Book (sets the break-even)</label><select id="gb">'+['PrizePicks','Underdog'].map(function(x){return '<option'+((sel.book||'PrizePicks')===x?' selected':'')+'>'+x+'</option>'}).join('')+'</select><div class="btns"><button class="b" data-act="grade">Grade it</button></div></div>';
  if(!sel.player)h+='<div class="card"><div class="warn">Pick a player and a line to grade.</div></div>';
  else if(!p)h+='<div class="card"><div class="warn">No player named "'+esc(sel.player)+'" in the data.</div></div>';
  else if(!g&&miss)h+='<div class="card"><div class="warn">Cannot grade this combo: no usable Maps 1-2 stats for '+esc(miss)+'. Every player in a combo needs stats.</div></div>';
@@ -250,21 +252,22 @@ function chart(cs,st,line){var rows=cs.slice(0,10).filter(function(c){return c[s
  var ds=rows.map(function(c){return '<div class="bd">'+esc(String(c.date||'').slice(5))+'</div>'}).join('');
  return '<div class="bars">'+(hasL?'<div class="ln" style="bottom:'+(line/mx*100)+'%"><span>'+line+'</span></div>':'')+cols+'</div><div class="bdates">'+ds+'</div>'}
 function gradeCard(g){return '<div class="card"><div class="muted">'+esc(g.player)+' · '+esc(g.team)+(g.opp?' vs '+esc(g.opp):'')+' · '+sname(g.stat)+' · line '+g.line+'</div><div class="grade'+gclass(g.grade)+'">'+g.grade+'</div><div><span class="pill '+(g.pick==='UNDER'?'u':'')+'">'+esc(g.label)+'</span></div>'+
- '<div class="stats"><div class="st"><b>'+g.proj+'</b><span>Projection</span></div><div class="st"><b>'+(g.edge>=0?'+':'')+g.edge+'</b><span>Edge vs line</span></div><div class="st"><b>'+g.over+'/'+g.of+'</b><span>Over, last '+g.of+'</span></div></div>'+
+ '<div class="stats"><div class="st"><b>'+g.proj+'</b><span>Projection</span></div><div class="st"><b>'+pc1(g.pPick)+'</b><span>Chance '+esc(g.pick)+'</span></div><div class="st"><b>'+(g.edgePP>=0?'+':'')+g.edgePP.toFixed(1)+'pp</b><span>Edge vs break-even '+pc1(g.be)+'</span></div><div class="st"><b>'+g.over+'/'+g.of+'</b><span>Over, last '+g.of+'</span></div></div>'+
+ (g.hits?'<h2 style="margin-top:12px">Hit rate vs '+g.line+'</h2>'+hitBoxes(g.hits)+'<div class="muted">Series (Maps 1-2) that went over this exact line: last 5 / 10 / 20, vs '+esc(g.opp||'this opponent')+', and this season. '+(GPModel.PARAMS.w_hr>0?'Blended into the chance at weight '+GPModel.PARAMS.w_hr+'.':'Shown for reference only: the backtest found it does not improve the grade, so it is not used in it.')+'</div>':'')+
  '<h2 style="margin-top:12px">Last 10 '+(g.stat==='hs'?'headshots':'kills')+' (Maps 1-2)</h2>'+chart(g.cs,g.stat,g.line)+'<div class="muted">Oldest to newest, with the date under each bar. Dashed line = '+g.line+'. Green = over, red = under.</div>'+
- '<h2 style="margin-top:12px">Breakdown</h2><div class="scroll"><table><tr><th>Part</th><th>Weight</th><th>Avg</th><th>Sample</th></tr>'+g.comp.map(function(c){return '<tr><td>'+esc(c.k)+'</td><td>'+(c.w==null?'sum':Math.round(c.w*100)+'%')+'</td><td>'+(c.v==null?'no data':c.v.toFixed(1))+'</td><td>'+c.n+'</td></tr>'}).join('')+'</table></div>'+
- '<div class="muted" style="margin-top:6px">'+esc(g.adj)+'. Parts with no data are left out and the other weights are scaled up. Blowout and role are not in the data.</div>'+
+ '<h2 style="margin-top:12px">Breakdown</h2><div class="scroll"><table><tr><th>Part</th><th>Value</th><th>Series used</th></tr>'+g.comp.map(function(c){return '<tr><td>'+esc(c.k)+'</td><td>'+(c.v==null?'no data':c.v.toFixed(c.f==null?1:c.f)+(c.u||''))+'</td><td>'+(c.n==null?'':c.n)+'</td></tr>'}).join('')+'</table></div>'+
+ '<div class="muted" style="margin-top:6px">'+esc(g.adj)+'. '+GRADE_LEGEND+' Role and map veto are not in the data.</div>'+
  '<div class="btns"><button class="b" data-act="gadd">Add to slip</button><button class="g" data-act="gimg">Download image</button><button class="g" data-act="gshare">Share</button></div>'+
  '<h2 style="margin-top:12px">Last 10 (Maps 1-2)</h2><div class="scroll"><table><tr><th>Date</th><th>Opp</th><th>Maps</th><th>'+(g.stat==='hs'?'HS':'Kills')+'</th></tr>'+g.cs.slice(0,10).map(function(c){return '<tr><td>'+esc(c.date)+'</td><td>'+esc(c.opp)+'</td><td>'+esc(c.maps)+'</td><td>'+(c[g.stat]==null?'':c[g.stat])+'</td></tr>'}).join('')+'</table></div></div>'}
 // ---- auto slips: strong overs and strong unders, mixed
 var svar='var',excl={};
 function shuf(arr){if(svar!=='var')return arr;var t=arr.slice(0,10),r=arr.slice(10);for(var i=t.length-1;i>0;i--){var j=Math.floor(Math.random()*(i+1)),x=t[i];t[i]=t[j];t[j]=x}return t.concat(r)}
 function buildSlip(n,mode){
- var best={};allLines().forEach(function(l){if(!l.g||!l.line||isCombo(l.player))return;var k=norm(l.player),e=Math.abs(l.g.edge/l.line);if(!best[k]||e>best[k].e)best[k]={l:l,e:e}});
- var all=Object.keys(best).map(function(k){var l=best[k].l;return{l:l,pct:l.g.edge/l.line}}),skipNote='';
+ var best={};allLines().forEach(function(l){if(!l.g||!l.line||isCombo(l.player))return;var k=norm(l.player),e=l.g.edgePP;if(!best[k]||e>best[k].e)best[k]={l:l,e:e}});
+ var all=Object.keys(best).map(function(k){var l=best[k].l;return{l:l,pct:(l.g.pick==='OVER'?1:-1)*(100+l.g.edgePP)/100,e:l.g.edgePP}}),skipNote='';
  var fresh=all.filter(function(x){return !excl[norm(x.l.player)]});if(Object.keys(excl).length){if(fresh.length>=n)all=fresh;else skipNote=' Not enough new players left, so skipped ones were allowed back.'}
- var ov=all.filter(function(x){return (x.l.g.grade==='A+'||x.l.g.grade==='B')&&x.pct>0}).sort(function(a,b){return b.pct-a.pct});
- var un=all.filter(function(x){return (x.l.g.grade==='D'||x.l.g.grade==='F')&&x.pct<=-.05}).sort(function(a,b){return a.pct-b.pct});
+ var ov=all.filter(function(x){return isPlay(x.l.g)&&x.l.g.pick==='OVER'}).sort(function(a,b){return b.pct-a.pct});
+ var un=all.filter(function(x){return isPlay(x.l.g)&&x.l.g.pick==='UNDER'}).sort(function(a,b){return a.pct-b.pct});
  var upFirst=un.length&&(!ov.length||Math.abs(un[0].pct)>ov[0].pct);ov=shuf(ov);un=shuf(un);
  var used={},out=[];
  function take(arr,cnt){var t=0;for(var i=0;i<arr.length&&t<cnt;i++){var k=norm(arr[i].l.player);if(used[k])continue;used[k]=1;out.push(arr[i]);t++}return t}
@@ -282,11 +285,11 @@ function buildSlip(n,mode){
  if(out.length<n){ // still short: use the best remaining graded lines, any grade
   take(all.slice().sort(function(a,b){return Math.abs(b.pct)-Math.abs(a.pct)}),n-out.length)}
  var res=out.map(function(x){return{player:x.l.player,stat:x.l.stat,line:x.l.line,pick:x.l.g.pick,grade:x.l.g.grade}});
- var no=res.filter(function(x){return x.pick==='OVER'}).length,nu=res.length-no,weak=out.filter(function(x){return !((x.l.g.grade==='A+'||x.l.g.grade==='B')&&x.pct>0)&&!((x.l.g.grade==='D'||x.l.g.grade==='F')&&x.pct<=-.05)}).length;
+ var no=res.filter(function(x){return x.pick==='OVER'}).length,nu=res.length-no,weak=out.filter(function(x){return !isPlay(x.l.g)}).length;
  var msg='Built '+res.length+'-leg slip: '+no+' Over'+(no===1?'':'s')+', '+nu+' Under'+(nu===1?'':'s')+(res.length<n?' (only '+res.length+' lines available)':'');
- if(res.length&&(!(no&&nu)||weak)&&mode!=='safe')msg+=weak?'. Not enough strong picks, so '+weak+' weaker leg'+(weak===1?' was':'s were')+' added':'. Only one side had strong picks';
+ if(res.length&&(!(no&&nu)||weak)&&mode!=='safe')msg+=weak?'. Not enough plays (A, B, F without a flag), so '+weak+' weaker leg'+(weak===1?' was':'s were')+' added (below break-even or flagged)':'. Only one side had strong picks';
  return{out:res,msg:msg+skipNote}}
-function viewSlip(){var h='<div class="grid c2"><div class="card"><h2>Slip builder</h2><div class="btns"><button class="g" data-act="auto" data-n="2" data-m="safe">Safe 2-Leg</button><button class="g" data-act="auto" data-n="3" data-m="bal">Balanced 3-Leg</button><button class="g" data-act="auto" data-n="4" data-m="bal">Balanced 4-Leg</button><button class="g" data-act="auto" data-n="4" data-m="deg">Degenerate 4-Leg</button></div><div class="btns" style="margin-top:8px"><button class="'+(svar==='var'?'b':'g')+'" data-act="svar" data-v="var">Variety</button><button class="'+(svar==='best'?'b':'g')+'" data-act="svar" data-v="best">Best edges</button><button class="g" data-act="sskip">Skip these players</button>'+(Object.keys(excl).length?'<button class="g" data-act="sskipclr">Reset skips ('+Object.keys(excl).length+')</button>':'')+'</div><div class="muted" style="margin-top:6px">Variety picks from the top 10 strong picks on each side, so every tap gives a new mix. Best edges always takes the biggest edges. Skip these players leaves the players on your current slip out of the next builds.</div><div class="muted" style="margin-top:6px">Auto slips mix strong Overs (grade A+ or B) with strong Unders (D or F, projection at least 5% below the line), one leg per player. Safe 2-Leg takes the two biggest edges on either side. Balanced 3-Leg is 2 of one side and 1 of the other. Balanced 4-Leg is 2 Overs and 2 Unders. Degenerate 4-Leg takes the four biggest edges with at least one of each side. If a side runs short, the slip fills from the other side and says so.</div></div>';
+function viewSlip(){var h='<div class="grid c2"><div class="card"><h2>Slip builder</h2><div class="btns"><button class="g" data-act="auto" data-n="2" data-m="safe">Safe 2-Leg</button><button class="g" data-act="auto" data-n="3" data-m="bal">Balanced 3-Leg</button><button class="g" data-act="auto" data-n="4" data-m="bal">Balanced 4-Leg</button><button class="g" data-act="auto" data-n="4" data-m="deg">Degenerate 4-Leg</button></div><div class="btns" style="margin-top:8px"><button class="'+(svar==='var'?'b':'g')+'" data-act="svar" data-v="var">Variety</button><button class="'+(svar==='best'?'b':'g')+'" data-act="svar" data-v="best">Best edges</button><button class="g" data-act="sskip">Skip these players</button>'+(Object.keys(excl).length?'<button class="g" data-act="sskipclr">Reset skips ('+Object.keys(excl).length+')</button>':'')+'</div><div class="muted" style="margin-top:6px">Variety picks from the top 10 plays on each side, so every tap gives a new mix. Best edges always takes the biggest edges. Skip these players leaves the players on your current slip out of the next builds.</div><div class="muted" style="margin-top:6px">Auto slips use only plays: Overs graded A or B and Unders graded F (the chance of the pick beats the book break-even by 3+ percentage points), with no filter flag, one leg per player. When there are not enough plays the slip is filled with C / D legs and says so: those are below break-even. Safe 2-Leg takes the two biggest edges on either side. Balanced 3-Leg is 2 of one side and 1 of the other. Balanced 4-Leg is 2 Overs and 2 Unders. Degenerate 4-Leg takes the four biggest edges with at least one of each side. If a side runs short, the slip fills from the other side and says so.</div></div>';
  h+='<div class="card"><h2>Your slip · '+slip.length+' legs</h2>'+(slip.length?slip.map(function(s,i){return '<div class="item"><div><b>'+esc(s.player)+'</b> <span class="pill '+(s.pick==='UNDER'?'u':'')+'">'+s.pick+' '+s.line+'</span><br><span class="muted">'+sname(s.stat)+(s.grade?' · grade '+esc(s.grade):'')+'</span></div><button class="g" data-act="sdel" data-i="'+i+'">✕</button></div>'}).join('')+'<div class="btns"><button class="b" data-act="scopy">Copy</button><button class="g" data-act="spp">Open PrizePicks</button><button class="g" data-act="simg">Download image</button><button class="g" data-act="sshare">Share</button><button class="g" data-act="sclear">Clear</button></div>':'<div class="muted">Empty. Add legs from Lines or Grader.</div>')+'</div></div>';return h}
 function fv(x,d){return x==null||isNaN(x)?'–':x.toFixed(d==null?1:d)}
 function pct(a,b){return b?(a/b*100):null}
@@ -332,7 +335,7 @@ function img(kind,cb){fontReady(function(){var c=document.createElement('canvas'
  var im=new Image();im.onload=function(){x.globalAlpha=.12;var w=760,h=w*im.height/im.width;x.drawImage(im,(1080-w)/2,(1350-h)/2,w,h);x.globalAlpha=1;draw();cb(c)};im.onerror=function(){draw();cb(c)};im.src='assets/logo.png';
  function T(t,y,size,color,glow,maxW){x.font=size+'px '+IMGFONT;while(maxW&&size>20&&x.measureText(t).width>maxW){size-=2;x.font=size+'px '+IMGFONT}
   x.shadowColor=glow||'transparent';x.shadowBlur=glow?28:0;x.fillStyle=color;x.fillText(t,540,y);x.shadowBlur=0}
- function draw(){x.textAlign='center';if(kind.g){var g=kind.g,gc=g.grade==='A+'||g.grade==='B'?'#00FF66':g.grade==='C'?'#ffc53d':'#ff4d6d';
+ function draw(){x.textAlign='center';if(kind.g){var g=kind.g,gc=g.grade==='A'||g.grade==='B'||g.grade==='F'?'#00FF66':g.grade==='C'||g.grade==='D'?'#ffc53d':'#ff4d6d';
   T(g.player.toUpperCase(),190,70,'#fff','#00FF66',960);T(sname(g.stat).toUpperCase(),262,44,'#00FF66',null,960);T('LINE '+g.line+'  ·  PROJ '+g.proj,335,48,'#fff',null,960);
   T(g.grade,640,320,gc,gc,900);T(g.label.toUpperCase(),770,64,gc,null,960);
   T('OVER '+g.over+'/'+g.of+' LAST '+g.of+(g.opp?'  ·  VS '+g.opp.toUpperCase():''),850,36,'#c8cdd2',null,960)}
@@ -352,14 +355,14 @@ function showImg(url,blob,name){var old=document.getElementById('imgov');if(old)
  ov.appendChild(im);ov.appendChild(hint);ov.appendChild(row);document.body.appendChild(ov)}
 function dl(c,name){c.toBlob(function(b){if(!b){toast('Could not build the image');return}showImg(URL.createObjectURL(b),b,name)},'image/png')}
 function share(c,name){dl(c,name)}
-function curGrade(){var g=gradeFor(sel.player,sel.team||'',sel.stat,parseFloat(sel.line),sel.opp);return g&&!g.missing?g:null}
+function curGrade(){var g=gradeFor(sel.player,sel.team||'',sel.stat,parseFloat(sel.line),sel.opp,{book:sel.book||'PrizePicks',odds:sel.odds});return g&&!g.missing?g:null}
 function addSlip(g){if(slip.some(function(s){return norm(s.player)===norm(g.player)&&s.stat===g.stat})){toast('Already on slip');return}slip.push({player:g.player,stat:g.stat,line:g.line,pick:g.pick,grade:g.grade});save('gp_slip',slip);toast('Added '+g.player+' '+g.pick+' '+g.line)}
 function rp(l){if(l.g||String(l.player||'').indexOf('+')>=0)return '';var p=find(l.player,l.team);return p?p.name:''}
 function openP(n){gpClose();sel.pl=n;sel.v='all';sel.o='';var r=recents().filter(function(x){return x!==n});r.unshift(n);save('gp_recent',r.slice(0,8));tab='players';render();window.scrollTo(0,0);toast('Stats for '+n)}
 // ---- game props side panel: tap See props on a game and that match's lines slide in on the right
 function gpClose(){var p=document.getElementById('gpanel');if(p){p.classList.remove('open');setTimeout(function(){var q=document.getElementById('gpanel');if(q&&!q.classList.contains('open'))q.remove()},250)}}
 function gpItem(a){var l=a[0],i=a[1],g=l.g,started=l.start&&new Date(l.start).getTime()<NOW();
- return '<div class="item"><div><b>'+esc(l.player)+'</b> <span class="muted">'+esc(sname(l.stat))+(l.book?' · '+esc(l.book):'')+(started?' · started':'')+'</span><br><span class="muted">line </span><b>'+l.line+'</b>'+(g?'<span class="muted"> · proj '+g.proj+' · over '+g.over+'/'+g.of+'</span>':'<span class="muted"> · can\'t grade this one'+(rp(l)?', research him in the Players tab':'')+'</span>')+'</div><div style="text-align:right">'+(g?'<span class="pill '+(g.pick==='UNDER'?'u':'')+'">'+g.grade+' '+g.pick+'</span><br><button class="g" data-act="lg" data-i="'+i+'">Grade</button> <button class="g" data-act="ladd" data-i="'+i+'">+ Slip</button>':(rp(l)?'<button class="g" data-act="plview" data-p="'+esc(rp(l))+'">Research</button>':'<button class="g" data-act="lg" data-i="'+i+'">Grade</button>'))+'</div></div>'}
+ return '<div class="item"><div><b>'+esc(l.player)+'</b> <span class="muted">'+esc(sname(l.stat))+(l.book?' · '+esc(l.book):'')+(started?' · started':'')+'</span><br><span class="muted">line </span><b>'+l.line+'</b>'+(g?'<span class="muted"> · proj '+g.proj+' · over '+g.over+'/'+g.of+'</span>':'<span class="muted"> · can\'t grade this one'+(rp(l)?', research him in the Players tab':'')+'</span>')+'</div><div style="text-align:right">'+(g?'<span class="pill '+(g.pick==='UNDER'?'u':'')+'">'+pillTxt(g)+'</span><br><button class="g" data-act="lg" data-i="'+i+'">Grade</button> <button class="g" data-act="ladd" data-i="'+i+'">+ Slip</button>':(rp(l)?'<button class="g" data-act="plview" data-p="'+esc(rp(l))+'">Research</button>':'<button class="g" data-act="lg" data-i="'+i+'">Grade</button>'))+'</div></div>'}
 function openGP(id){var g=null;GAMES.forEach(function(x){if(String(x.id)===String(id))g=x});if(!g){toast('Game not found');return}
  var all=allLines(),mine=[];all.forEach(function(l,i){if(teq(l.team,g.team1)||teq(l.team,g.team2))mine.push([l,i])});
  function side(t){return mine.filter(function(a){return teq(a[0].team,t)}).sort(function(a,b){return a[0].player.toLowerCase()<b[0].player.toLowerCase()?-1:a[0].player.toLowerCase()>b[0].player.toLowerCase()?1:(a[0].stat<b[0].stat?-1:1)})}
@@ -391,13 +394,13 @@ document.addEventListener('click',function(e){var b=e.target.closest('[data-act]
  else if(a==='pclose'){sel.pl='';render();toast('Back to list')}
  else if(a==='pgrade'){var pp2=find(sel.pl);sel.player=pp2.name;sel.line=sel.stat==='hs'?(sel.l2||''):(sel.l1||'');sel.opp=sel.o||'';go('grader');toast('Loaded '+pp2.name+' in the grader')}
  else if(a==='pg'){sel.player=b.dataset.p;var p=find(sel.player);sel.opp='';go('grader');toast('Loaded '+sel.player+'. Enter a line')}
- else if(a==='grade'){var np=$('gp').value;if(np!==sel.player)sel.team='';sel.player=np;sel.stat=$('gs').value;sel.line=$('gl').value;sel.opp=$('go').value;render();toast('Graded')}
+ else if(a==='grade'){var np=$('gp').value;if(np!==sel.player)sel.team='';sel.player=np;sel.stat=$('gs').value;sel.line=$('gl').value;sel.opp=$('go').value;var nb=$('gb')?$('gb').value:'PrizePicks';if(nb!==sel.book||String(parseFloat(sel.line))!==String(sel.oddsLine))sel.odds=null;sel.book=nb;render();toast('Graded')}
  else if(a==='gadd'){var g=curGrade();if(g)addSlip(g)}
  else if(a==='gimg'){var g2=curGrade();if(g2)img({g:g2},function(c){dl(c,'grade-1080x1350.png')})}
  else if(a==='gshare'){var g3=curGrade();if(g3)img({g:g3},function(c){share(c,'grade.png')})}
  else if(a==='madd'){var n=$('mp').value.trim(),l=parseFloat($('ml').value);if(!n||isNaN(l)){toast('Enter a player and a line');return}var p2=find(n);manual.push({player:p2?p2.name:n,team:p2?p2.team:'',stat:$('ms').value,line:l,opponent:$('mo').value,period:'Maps 1-2',src:'manual'});save('gp_manual',manual);render();toast('Line saved')}
  else if(a==='ldel'){manual.splice(i-LINES.length,1);save('gp_manual',manual);render();toast('Line removed')}
- else if(a==='lg'){var l2=allLines()[i];sel={player:l2.player,stat:l2.stat,line:String(l2.line),opp:l2.opp,team:l2.team};go('grader');toast('Loaded '+l2.player)}
+ else if(a==='lg'){var l2=allLines()[i];sel={player:l2.player,stat:l2.stat,line:String(l2.line),opp:l2.opp,team:l2.team,book:l2.book||'PrizePicks',odds:l2.odds,oddsLine:String(+l2.line)};go('grader');toast('Loaded '+l2.player)}
  else if(a==='ladd'){var l3=allLines()[i];if(!l3.g){toast('Can\'t grade this one. Research the player in the Players tab');return}addSlip(l3.g);render()}
  else if(a==='auto'){var r=buildSlip(+b.dataset.n,b.dataset.m||'bal');if(!r.out.length){toast('No graded lines yet. Add lines first');return}slip=r.out;save('gp_slip',slip);render();toast(r.msg)}
  else if(a==='svar'){svar=b.dataset.v;render();toast(svar==='var'?'Variety on: each build is a new mix':'Best edges: always the biggest edges')}
@@ -422,8 +425,8 @@ function applyFeeds(g,l,h){
  if(l){LINES=l.lines||[];META.lines_at=l.observed_at?fmt(l.observed_at):''}
  if(h&&h.entries)HIST=h.entries}
 function feeds(){return Promise.all([getJSON('games.json').catch(function(){return null}),getJSON('lines.json').catch(function(){return null}),getJSON('lines_history.json').catch(function(){return null})])}
-function boot(){Promise.all([getJSON('players.json'),feeds()]).then(function(r){
- DB=r[0].players||[];RANK=r[0].ranks||{};META.updated=r[0].updated||'';applyFeeds(r[1][0],r[1][1],r[1][2]);render();
+function boot(){Promise.all([getJSON('players.json'),feeds(),getJSON('team_strength.json').catch(function(){return null})]).then(function(r){
+ STRENGTH=r[2]||null;MCTX=null;DB=r[0].players||[];RANK=r[0].ranks||{};META.updated=r[0].updated||'';applyFeeds(r[1][0],r[1][1],r[1][2]);render();
  }).catch(function(){$('main').innerHTML='<div class="card"><div class="warn">Could not load players.json. Open this from the hosted site.</div></div>';nav()})}
 setInterval(function(){if(document.hidden||!DB.length)return;var ae=document.activeElement;if(ae&&/INPUT|SELECT|TEXTAREA/.test(ae.tagName))return;if(['games','lines','dash'].indexOf(tab)<0)return;
  feeds().then(function(r){applyFeeds(r[0],r[1],r[2]);if(!document.getElementById('imgov'))render()})},60000);

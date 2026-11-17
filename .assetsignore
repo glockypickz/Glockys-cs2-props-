@@ -9,3 +9,10 @@ node_modules
 wrangler.jsonc
 .assetsignore
 debug*
+.env
+.env.*
+.gitignore
+cito_cache
+cito_ids.json
+tests
+__pycache__

@@ -6,14 +6,14 @@ Prints a short report to the Actions log and writes gap_report.json.
 """
 import json
 from collections import defaultdict
-from grader import Grader, teq
+from grader import Grader, teq, load_strength
 
 
 def main():
     lines = json.load(open("lines.json", encoding="utf-8")).get("lines", [])
     pj = json.load(open("players.json", encoding="utf-8"))
     players = pj.get("players", [])
-    gr = Grader(players, pj.get("ranks") or {})
+    gr = Grader(players, pj.get("ranks") or {}, strength=load_strength())
     teams = sorted({p["team"] for p in players if p.get("team")})
 
     rows = {}   # one row per player name on the lines (combos split)

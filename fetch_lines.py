@@ -68,18 +68,18 @@ def parse_time(t):
 def load_grader():
     """Grader built from players.json, so each pick can be locked in. Returns None if it can't be built."""
     try:
-        from grader import Grader
+        from grader import Grader, load_strength
         global STATS_STAMP
         d = json.load(open("players.json", encoding="utf-8"))
         STATS_STAMP = str(d.get("updated") or "")
-        return Grader(d.get("players", []), d.get("ranks") or {})
+        return Grader(d.get("players", []), d.get("ranks") or {}, strength=load_strength())  # team_strength.json: file read, no Cito call
     except Exception as e:
         print("grader not available, picks are not locked this run:", e)
         return None
 
 
 def try_lock(gr, e, now, t0):
-    """Save the app's grade, projection and pick for this line, once, before the match starts."""
+    """Save the app's grade, projection, pick and probability for this line, once, before the match starts."""
     if gr is None or e.get("lock") or (t0 and now and now >= t0):
         return
     try:
@@ -87,14 +87,17 @@ def try_lock(gr, e, now, t0):
         if not st:
             return
         if "+" in e["player"]:
-            g = gr.grade_combo(e["player"], e.get("team"), st, float(e["line"]), e.get("opponent") or "")
+            g = gr.grade_combo(e["player"], e.get("team"), st, float(e["line"]), e.get("opponent") or "", e.get("book"), e.get("odds"))
         else:
             p = gr.find(e["player"], e.get("team"))
             if not p:
                 return
-            g = gr.grade(p, st, float(e["line"]), e.get("opponent") or "")
+            g = gr.grade(p, st, float(e["line"]), e.get("opponent") or "", e.get("team"), e.get("book"), e.get("odds"))
         if g:
             e["lock"] = {"line": float(e["line"]), "proj": g["proj"], "grade": g["grade"], "pick": g["pick"],
+                         "p_over": g["p_over"], "p_pick": g["p_pick"], "be": g["be"], "edge_pp": g["edge_pp"],
+                         "reasons": g["reasons"], "flag": g.get("flag", ""), "model": g["model"], "odds": e.get("odds"),
+                         "hits": g.get("hits"),   # [over, series] vs this line: l5 / l10 / l20 / szn / h2h (single props only)
                          "at": now.isoformat(timespec="seconds"), "stats_updated": STATS_STAMP}
     except Exception as ex:
         print("lock failed for", e.get("player"), ex)
@@ -104,8 +107,9 @@ STATS_STAMP = ""
 
 
 def update_history(lines, now_iso):
-    """Remember every line we saw, per book/player/stat/match. The line keeps updating until the match starts,
-    so the saved number is the closing line. first_line is the first number we ever saw."""
+    """Remember every line we saw, per book/player/stat/match (PrizePicks and Underdog are separate entries).
+    line / odds keep updating until the match starts, so they are the closing line and odds; first_line /
+    first_odds are the first we saw. Finished lines are then settled (hit / miss / push / void, see settle.py)."""
     try:
         old = json.load(open(HISTORY_FILE, encoding="utf-8")).get("entries", [])
     except Exception:
@@ -123,12 +127,20 @@ def update_history(lines, now_iso):
         if e is None:
             by[k] = {"book": l["book"], "player": l["player"], "team": l.get("team", ""),
                      "opponent": l.get("opponent", ""), "stat": l["stat"], "start": start,
-                     "line": l["line"], "first_line": l["line"], "first_seen": now_iso, "last_seen": now_iso}
+                     "line": l["line"], "first_line": l["line"], "odds": l.get("odds"), "first_odds": l.get("odds"),
+                     "first_seen": now_iso, "last_seen": now_iso}
         elif t0 is None or now is None or now < t0:
             e["line"] = l["line"]
+            e["odds"] = l.get("odds")
+            e.setdefault("first_odds", None)
             e["last_seen"] = now_iso
         try_lock(gr, by[k], now, t0)
     print("locked picks:", sum(1 for e in by.values() if e.get("lock")), "of", len(by))
+    try:
+        from settle import settle_all
+        settle_all(gr, list(by.values()), now)
+    except Exception as ex:
+        print("settling failed (history is still saved):", ex)
     cutoff = (now - datetime.timedelta(days=KEEP_DAYS)) if now else None
     cut2 = (now - datetime.timedelta(days=KEEP_OTHER_DAYS)) if now else None
     keep = []
