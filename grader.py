@@ -22,8 +22,15 @@ How a prop is graded
        F = Under, edge >= +3pp   (take the Under)
      No A+ and no E.
      Break-even comes from the line's odds when stored, else the book default.
-  7. Filters, shown as a flag next to the letter (the letter itself is not changed): fewer than 8 earlier series, player not on the line's team,
-     player missed 2+ of his team's last 3 series (stand-in / roster change).
+     Then a hit-rate override can raise the letter to A or B Over: the equal-weight blend of L5 / L10 / L20 /
+     season over-rates vs this line (w_hr_l5 / w_hr_l10 / w_hr_l20 / w_hr_szn, default 0.25 each). A window with
+     0 series is skipped and the rest are renormalized. Season must have hr_szn_min (8) series or the override
+     does not fire (and a low-sample flag is shown). Blend >= hr_upgrade_a (0.85) -> A Over; >= hr_upgrade_b
+     (0.75) -> B Over unless the model letter is already A. Below that the model letter is unchanged. This is
+     not w_hr (which stays 0 and does not enter P(over)).
+  7. Filters, shown as a flag next to the letter (the letter itself is not changed, except the hit-rate override
+     above): fewer than 8 earlier series, player not on the line's team,
+     player missed 2+ of his team's last 3 series (stand-in / roster change), thin hit-rate windows.
 """
 import re, math, bisect
 
@@ -33,7 +40,8 @@ PARAMS = {"m": 100, "half_life": 8, "n_max": 200, "m_team": 1500, "elo_k": 16, "
           "rd_a": 17.34, "rd_b": 16.18, "h2h_min": 3, "h2h_w": 0.0, "w_line": 0.7,
           "g_kills": 0.6573, "g_hs": 0.3404, "size_kills": 20.0, "size_hs": 16.0,
           "min_series": 8, "grade_a": 6.0, "grade_b": 3.0,
-          "w_rank": 0.25, "rank_s": 1.0, "w_maps": 0.25, "k_maps": 6.0, "w_hr": 0.0, "k_hr": 5.0,
+          "w_rank": 0.25, "rank_s": 1.0, "w_maps": 0.25, "k_maps": 6.0, "w_hr": 0.0, "k_hr": 5.0, "w_hr_l5": 0.25, "w_hr_l10": 0.25, "w_hr_l20": 0.25, "w_hr_szn": 0.25,
+          "hr_upgrade_a": 0.85, "hr_upgrade_b": 0.75, "hr_szn_min": 8,
           "w_l5": 0.1, "w_l10": 0.1, "w_l15": 0.0, "w_szn": 0.0, "w_kd": 0.1, "k_kd": 40.0,
           "w_hs5": 0.3, "w_hs10": 0.2, "w_hs15": 0.0, "w_hsszn": 0.1,
           "w_khs5": 0.1, "w_khs10": 0.0, "w_khs15": 0.0, "w_khsszn": 0.0, "k_hsp": 30.0, "w_hkd": -0.1}
@@ -59,6 +67,11 @@ PARAMS = {"m": 100, "half_life": 8, "n_max": 200, "m_team": 1500, "elo_k": 16, "
 #         hr = (sum w_i * over_i + k_hr * 0.5) / (sum w_i + k_hr) over the last n_max series (pushes left out,
 #         w_i = 0.5 ** (i / half_life)). 0 = shown on the site but not used in the grade. Chosen by backtest.py
 #         (walk-forward on the earlier locked lines, checked on the later ones).
+# Hit-rate letter override (separate from w_hr; w_hr stays 0). w_hr_l5 / w_hr_l10 / w_hr_l20 / w_hr_szn: weights
+#   of the L5 / L10 / L20 / season over-rate vs the current line, averaged (a window with 0 series is skipped).
+#   Default 0.25 each. L20 is computed for this even though prop cards display L15. hr_upgrade_a / hr_upgrade_b:
+#   blend >= 0.85 -> A Over; >= 0.75 -> B Over unless the model letter is already A; else the model letter stays.
+#   hr_szn_min: season needs this many series or the override does not fire (low-sample flag). Thresholds 0 = off.
 # Cito features (only active when team_strength.json is present; with no file the grader is exactly as before):
 #   w_rank: weight of the ranking win chance (dated VRS + world points, latest list strictly before the match day)
 #           blended into the Elo win chance. rank_s: exponent in p = pa^s / (pa^s + pb^s).
@@ -178,6 +191,48 @@ def letter(pick, epp, P=PARAMS):
     if pick == "OVER":
         return "A" if epp >= P["grade_a"] else "B" if epp >= P["grade_b"] else "C"
     return "F" if epp >= P["grade_b"] else "D"
+
+
+HR_BLEND_WINS = (("l5", 5, "w_hr_l5"), ("l10", 10, "w_hr_l10"), ("l20", 20, "w_hr_l20"), ("szn", None, "w_hr_szn"))
+
+
+def hitrate_upgrade(hits, P=PARAMS):
+    """Equal-weight (by default) blend of L5 / L10 / L20 / season over-rates. Returns
+    (blend or None, upgrade letter or None, extra reason strings). Upgrade is off when
+    both thresholds are 0 (so a checkout compared to an older grader stays identical)."""
+    reasons = []
+    if not hits or not (float(P.get("hr_upgrade_a") or 0) > 0 or float(P.get("hr_upgrade_b") or 0) > 0):
+        return None, None, reasons
+    szn_n = int((hits.get("szn") or [0, 0])[1] or 0)
+    szn_min = int(P.get("hr_szn_min") or 8)
+    if szn_n < szn_min:
+        reasons.append("only %d season series vs this line (need %d for the hit-rate grade)" % (szn_n, szn_min))
+        return None, None, reasons
+    num = den = 0.0
+    thin = []
+    for key, need, wk in HR_BLEND_WINS:
+        w = float(P.get(wk) or 0)
+        if w <= 0:
+            continue
+        v = hits.get(key) or [0, 0]
+        n = int(v[1] or 0)
+        if n <= 0:
+            continue
+        num += w * (float(v[0]) / n)
+        den += w
+        if need and n < need:
+            thin.append("%s %d" % (key.upper(), n))
+    if den <= 0:
+        return None, None, reasons
+    blend = num / den
+    if thin:
+        reasons.append("thin hit-rate windows (" + ", ".join(thin) + ")")
+    up = None
+    if blend >= float(P["hr_upgrade_a"]):
+        up = "A"
+    elif blend >= float(P["hr_upgrade_b"]):
+        up = "B"
+    return blend, up, reasons
 
 
 # ---- players.json storage. fmt 2 (compact) keeps a whole season small enough for the site (Workers assets <= 25 MiB):
@@ -669,7 +724,7 @@ class Grader:
             out.append("missed 2+ of the team's last 3 series (stand-in or roster change)")
         return out
 
-    def finish(self, mu, line, st, book=None, odds=None, reasons=None, size=None, hr=None):
+    def finish(self, mu, line, st, book=None, odds=None, reasons=None, size=None, hr=None, hits=None):
         P = self.P
         size = size or (P["size_kills"] if st == "kills" else P["size_hs"])
         mu_f = blend_mean(mu, line, size, P["w_line"])
@@ -688,10 +743,19 @@ class Grader:
         epp = (pp - be) * 100
         reasons = list(reasons or [])
         g = letter(pick, epp, P)
+        model_pick, model_grade = pick, g
+        blend, up, extra = hitrate_upgrade(hits, P)
+        reasons += extra
+        if up == "A" or (up == "B" and g != "A"):
+            if model_pick == "UNDER":
+                reasons.append("model leans Under; hit-rate grade is Over")
+            pick, g = "OVER", up
         # proj / edge show the model's own number; the probabilities use the line-blended mean
         return {"proj": round(mu, 1), "mu_model": round(mu, 2), "mu_blend": round(mu_f, 2), "edge": round(mu - line, 1), "grade": g, "pick": pick,
                 "p_over": round(po, 4), "p_push": round(eq, 4), "p_pick": round(pp, 4), "be": round(be, 4),
-                "edge_pp": round(epp, 2), "reasons": reasons, "flag": "; ".join(reasons), "model": MODEL_VERSION}
+                "edge_pp": round(epp, 2), "reasons": reasons, "flag": "; ".join(reasons), "model": MODEL_VERSION,
+                "hr_blend": None if blend is None else round(blend, 4), "hr_upgrade": up,
+                "model_grade": model_grade, "model_pick": model_pick}
 
     def grade(self, p, st, line, opp, team=None, book=None, odds=None, before="9999"):
         if line is None or (isinstance(line, float) and math.isnan(line)):
@@ -700,7 +764,7 @@ class Grader:
         if not pr:
             return None
         hits = self.hitrates(p, st, float(line), opp, before)
-        r = self.finish(pr["mu"], float(line), st, book, odds, self.filters(p, team, pr["n"], before), hr=hits["p"])
+        r = self.finish(pr["mu"], float(line), st, book, odds, self.filters(p, team, pr["n"], before), hr=hits["p"], hits=hits)
         r["hits"] = {k: hits[k] for k in ("l5", "l10", "l15", "l20", "szn", "h2h")}
         r["p_hr"] = round(hits["p"], 4)
         r.update({"n": pr["n"], "rounds": round(pr["rounds"], 1), "pwin": round(pr["pwin"], 3), "rate": round(pr["rate"], 4),
