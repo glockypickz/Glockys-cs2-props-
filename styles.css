@@ -161,7 +161,7 @@ header img{filter:drop-shadow(0 0 10px rgba(0,255,102,.35));animation:gpglow 3.5
 .tc-name b,.tc-name span{display:block;background:#000a;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .tc-name b{font-size:8cqw;line-height:1.15;font-weight:400;text-transform:uppercase;border-radius:7px 7px 0 0;padding:1cqw 2cqw 0}
 .tc-name span{font-size:3.2cqw;color:var(--acc);border-radius:0 0 7px 7px;padding:0 2cqw 1.2cqw}
-.tc-back{display:grid;grid-template-columns:1fr 1fr;gap:1.2cqw}.tc-bh,.tc-back .tc-wide{grid-column:1/-1}.tc-bh{font-size:2.4cqw;color:var(--muted);text-transform:uppercase;letter-spacing:.04em}
+.tc-back{display:grid;grid-template-columns:1fr 1fr;gap:1.2cqw}.tc-bh{grid-column:1/-1;font-size:2.4cqw;color:var(--muted);text-transform:uppercase;letter-spacing:.04em}
 .tc-back div:not(.tc-bh){display:flex;justify-content:space-between;align-items:center;background:#ffffff0d;border:1px solid color-mix(in srgb,var(--acc) 30%,transparent);border-radius:7px;padding:1cqw 2.4cqw}.tc-back b{font-size:5cqw;font-weight:400;white-space:nowrap;order:2}.tc-back i{font-style:normal;font-size:2.6cqw;color:var(--muted);text-transform:uppercase}
 .tc-meta{font-size:2.8cqw;color:var(--silver)}
 .tc-foot{display:flex;justify-content:space-between;font-size:2.8cqw;margin-top:2cqw;color:var(--muted)}.tc-foot span:first-child{color:var(--green)}
