@@ -1,6 +1,6 @@
 // Glockys Prop Grader: serves the site files, but only hands out lines_history.json (locked picks and results) to the admin.
 // The file stores only a fingerprint (SHA-256 hash) of the admin key, so the key itself is never in the public repo.
-const KEY_HASH = "1d2187ea34c9f5b14b63ef338c7534a280956244736f086d6c82708706fe5c49";
+const KEY_HASH = "1173bfd89af9b487d93ba1bad460a1a3cb36033f987980cd636f4a6bfbde0bfc";
 
 async function sha256(text) {
   const buf = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(text));
