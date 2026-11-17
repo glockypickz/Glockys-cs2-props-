@@ -45,6 +45,8 @@ async def run(data, cutoff):
             if "mid" in l:
                 have.add((l["mid"], l.get("n")))
     added, new_games, skipped_players = 0, 0, set()
+    if U.SEM is None:  # update_data.py only creates its semaphore in main()
+        U.SEM = asyncio.Semaphore(max(1, U.CONCURRENCY))
     async with aiohttp.ClientSession(headers=U.H) as s:
         matches = await recent_matches(s, cutoff)
         print("finished matches in the window:", len(matches))
