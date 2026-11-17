@@ -1,0 +1,9 @@
+# local secrets (CITO_API_KEY=..., KASHROCK_API_KEY=...): never commit
+.env
+.env.*
+# Cito daily call counter (per machine / per run)
+cito_cache/_usage.json
+cito_cache/*.tmp
+*.tmp
+__pycache__/
+node_modules/

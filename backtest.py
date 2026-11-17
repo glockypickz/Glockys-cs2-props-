@@ -2,6 +2,10 @@
 
   python backtest.py            report with the PARAMS in grader.py
   python backtest.py --tune     also tune the parameters on the EARLY slice only and report on the later holdout
+  python backtest.py --strength tests/fixtures/team_strength_mock.json   use a Cito team_strength file (default:
+                                team_strength.json if present); --no-cito ignores it. Cito features only ever use
+                                snapshots dated BEFORE each predicted match (rankings / map stats), never same-day data.
+                                This script never calls the Cito API: it only reads saved files.
 
 Part 1 (players.json, no lines needed): every Map 1+2 series is predicted with only logs dated before that
 series (Elo, team rates, player rates all as of the day before). Scores: negative-binomial log-likelihood of
@@ -15,9 +19,16 @@ Never prints made-up numbers: every figure is computed from the files in the rep
 """
 import json, math, random, sys, datetime, statistics as S
 import grader as GV
-from grader import Grader, PARAMS, teq, norm, nb_probs, break_even
+from grader import Grader as _Grader, PARAMS, teq, norm, nb_probs, break_even, load_strength
 import grader_legacy as GL
 from settle import find_result
+
+STRENGTH = None              # team_strength data (set in main from --strength / --no-cito)
+
+
+def Grader(players, ranks=None, params=None):
+    return _Grader(players, ranks, params=params, strength=STRENGTH)
+
 
 SPLIT = "2026-10-20"        # players.json: tune on series before this date, report on series from it
 LINE_SPLIT = "2026-11-15"   # lines_history: tune w on matches before this UTC date, report on matches from it
@@ -146,6 +157,8 @@ def tune(players):
     print("fitted on the early slice (%d maps): %s" % (nmaps, g))
     grid = {"elo_k": [16, 24, 32], "m": [50, 75, 100, 150, 200, 250, 300], "half_life": [3, 5, 8, 12, 20, 1000],
             "beta": [0.0, 0.25, 0.5, 0.75, 1.0], "h2h_w": [0.0, 0.1, 0.2]}
+    if STRENGTH:
+        grid.update({"w_rank": [0.0, 0.25, 0.5, 0.75, 1.0], "rank_s": [0.5, 1.0, 2.0], "w_maps": [0.0, 0.25, 0.5, 0.75, 1.0], "k_maps": [2.0, 6.0, 15.0]})
     obj = lambda r: r["kills"]["ll"] + r["hs"]["ll"]
     best = obj(score(players, P, early))
     for _round in range(2):
@@ -236,38 +249,55 @@ def line_rows(players, params):
             pr = G.project(p, st, e.get("opponent"), e.get("team") or p.get("team"), date)
             if not pr:
                 continue
-            g = G.finish(pr["mu"], line, st, e["book"], e.get("odds"), G.filters(p, e.get("team"), pr["n"], date))
+            hits = G.hitrates(p, st, line, e.get("opponent"), date)   # series before the match only
+            g = G.finish(pr["mu"], line, st, e["book"], e.get("odds"), G.filters(p, e.get("team"), pr["n"], date), hr=hits["p"])
             mu = pr["mu"]
         rows.append({"start": e["start"], "book": e["book"], "stat": st, "line": line, "act": act, "mid": mid, "dup": dup,
                      "push": act == line, "over": act > line, "mu": mu, "v2": g,
+                     "hr": None if "+" in e["player"] else hits["p"],
                      "old_grade": lk["grade"], "old_pick": lk["pick"],
                      "old_hit": (act > line) if lk["pick"] == "OVER" else (act < line)})
     return rows
 
 
-def p_over_with_w(r, w, P):
+HR_GRID = (0.0, 0.05, 0.1, 0.15, 0.2, 0.3, 0.5)
+
+
+def p_over_with_w(r, w, P, whr=0.0):
     size = P["size_kills"] if r["stat"] == "kills" else P["size_hs"]
-    return GV.p_over_np(GV.blend_mean(r["mu"], r["line"], size, w), size, r["line"])
+    p = GV.p_over_np(GV.blend_mean(r["mu"], r["line"], size, w), size, r["line"])
+    if whr > 0 and r.get("hr") is not None:
+        p = (1 - whr) * p + whr * r["hr"]
+    return p
 
 
-def line_scores(rows, w, P):
+def line_scores(rows, w, P, whr=0.0):
     rs = [r for r in rows if not r["push"]]
-    br = S.mean((p_over_with_w(r, w, P) - r["over"]) ** 2 for r in rs)
-    ll = -S.mean(math.log(max(1e-9, p if r["over"] else 1 - p)) for r in rs for p in [p_over_with_w(r, w, P)])
+    br = S.mean((p_over_with_w(r, w, P, whr) - r["over"]) ** 2 for r in rs)
+    ll = -S.mean(math.log(max(1e-9, p if r["over"] else 1 - p)) for r in rs for p in [p_over_with_w(r, w, P, whr)])
     return br, ll, len(rs)
 
 
-def grade_table(rows, w, P, label):
-    G = Grader([], params=dict(P, w_line=w))
+def letter_summary(out, key="ng", hit="nhit"):
+    return "  ".join("%s %d/%d %s" % (g, sum(x[hit] for x in out if x[key] == g), sum(1 for x in out if x[key] == g),
+                                       pct(S.mean(x[hit] for x in out if x[key] == g)) if any(x[key] == g for x in out) else "–")
+                     for g in ("A", "B", "C", "D", "F"))
+
+
+def grade_table(rows, w, P, label, whr=None, quiet=False):
+    whr = P.get("w_hr", 0.0) if whr is None else whr
+    G = Grader([], params=dict(P, w_line=w, w_hr=whr))
     out = []
     for r in rows:
         if r["push"]:
             continue
-        g = G.finish(r["mu"], r["line"], r["stat"], r["book"], None, r["v2"]["reasons"])
+        g = G.finish(r["mu"], r["line"], r["stat"], r["book"], None, r["v2"]["reasons"], hr=r.get("hr"))
         g["flagged"] = bool(g["reasons"])
         hit = r["over"] if g["pick"] == "OVER" else (not r["over"])
         out.append(dict(r, ng=g["grade"], npick=g["pick"], nhit=hit, epp=g["edge_pp"]))
-    print("\n  v2 grades on %s (w=%.2f):" % (label, w))
+    if quiet:
+        return out
+    print("\n  v2 grades on %s (w=%.2f, w_hr=%.2f):" % (label, w, whr))
     print("  %-6s %5s %9s %8s %16s %16s" % ("grade", "n", "record", "hit", "Wilson 95%", "match-clustered"))
     for gname in ("A", "B", "C", "D", "F"):
         a = [x for x in out if x["ng"] == gname]
@@ -285,6 +315,14 @@ def grade_table(rows, w, P, label):
 
 
 def main():
+    global STRENGTH
+    if "--no-cito" in sys.argv:
+        STRENGTH, src = None, "off (--no-cito)"
+    else:
+        path = sys.argv[sys.argv.index("--strength") + 1] if "--strength" in sys.argv else "team_strength.json"
+        STRENGTH = load_strength(path)
+        src = ("%s (%s)" % (path, STRENGTH.get("source", "?"))) if STRENGTH else "none (no %s)" % path
+    print("Cito team_strength:", src, "| w_rank %s w_maps %s" % (PARAMS["w_rank"], PARAMS["w_maps"]))
     data = json.load(open("players.json", encoding="utf-8"))
     players = data["players"]
     P = dict(PARAMS)
@@ -325,6 +363,22 @@ def main():
     w = best_w[0]
     base_tr = S.mean((0.5 - r["over"]) ** 2 for r in tr if not r["push"])
     print("    line-implied 0.5 baseline on that slice: Brier %.4f  log loss %.4f -> chosen w=%.2f" % (base_tr, math.log(2), w))
+    print("\n  hit-rate weight w_hr (P = (1-w_hr)*P_model + w_hr*hit rate vs this line, earlier series only), tuned on matches before %s with w=%.2f:" % (LINE_SPLIT, w))
+    best_h = None
+    for h in HR_GRID:
+        br, ll, n = line_scores(tr, w, P, h)
+        print("    w_hr=%.2f  Brier %.4f  log loss %.4f" % (h, br, ll))
+        if best_h is None or ll < best_h[1] - 1e-9:
+            best_h = (h, ll)
+    whr = best_h[0]
+    print("    -> chosen w_hr=%.2f (0 means the hit rate did not help on the earlier lines)" % whr)
+    for label, rs in (("HOLDOUT from " + LINE_SPLIT, ho), ("all settled lines", main_rows)):
+        print("    %s: " % label + " | ".join("w_hr=%.2f log loss %.4f Brier %.4f" % (hh, line_scores(rs, w, P, hh)[1], line_scores(rs, w, P, hh)[0])
+                                                  for hh in sorted({0.0, whr, 0.2})))
+        for hh in sorted({0.0, whr, 0.2}):
+            print("      hit %% by letter, w=%.2f w_hr=%.2f: %s" % (w, hh, letter_summary(grade_table(rs, w, P, label, whr=hh, quiet=True))))
+        for hh in sorted({0.0, whr, 0.2}):
+            print("      hit %% by letter, MODEL ONLY w=0 w_hr=%.2f: %s" % (hh, letter_summary(grade_table(rs, 0.0, P, label, whr=hh, quiet=True))))
     for label, rs in (("HOLDOUT matches from " + LINE_SPLIT, ho), ("all settled lines", main_rows)):
         br, ll, n = line_scores(rs, w, P)
         br0, ll0, _ = line_scores(rs, 0.0, P)
