@@ -813,8 +813,8 @@ class Grader:
     def tier(r):
         return "t5" if r <= 5 else "t15" if r <= 15 else "t30" if r <= 30 else "t31"
 
-    def v1_project(self, p, st, opp, before="9999"):
-        """v1 projection (grader_legacy.Grader.grade), using only series dated strictly before `before`."""
+    def v1_project_parts(self, p, st, opp, before="9999"):
+        """v1 projection pieces (same math as v1_project) for the breakdown display."""
         cs = [c for c in self.series(p) if c["date"] < before]
         nums = lambda rows: [c[st] for c in rows if c.get(st) is not None]
         v = nums(cs)
@@ -822,33 +822,50 @@ class Grader:
             return None
         opp_rank = self.rank_of(opp) if opp else None
         on = norm(opp)
-        comp = [(0.35, mean(nums(cs[:10]))), (0.20, mean(v))]
+        l10r, l3r = cs[:10], cs[:3]
         h = [c for c in cs if norm(c["opp"]) == on] if opp else []
-        comp.append((0.20, mean(nums(h))))
         same = []
         if opp_rank is not None:
             for c in cs:
                 rnk = self.rank_of(c["opp"])
                 if rnk is not None and self.tier(rnk) == self.tier(opp_rank):
                     same.append(c)
-        comp.append((0.15, mean(nums(same))))
-        comp.append((0.10, mean(nums(cs[:3]))))
-        use = [(w, x) for w, x in comp if x is not None]
-        tw = sum(w for w, _ in use)
+        parts = [
+            {"key": "l10", "label": "Last 10 series", "w": 0.35, "v": mean(nums(l10r)), "n": len(nums(l10r))},
+            {"key": "szn", "label": "Season (all series)", "w": 0.20, "v": mean(v), "n": len(v)},
+            {"key": "h2h", "label": "Head-to-head" + ((" vs " + opp) if opp else ""), "w": 0.20, "v": mean(nums(h)), "n": len(nums(h))},
+            {"key": "tier", "label": "Same rank tier" + ((" as " + opp) if opp else ""), "w": 0.15, "v": mean(nums(same)), "n": len(nums(same))},
+            {"key": "l3", "label": "Last 3 series", "w": 0.10, "v": mean(nums(l3r)), "n": len(nums(l3r))},
+        ]
+        use = [x for x in parts if x["v"] is not None]
+        tw = sum(x["w"] for x in use)
         if not tw:
             return None
-        proj = sum(x * w for w, x in use) / tw
+        pre = sum(x["v"] * x["w"] for x in use) / tw
+        proj = pre
         adr5 = mean([c["adr"] for c in cs[:5] if c.get("adr") is not None])
         adrc = mean([c["adr"] for c in cs if c.get("adr") is not None])
-        if adr5 is not None and adrc:
-            proj *= max(0.95, min(1.05, 1 + 0.5 * (adr5 / adrc - 1)))
-        return proj
+        adr_n5 = sum(1 for c in cs[:5] if c.get("adr") is not None)
+        adr_n = sum(1 for c in cs if c.get("adr") is not None)
+        adr_used = adr5 is not None and bool(adrc)
+        adr_mult = 1.0
+        if adr_used:
+            adr_mult = max(0.95, min(1.05, 1 + 0.5 * (adr5 / adrc - 1)))
+            proj *= adr_mult
+        return {"proj": proj, "pre": pre, "parts": parts, "adr5": adr5, "adrc": adrc,
+                "adr_mult": adr_mult, "adr_used": adr_used, "adr_n5": adr_n5, "adr_n": adr_n, "weight_sum": tw}
+
+    def v1_project(self, p, st, opp, before="9999"):
+        """v1 projection (grader_legacy.Grader.grade), using only series dated strictly before `before`."""
+        d = self.v1_project_parts(p, st, opp, before)
+        return None if d is None else d["proj"]
 
     def _v1_result(self, mu, line, st, book, odds, reasons=None):
         """Shade the v1 projection, apply the Under break-even D/F rule, attach NB display fields."""
         g, pick = v1_shade(mu, line)
         if g is None:
             return None
+        pre_grade, pre_pick = g, pick
         proj = round1(mu)
         g, pick, epp_u, be_u, pu_u = under_be_letter(g, pick, proj, line, st, book, odds, self.P)
         size = self.P["size_kills"] if st == "kills" else self.P["size_hs"]
@@ -868,36 +885,38 @@ class Grader:
                 "grade": g, "pick": pick,
                 "p_over": round(po, 4), "p_push": round(eq, 4), "p_pick": round(p_pick, 4), "be": round(be, 4),
                 "edge_pp": round(epp, 2), "reasons": reasons, "flag": "; ".join(reasons), "model": MODEL_VERSION,
-                "hr_blend": None, "hr_upgrade": None, "model_grade": g, "model_pick": pick}
+                "hr_blend": None, "hr_upgrade": None, "model_grade": g, "model_pick": pick,
+                "under_be": {"applied": epp_u is not None, "pu": pu_u, "be": be_u, "epp": epp_u, "pre_grade": pre_grade}}
 
     def grade(self, p, st, line, opp, team=None, book=None, odds=None, before="9999"):
         if line is None or (isinstance(line, float) and math.isnan(line)):
             return None
-        mu = self.v1_project(p, st, opp, before)
-        if mu is None:
+        det = self.v1_project_parts(p, st, opp, before)
+        if det is None:
             return None
-        reasons = self.filters(p, team, len([c for c in self.series(p) if c["date"] < before]), before)
-        r = self._v1_result(mu, float(line), st, book, odds, reasons)
+        n = len([c for c in self.series(p) if c["date"] < before])
+        reasons = self.filters(p, team, n, before)
+        r = self._v1_result(det["proj"], float(line), st, book, odds, reasons)
         if not r:
             return None
+        r["v1"] = det
         hits = self.hitrates(p, st, float(line), opp, before)
         r["hits"] = {k: hits[k] for k in ("l5", "l10", "l15", "l20", "szn", "h2h")}
         r["p_hr"] = round(hits["p"], 4)
-        pr = self.project(p, st, opp, team or p.get("team"), before)
         empty_kpm = {k: None for k in ("l5", "l10", "l15", "l20", "szn")}
         empty_hsp = {k: None for k in ("l5", "l10", "l15", "l20", "szn")}
-        if pr:
-            r["h2h_n"], r["h2h_rate"] = pr["h2h"], (None if pr["h2h_rate"] is None else round(pr["h2h_rate"], 4))
-            r.update({"n": pr["n"], "rounds": round(pr["rounds"], 1), "pwin": round(pr["pwin"], 3), "rate": round(pr["rate"], 4),
-                      "p_rank": None if pr["p_rank"] is None else round(pr["p_rank"], 3),
-                      "rounds_maps": None if pr["rounds_maps"] is None else round(pr["rounds_maps"], 1),
-                      "kd": None if pr["form"]["kd"] is None else round(pr["form"]["kd"], 3),
-                      "kpm": {k: (None if v is None else round(v, 2)) for k, v in pr["form"]["kpm"].items()},
-                      "hsp": {("szn" if k == "szn" else "l" + k): (None if v is None else round(v, 4)) for k, v in pr["hsf"]["raw"].items()}})
+        cs = [c for c in self.series(p) if c["date"] < before]
+        rows = [c for c in cs if c.get("rd") and c.get(st) is not None][: self.P["n_max"]]
+        r.update({"h2h_n": 0, "h2h_rate": None, "n": n, "rounds": None, "pwin": None, "rate": None,
+                  "p_rank": None, "rounds_maps": None})
+        if rows:
+            form = self.form(cs, rows, before)
+            hsf = self.hs_form(cs, team or p.get("team"), before)
+            r.update({"kd": None if form["kd"] is None else round(form["kd"], 3),
+                      "kpm": {k: (None if v is None else round(v, 2)) for k, v in form["kpm"].items()},
+                      "hsp": {("szn" if k == "szn" else "l" + k): (None if v is None else round(v, 4)) for k, v in hsf["raw"].items()}})
         else:
-            n = len([c for c in self.series(p) if c["date"] < before])
-            r.update({"h2h_n": 0, "h2h_rate": None, "n": n, "rounds": None, "pwin": None, "rate": None,
-                      "p_rank": None, "rounds_maps": None, "kd": None, "kpm": empty_kpm, "hsp": empty_hsp})
+            r.update({"kd": None, "kpm": empty_kpm, "hsp": empty_hsp})
         r["bait"] = self.bait(p, st, float(line), before)
         return r
 
