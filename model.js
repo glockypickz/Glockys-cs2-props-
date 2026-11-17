@@ -6,12 +6,14 @@
 (function(root){
 'use strict';
 // PARAMS: tuned by backtest.py on the early slice. MUST match PARAMS in grader.py.
-var PARAMS={"m": 100, "half_life": 8, "n_max": 200, "m_team": 1500, "elo_k": 16, "beta": 0.25, "rd_a": 17.34, "rd_b": 16.18, "h2h_min": 3, "h2h_w": 0.0, "w_line": 0.7, "g_kills": 0.6573, "g_hs": 0.3404, "size_kills": 20.0, "size_hs": 16.0, "min_series": 8, "grade_a": 6.0, "grade_b": 3.0, "w_rank": 0.25, "rank_s": 1.0, "w_maps": 0.25, "k_maps": 6.0, "w_hr": 0.0, "k_hr": 5.0, "w_l5": 0.1, "w_l10": 0.1, "w_l15": 0.0, "w_szn": 0.0, "w_kd": 0.1, "k_kd": 40.0,
+var PARAMS={"m": 100, "half_life": 8, "n_max": 200, "m_team": 1500, "elo_k": 16, "beta": 0.25, "rd_a": 17.34, "rd_b": 16.18, "h2h_min": 3, "h2h_w": 0.0, "w_line": 0.7, "g_kills": 0.6573, "g_hs": 0.3404, "size_kills": 20.0, "size_hs": 16.0, "min_series": 8, "grade_a": 6.0, "grade_b": 3.0, "w_rank": 0.25, "rank_s": 1.0, "w_maps": 0.25, "k_maps": 6.0, "w_hr": 0.0, "k_hr": 5.0, "w_hr_l5": 0.25, "w_hr_l10": 0.25, "w_hr_l20": 0.25, "w_hr_szn": 0.25, "hr_upgrade_a": 0.85, "hr_upgrade_b": 0.75, "hr_szn_min": 8, "w_l5": 0.1, "w_l10": 0.1, "w_l15": 0.0, "w_szn": 0.0, "w_kd": 0.1, "k_kd": 40.0,
  "w_hs5": 0.3, "w_hs10": 0.2, "w_hs15": 0.0, "w_hsszn": 0.1, "w_khs5": 0.1, "w_khs10": 0.0, "w_khs15": 0.0, "w_khsszn": 0.0, "k_hsp": 30.0, "w_hkd": -0.1};
 // w_hs* / w_khs* / k_hsp: HS% form inputs for the headshots / kills projection. See grader.py.
 var HS_WIN=["5","10","15","szn"];
 // w_l5..w_szn, w_kd, k_kd: kill-model form inputs (kills props only). See grader.py.
 // w_hr / k_hr: hit rate vs the current line blended into P(over) (0 = shown, not used). See grader.py.
+// w_hr_l5 / w_hr_l10 / w_hr_l20 / w_hr_szn, hr_upgrade_a / hr_upgrade_b / hr_szn_min: letter override from the
+//   equal-weight blend of L5 / L10 / L20 / season over-rates vs this line (L20 is used here even though cards show L15). See grader.py.
 // Cito features (w_rank, rank_s, w_maps, k_maps): only active when team_strength.json is loaded; see grader.py for the meaning.
 var BOOK_BE={"prizepicks":0.577,"underdog":0.53},DEFAULT_BE=0.577,VERSION='v2';
 var TEAM_ALIASES={"betm33": "33", "wraithpcific": "pcific", "lowcortisolbr": "lowcortisol", "lifesagame": "lag"};
@@ -116,12 +118,25 @@ function filters(ctx,p,team,n,before){var P=ctx.P,out=[];before=before||'9999';
  var last=teamLastMids(ctx,p.team,before),mine={};series(ctx,p).forEach(function(c){if(c.date<before)mine[c.mid]=1});
  if(last.length>=3&&last.filter(function(m){return mine[m]}).length<2)out.push('missed 2+ of the team\'s last 3 series (stand-in or roster change)');
  return out}
-function finish(ctx,mu,line,st,book,odds,reasons,hr){var P=ctx.P,size=st==='kills'?P.size_kills:P.size_hs,muF=blendMean(mu,line,size,P.w_line),r=nbProbs(muF,size,line),np=Math.max(1e-12,1-r[1]),
+function hitrateUpgrade(hits,P){var reasons=[],blend=null,up=null;
+ if(!hits||!(((P.hr_upgrade_a||0)>0)||((P.hr_upgrade_b||0)>0)))return{blend:blend,upgrade:up,reasons:reasons};
+ var sz=hits.szn||[0,0],szn=sz[1]||0,sznMin=P.hr_szn_min||8;
+ if(szn<sznMin){reasons.push('only '+szn+' season series vs this line (need '+sznMin+' for the hit-rate grade)');return{blend:blend,upgrade:up,reasons:reasons}}
+ var wins=[['l5',5,'w_hr_l5'],['l10',10,'w_hr_l10'],['l20',20,'w_hr_l20'],['szn',null,'w_hr_szn']],num=0,den=0,thin=[];
+ for(var i=0;i<wins.length;i++){var k=wins[i][0],need=wins[i][1],w=P[wins[i][2]]||0;if(w<=0)continue;var v=hits[k]||[0,0],n=v[1]||0;if(n<=0)continue;num+=w*(v[0]/n);den+=w;if(need&&n<need)thin.push(k.toUpperCase()+' '+n)}
+ if(den<=0)return{blend:blend,upgrade:up,reasons:reasons};blend=num/den;
+ if(thin.length)reasons.push('thin hit-rate windows ('+thin.join(', ')+')');
+ if(blend>=P.hr_upgrade_a)up='A';else if(blend>=P.hr_upgrade_b)up='B';
+ return{blend:blend,upgrade:up,reasons:reasons}}
+function finish(ctx,mu,line,st,book,odds,reasons,hr,hits){var P=ctx.P,size=st==='kills'?P.size_kills:P.size_hs,muF=blendMean(mu,line,size,P.w_line),r=nbProbs(muF,size,line),np=Math.max(1e-12,1-r[1]),
  po=r[0]/np,pu=r[2]/np;if(hr!=null&&P.w_hr>0){po=(1-P.w_hr)*po+P.w_hr*hr;pu=1-po}var be=breakEven(book,odds),pick=Math.abs(po-pu)<1e-6?(mu>=lineMean(line,size)?'OVER':'UNDER'):(po>pu?'OVER':'UNDER'),pp=Math.max(po,pu),epp=(pp-be)*100;reasons=(reasons||[]).slice();
  var g=pick==='OVER'?(epp>=P.grade_a?'A':epp>=P.grade_b?'B':'C'):(epp>=P.grade_b?'F':'D');
- return{proj:mu,muBlend:muF,edge:mu-line,grade:g,pick:pick,pOver:po,pPush:r[1],pPick:pp,be:be,edgePP:epp,reasons:reasons,flag:reasons.join('; '),model:VERSION}}
+ var modelPick=pick,modelGrade=g,hu=hitrateUpgrade(hits,P);reasons=reasons.concat(hu.reasons);
+ if(hu.upgrade==='A'||(hu.upgrade==='B'&&g!=='A')){if(modelPick==='UNDER')reasons.push('model leans Under; hit-rate grade is Over');pick='OVER';g=hu.upgrade}
+ return{proj:mu,muBlend:muF,edge:mu-line,grade:g,pick:pick,pOver:po,pPush:r[1],pPick:pp,be:be,edgePP:epp,reasons:reasons,flag:reasons.join('; '),model:VERSION,
+  hrBlend:hu.blend,hrUpgrade:hu.upgrade,modelGrade:modelGrade,modelPick:modelPick}}
 function grade(ctx,p,st,line,opp,o){o=o||{};if(line==null||isNaN(line))return null;var pr=project(ctx,p,st,opp,o.team||p.team,o.before);if(!pr)return null;
- var hits=hitrates(ctx,p,st,+line,opp,o.before),r=finish(ctx,pr.mu,+line,st,o.book,o.odds,filters(ctx,p,o.team,pr.n,o.before),hits.p);
+ var hits=hitrates(ctx,p,st,+line,opp,o.before),r=finish(ctx,pr.mu,+line,st,o.book,o.odds,filters(ctx,p,o.team,pr.n,o.before),hits.p,hits);
  r.hits={l5:hits.l5,l10:hits.l10,l15:hits.l15,l20:hits.l20,szn:hits.szn,h2h:hits.h2h};r.pHr=hits.p;r.n=pr.n;r.rounds=pr.rounds;r.roundsElo=pr.roundsElo;r.roundsMaps=pr.roundsMaps;r.pRank=pr.pRank;r.kd=pr.form.kd;r.kpm=pr.form.kpm;r.formN=pr.form.n;r.hsp={l5:pr.hsf.raw['5'],l10:pr.hsf.raw['10'],l15:pr.hsf.raw['15'],szn:pr.hsf.raw.szn};r.hspN={l5:pr.hsf.n['5'],l10:pr.hsf.n['10'],l15:pr.hsf.n['15'],szn:pr.hsf.n.szn};r.pwin=pr.pwin;r.rate=pr.rate;r.prior=pr.prior;r.adj=pr.adj;r.cs=pr.cs;r.nRate=pr.nRate;return r}
 function gradeCombo(ctx,ps,names,st,line,opp,o){o=o||{};var mu=0,reasons=[],nmin=999,parts=[];
  for(var i=0;i<ps.length;i++){var p=ps[i],pr=project(ctx,p,st,opp,o.team||p.team,o.before);if(!pr)return null;mu+=pr.mu;nmin=Math.min(nmin,pr.n);parts.push({name:p.name,proj:pr.mu,n:pr.n});

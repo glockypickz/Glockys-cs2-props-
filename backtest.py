@@ -311,17 +311,20 @@ def line_rows(players, params):
             if g is None:
                 continue
             mu = g["mu_model"]
+            win_hits, base_reasons = None, list(g.get("reasons") or [])
         else:
             p = G.find(e["player"], e.get("team"))
             pr = G.project(p, st, e.get("opponent"), e.get("team") or p.get("team"), date)
             if not pr:
                 continue
             hits = G.hitrates(p, st, line, e.get("opponent"), date)   # series before the match only
-            g = G.finish(pr["mu"], line, st, e["book"], e.get("odds"), G.filters(p, e.get("team"), pr["n"], date), hr=hits["p"])
+            base_reasons = G.filters(p, e.get("team"), pr["n"], date)
+            g = G.finish(pr["mu"], line, st, e["book"], e.get("odds"), base_reasons, hr=hits["p"], hits=hits)
             mu = pr["mu"]
+            win_hits = hits
         rows.append({"start": e["start"], "book": e["book"], "stat": st, "line": line, "act": act, "mid": mid, "dup": dup,
                      "push": act == line, "over": act > line, "mu": mu, "v2": g,
-                     "hr": None if "+" in e["player"] else hits["p"],
+                     "hr": None if win_hits is None else win_hits["p"], "hits": win_hits, "reasons": base_reasons,
                      "old_grade": lk["grade"], "old_pick": lk["pick"],
                      "old_hit": (act > line) if lk["pick"] == "OVER" else (act < line)})
     return rows
@@ -358,7 +361,7 @@ def grade_table(rows, w, P, label, whr=None, quiet=False):
     for r in rows:
         if r["push"]:
             continue
-        g = G.finish(r["mu"], r["line"], r["stat"], r["book"], None, r["v2"]["reasons"], hr=r.get("hr"))
+        g = G.finish(r["mu"], r["line"], r["stat"], r["book"], None, r.get("reasons") or [], hr=r.get("hr"), hits=r.get("hits"))
         g["flagged"] = bool(g["reasons"])
         hit = r["over"] if g["pick"] == "OVER" else (not r["over"])
         out.append(dict(r, ng=g["grade"], npick=g["pick"], nhit=hit, epp=g["edge_pp"]))
