@@ -8,7 +8,10 @@ Incremental (players.json and season_state.json are kept between runs):
      season_state.json, so a backfill that does not finish in one run carries on in the next one.
 Season = calendar year (SEASON_START, default Jan 1 of this year), the same as the SZN hit-rate box. Logs from before
 SEASON_START are dropped. players.json is written in the compact fmt 2 (grader.encode_players) so a full season stays
-small enough for the site."""
+small enough for the site.
+Speed: up to BO3_CONCURRENCY (default 4) bo3.gg requests in flight with a BO3_DELAY (default 0.1 s) pause per request;
+a 429 makes every worker back off together. Teams on today's prop board (lines.json) are updated and backfilled first.
+Dial back with BO3_CONCURRENCY=1 BO3_DELAY=0.3 (the old pace) if bo3.gg starts rate-limiting."""
 import re, asyncio, json, datetime, time, os, aiohttp
 from grader import load_players, encode_players
 
@@ -60,25 +63,39 @@ STATE_FILE = "season_state.json"   # per-team scan progress (match ids seen, old
 MAX_BYTES = 22 * 1024 * 1024       # players.json must stay under the 25 MiB Workers asset limit: oldest logs are trimmed above this
 ONLY_TEAMS = [x.strip() for x in os.environ.get("ONLY_TEAMS", "").split(",") if x.strip()]  # testing: scan only these team slugs
 ACTIVE_DAYS = 120        # skip teams with no match in this many days
-DELAY = 0.3
+DELAY = float(os.environ.get("BO3_DELAY", "0.1"))           # pause after each request, per worker slot (was 0.3)
+CONCURRENCY = int(os.environ.get("BO3_CONCURRENCY", "4"))   # bo3.gg requests in flight at once (was 1)
 # Optional per-map fields saved when bo3.gg returns them (names are guesses; the Actions log prints the real keys)
 EXTRA_KEYS = ["rating", "player_rating", "kast", "first_kills", "first_deaths", "clutches_won", "clutches",
               "rounds_count", "rounds", "hits", "shots"]
 EVENT_TYPE = {}   # tournament id -> "lan" / "online" / None (kept in season_state.json between runs)
 SAMPLE_PRINTED = False
 STATS = {}        # game id -> trimmed players_stats rows (this run only: a match between two tracked teams is fetched once)
-REQ = {"n": 0}    # requests made this run
+REQ = {"n": 0, "429": 0}   # requests made / rate-limit answers this run
+STATS_WAIT = {}   # game id -> in-flight fetch (concurrent callers share it, so a game is fetched once)
+EVENT_WAIT = {}   # tournament id -> in-flight event-type lookup
+SEM = None        # asyncio.Semaphore(CONCURRENCY), made in main()
+PAUSE = {"until": 0.0}   # global back-off after a 429: every worker waits until this time
 STAT_KEEP = ["kills", "headshots", "death", "assists", "adr", "team_clan", "steam_profile"] + EXTRA_KEYS
 
 async def get(s, path, params=None):
-    for attempt in range(5):
-        async with s.get(B + path, params=params) as r:
-            if r.status == 429:
-                await asyncio.sleep(3 * (attempt + 1))
-                continue
-            r.raise_for_status()
-            REQ["n"] += 1
-            data = await r.json()
+    """One bo3.gg request. At most CONCURRENCY in flight; a 429 pauses ALL workers (shared back-off)."""
+    for attempt in range(6):
+        async with SEM:
+            wait = PAUSE["until"] - time.time()
+            if wait > 0:
+                await asyncio.sleep(wait)
+            async with s.get(B + path, params=params) as r:
+                if r.status == 429:
+                    REQ["429"] += 1
+                    ra = r.headers.get("Retry-After")
+                    back = float(ra) if ra and ra.replace(".", "", 1).isdigit() else 3.0 * (attempt + 1)
+                    PAUSE["until"] = max(PAUSE["until"], time.time() + back)
+                    print("429 from bo3.gg on %s: all workers pause %.0f s" % (path.split("?")[0], back))
+                    continue
+                r.raise_for_status()
+                REQ["n"] += 1
+                data = await r.json()
             await asyncio.sleep(DELAY)
             return data
     raise Exception("rate limited: " + path)
@@ -122,22 +139,37 @@ async def event_type(s, m):
     tid = (m.get("tournament") or {}).get("id")
     if tid is None:
         return None
-    if tid not in EVENT_TYPE:
-        try:
-            det = await get(s, f"/matches/{m['slug']}")
-            EVENT_TYPE[tid] = (det.get("tournament") or {}).get("event_type")
-        except Exception as e:
-            print("event type lookup failed:", tid, e)
-            EVENT_TYPE[tid] = None
-    return EVENT_TYPE[tid]
+    if tid in EVENT_TYPE:
+        return EVENT_TYPE[tid]
+    if tid not in EVENT_WAIT:
+        async def look():
+            try:
+                det = await get(s, f"/matches/{m['slug']}")
+                EVENT_TYPE[tid] = (det.get("tournament") or {}).get("event_type")
+            except Exception as e:
+                print("event type lookup failed:", tid, e)
+                EVENT_TYPE[tid] = None
+        EVENT_WAIT[tid] = asyncio.ensure_future(look())
+    await EVENT_WAIT[tid]
+    return EVENT_TYPE.get(tid)
 
 def _trim(p):
     return {k: p[k] for k in STAT_KEEP if k in p}
 
 
 async def game_stats(s, gid):
-    if gid not in STATS:
-        STATS[gid] = [_trim(p) for p in (await get(s, f"/games/{gid}/players_stats") or [])]
+    """Per-game stats, fetched once per run even when two tracked teams ask for the same game at the same time."""
+    if gid in STATS:
+        return STATS[gid]
+    if gid not in STATS_WAIT:
+        async def fetch():
+            STATS[gid] = [_trim(p) for p in (await get(s, f"/games/{gid}/players_stats") or [])]
+        STATS_WAIT[gid] = asyncio.ensure_future(fetch())
+    try:
+        await STATS_WAIT[gid]
+    except Exception:
+        STATS_WAIT.pop(gid, None)   # failed: let a later caller retry
+        raise
     return STATS[gid]
 
 
@@ -157,10 +189,9 @@ async def match_rows(s, m, tid, tname, only=None):
     date = m["start_date"][:10]
     et = await event_type(s, m)
     rows = []
-    for g in m.get("games", []):
-        if g.get("state") != "done":
-            continue
-        stats = await game_stats(s, g["id"])
+    gs = [g for g in m.get("games", []) if g.get("state") == "done"]
+    all_stats = await asyncio.gather(*(game_stats(s, g["id"]) for g in gs))
+    for g, stats in zip(gs, all_stats):
         if stats and not SAMPLE_PRINTED:
             SAMPLE_PRINTED = True
             print("players_stats keys:", sorted(stats[0].keys()))
@@ -231,8 +262,8 @@ async def update_team(s, t, cutoff, out, prev, state):
             o = min(dates) + "T23:59:59"
             st["oldest"] = min(st.get("oldest") or o, o)
     rows = []
-    for m in new:
-        rows += await match_rows(s, m, tid, tname)
+    for m, rs in zip(new, await asyncio.gather(*(match_rows(s, m, tid, tname) for m in new))):
+        rows += rs
         known.add(m["id"])
     st["mids"] = sorted(x for x in known if x is not None)
     st["scanned"] = datetime.date.today().isoformat()
@@ -273,13 +304,16 @@ async def backfill_team(s, t, out, state, deadline):
     while time.time() < deadline:
         ms = await matches_page(s, tid, 0, BACKFILL_PAGE, before=st.get("oldest"))
         pages += 1
+        todo = []
         for m in ms:
             if m["start_date"][:10] < SEASON_START:
                 st["done"] = True
                 break
-            if m["id"] in known:
-                continue
-            for r in await match_rows(s, m, tid, tname, only=set(names)):
+            if m["id"] not in known:
+                todo.append(m)
+        res = await asyncio.gather(*(match_rows(s, m, tid, tname, only=set(names)) for m in todo))
+        for m, rs in zip(todo, res):   # state moves only after the whole page is in (resumable)
+            for r in rs:
                 e = out[names[_canon(r["name"])]]
                 e["logs"] = _merge_logs(e["logs"], [r["log"]])
                 added += 1
@@ -392,7 +426,27 @@ def write_players(data):
     return len(enc.encode())
 
 
+def board_teams():
+    """Team names on today's prop board (lines.json): fetched and backfilled first."""
+    try:
+        return {_tn(x) for l in (json.load(open("lines.json")).get("lines") or []) if l.get("team")
+                for x in re.split(r"\s*[/+]\s*", str(l["team"]))} - {""}
+    except Exception:
+        return set()
+
+
+async def pool(items, fn, n):
+    """Run fn(item) for items in order with n workers (items keep their priority order)."""
+    it = iter(items)
+    async def worker():
+        for x in it:
+            await fn(x)
+    await asyncio.gather(*(worker() for _ in range(max(1, n))))
+
+
 async def main():
+    global SEM
+    SEM = asyncio.Semaphore(max(1, CONCURRENCY))
     out = {}
     started = time.time()
     deadline = started + TIME_LIMIT
@@ -419,11 +473,16 @@ async def main():
             if t["id"] not in seen_ids and (not ONLY_TEAMS or t.get("slug") in ONLY_TEAMS):
                 seen_ids.add(t["id"])
                 q2.append(t)
-        queue = q2
-        print("teams with upcoming matches (scanned first):", len(UP_TEAMS), "| total queue:", len(queue))
+        board = board_teams()
+        on_board = lambda t: _tn(t.get("name", t["slug"])) in board or _tn((state["teams"].get(str(t["id"])) or {}).get("name")) in board
+        queue = [t for t in q2 if on_board(t)] + [t for t in q2 if not on_board(t)]   # stable: board, then upcoming, then the rest
+        board_ids = {t["id"] for t in queue if on_board(t)}
+        print("teams on today's prop board:", len(board_ids), "| with upcoming matches:", len(UP_TEAMS), "| total queue:", len(queue),
+              "| bo3.gg concurrency %d, delay %.2f s" % (CONCURRENCY, DELAY))
         status = {}
         t1 = time.time()
-        for i, t in enumerate(queue):
+
+        async def upd(t):
             st = state["teams"].get(str(t["id"])) or {}
             names = {_tn(t.get("name", t["slug"])), _tn(st.get("name"))} - {""}
             prev = {}
@@ -433,24 +492,35 @@ async def main():
                 status[t["id"]] = "kept"   # out of time: keep what we had
                 for name, e in prev.items():
                     out[(t["id"], name)] = dict(e, logs=_merge_logs(e["logs"], []))
-                continue
+                return
             try:
                 status[t["id"]] = await update_team(s, t, cutoff, out, prev, state)
             except Exception as ex:
                 print("skip", t.get("slug"), ex)
                 for name, e in prev.items():
                     out[(t["id"], name)] = dict(e, logs=_merge_logs(e["logs"], []))
+        await pool(queue, upd, CONCURRENCY)
         print("update phase: %.1f min, %d requests" % ((time.time() - t1) / 60, REQ["n"]))
-        t2, r2, filled = time.time(), REQ["n"], 0
-        for t in queue:
-            if time.time() > deadline:
-                break
-            if status.get(t["id"]) not in ("updated", "kept"):
-                continue
+        t2, r2, filled = time.time(), REQ["n"], {"n": 0}
+        bleft = {x for x in board_ids if status.get(x) in ("updated", "kept")
+                 and not (state["teams"].get(str(x)) or {}).get("done")}
+        print("board teams to backfill: %d" % len(bleft))
+
+        async def bf(t):
+            if time.time() > deadline or status.get(t["id"]) not in ("updated", "kept"):
+                return
             try:
-                filled += await backfill_team(s, t, out, state, deadline)
+                got = await backfill_team(s, t, out, state, deadline)
+                filled["n"] += got
             except Exception as ex:
                 print("backfill stopped for", t.get("slug"), ex)
+            if t["id"] in bleft:
+                bleft.discard(t["id"])
+                if not bleft:
+                    print("BOARD TEAMS BACKFILLED: all %d prop-board teams done after %.1f min (%.1f min since start), %d requests" % (
+                        len(board_ids), (time.time() - t2) / 60, (time.time() - started) / 60, REQ["n"]))
+        await pool(queue, bf, CONCURRENCY)
+        filled = filled["n"]
         left = sum(1 for t in queue if status.get(t["id"]) in ("updated", "kept") and not (state["teams"].get(str(t["id"])) or {}).get("done"))
         print("backfill phase: %.1f min, %d requests, %d logs added | teams still to backfill: %d" % (
             (time.time() - t2) / 60, REQ["n"] - r2, filled, left))
@@ -460,7 +530,9 @@ async def main():
                 if k not in done_tn:
                     for name, e in ents.items():
                         out[("old", k, name)] = dict(e, logs=_merge_logs(e["logs"], []))
-        print("teams with players:", len({k[0] for k in out}), "| players:", len(out), "| requests this run:", REQ["n"])
+        el = time.time() - started
+        print("teams with players:", len({k[0] for k in out}), "| players:", len(out), "| requests this run:", REQ["n"],
+              "| %.2f req/s | 429s: %d" % (REQ["n"] / max(el, 1e-9), REQ["429"]))
     if len(out) < 20:
         raise SystemExit(f"Only {len(out)} players fetched, keeping the old players.json")
     today = datetime.date.today().isoformat()
