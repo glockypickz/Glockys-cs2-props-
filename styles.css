@@ -124,3 +124,6 @@ header img{filter:drop-shadow(0 0 10px rgba(0,255,102,.35));animation:gpglow 3.5
 .tst.cash{background:var(--green);color:#000}.tst.lost{background:var(--red);color:#fff}.tst.run{background:#ffc53d22;color:var(--amber)}
 .bar{height:5px;background:#262626;border-radius:99px;margin-top:5px;min-width:90px;overflow:hidden}.bar i{display:block;height:100%;background:var(--amber)}
 .bar i.cash{background:var(--green)}.bar i.lost{background:var(--red)}
+
+/* tracker tables scroll inside their card instead of widening the page (grid items default to min-width:auto) */
+.grid>*{min-width:0}.trk{max-width:100%;overflow-x:auto}
