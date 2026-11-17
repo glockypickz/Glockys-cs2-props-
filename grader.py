@@ -31,6 +31,9 @@ How a prop is graded
   7. Filters, shown as a flag next to the letter (the letter itself is not changed, except the hit-rate override
      above): fewer than 8 earlier series, player not on the line's team,
      player missed 2+ of his team's last 3 series (stand-in / roster change), thin hit-rate windows.
+  8. Bait flag: true if the player met or beat this exact line (actual >= line) in each of his last 5 Maps 1-2
+     series dated strictly before the match. Needs 5 series with the stat; otherwise false. Display only: it does
+     not change the projection, P(over), or letter.
 """
 import re, math, bisect
 
@@ -711,6 +714,11 @@ class Grader:
         out["p"] = (sh + P["k_hr"] * 0.5) / (sw + P["k_hr"])
         return out
 
+    def bait(self, p, st, line, before="9999"):
+        """True if the last 5 Maps 1-2 series before `before` all met or beat this line (actual >= line). Needs 5 series."""
+        cs = [c for c in self.series(p) if c["date"] < before and c.get(st) is not None][:5]
+        return len(cs) == 5 and all(c[st] >= line for c in cs)
+
     def filters(self, p, team, n, before="9999"):
         P = self.P
         out = []
@@ -773,6 +781,7 @@ class Grader:
                   "kd": None if pr["form"]["kd"] is None else round(pr["form"]["kd"], 3),
                   "kpm": {k: (None if v is None else round(v, 2)) for k, v in pr["form"]["kpm"].items()},
                   "hsp": {("szn" if k == "szn" else "l" + k): (None if v is None else round(v, 4)) for k, v in pr["hsf"]["raw"].items()}})
+        r["bait"] = self.bait(p, st, float(line), before)
         return r
 
     def grade_combo(self, name, team, st, line, opp, book=None, odds=None, before="9999"):
@@ -794,4 +803,5 @@ class Grader:
             reasons += [n + ": " + x for x in self.filters(p, team, pr["n"], before)]
         r = self.finish(mu, float(line), st, book, odds, reasons)
         r["n"] = nmin
+        r["bait"] = False
         return r

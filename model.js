@@ -2,7 +2,8 @@
    Per-round rate (decayed, shrunk to the team) x Elo strength adjustment x expected rounds -> negative binomial P(over),
    letter = direction + strength, by edge (pp) of the lean side over the book's break-even:
    A = Over >= +6pp, B = Over >= +3pp, C = Over < +3pp (slight lean), D = Under < +3pp (slight lean), F = Under >= +3pp.
-   Filter reasons are a flag next to the letter; they do not change it. */
+   Filter reasons are a flag next to the letter; they do not change it.
+   Bait is a separate flag (last 5 Maps 1-2 series all met or beat this line); it does not change the projection, probability, or letter. */
 (function(root){
 'use strict';
 // PARAMS: tuned by backtest.py on the early slice. MUST match PARAMS in grader.py.
@@ -112,6 +113,8 @@ function hitrates(ctx,p,st,line,opp,before){var P=ctx.P;before=before||'9999';va
  var out={l5:hx(cs.slice(0,5)),l10:hx(cs.slice(0,10)),l15:hx(cs.slice(0,15)),l20:hx(cs.slice(0,20)),szn:hx(cs.filter(function(c){return c.date.slice(0,4)===yr})),h2h:hx(cs.filter(function(c){return opp&&teq(c.opp,opp)}))};
  var sw=0,sh=0;cs.slice(0,P.n_max).forEach(function(c,i){if(c[st]===line)return;var w=Math.pow(0.5,i/P.half_life);sw+=w;sh+=w*(c[st]>line?1:0)});
  out.p=(sh+P.k_hr*0.5)/(sw+P.k_hr);return out}
+function isBait(ctx,p,st,line,before){before=before||'9999';var cs=series(ctx,p).filter(function(c){return c.date<before&&c[st]!=null}).slice(0,5);
+ return cs.length===5&&cs.every(function(c){return c[st]>=line})}
 function filters(ctx,p,team,n,before){var P=ctx.P,out=[];before=before||'9999';
  if(team&&!teq(p.team,team))out.push('player is not on '+team+' in the data');
  if(n<P.min_series)out.push('only '+n+' earlier Map 1+2 series (need '+P.min_series+')');
@@ -137,12 +140,12 @@ function finish(ctx,mu,line,st,book,odds,reasons,hr,hits){var P=ctx.P,size=st===
   hrBlend:hu.blend,hrUpgrade:hu.upgrade,modelGrade:modelGrade,modelPick:modelPick}}
 function grade(ctx,p,st,line,opp,o){o=o||{};if(line==null||isNaN(line))return null;var pr=project(ctx,p,st,opp,o.team||p.team,o.before);if(!pr)return null;
  var hits=hitrates(ctx,p,st,+line,opp,o.before),r=finish(ctx,pr.mu,+line,st,o.book,o.odds,filters(ctx,p,o.team,pr.n,o.before),hits.p,hits);
- r.hits={l5:hits.l5,l10:hits.l10,l15:hits.l15,l20:hits.l20,szn:hits.szn,h2h:hits.h2h};r.pHr=hits.p;r.n=pr.n;r.rounds=pr.rounds;r.roundsElo=pr.roundsElo;r.roundsMaps=pr.roundsMaps;r.pRank=pr.pRank;r.kd=pr.form.kd;r.kpm=pr.form.kpm;r.formN=pr.form.n;r.hsp={l5:pr.hsf.raw['5'],l10:pr.hsf.raw['10'],l15:pr.hsf.raw['15'],szn:pr.hsf.raw.szn};r.hspN={l5:pr.hsf.n['5'],l10:pr.hsf.n['10'],l15:pr.hsf.n['15'],szn:pr.hsf.n.szn};r.pwin=pr.pwin;r.rate=pr.rate;r.prior=pr.prior;r.adj=pr.adj;r.cs=pr.cs;r.nRate=pr.nRate;return r}
+ r.hits={l5:hits.l5,l10:hits.l10,l15:hits.l15,l20:hits.l20,szn:hits.szn,h2h:hits.h2h};r.pHr=hits.p;r.n=pr.n;r.rounds=pr.rounds;r.roundsElo=pr.roundsElo;r.roundsMaps=pr.roundsMaps;r.pRank=pr.pRank;r.kd=pr.form.kd;r.kpm=pr.form.kpm;r.formN=pr.form.n;r.hsp={l5:pr.hsf.raw['5'],l10:pr.hsf.raw['10'],l15:pr.hsf.raw['15'],szn:pr.hsf.raw.szn};r.hspN={l5:pr.hsf.n['5'],l10:pr.hsf.n['10'],l15:pr.hsf.n['15'],szn:pr.hsf.n.szn};r.pwin=pr.pwin;r.rate=pr.rate;r.prior=pr.prior;r.adj=pr.adj;r.cs=pr.cs;r.nRate=pr.nRate;r.bait=isBait(ctx,p,st,+line,o.before);return r}
 function gradeCombo(ctx,ps,names,st,line,opp,o){o=o||{};var mu=0,reasons=[],nmin=999,parts=[];
  for(var i=0;i<ps.length;i++){var p=ps[i],pr=project(ctx,p,st,opp,o.team||p.team,o.before);if(!pr)return null;mu+=pr.mu;nmin=Math.min(nmin,pr.n);parts.push({name:p.name,proj:pr.mu,n:pr.n});
   filters(ctx,p,o.team,pr.n,o.before).forEach(function(x){reasons.push(names[i]+': '+x)})}
- var r=finish(ctx,mu,+line,st,o.book,o.odds,reasons);r.n=nmin;r.parts=parts;return r}
+ var r=finish(ctx,mu,+line,st,o.book,o.odds,reasons);r.n=nmin;r.parts=parts;r.bait=false;return r}
 var api={PARAMS:PARAMS,VERSION:VERSION,TEAM_ALIASES:TEAM_ALIASES,tn:tn,teq:teq,norm:norm,breakEven:breakEven,americanBe:americanBe,nbProbs:nbProbs,lineMean:lineMean,
- build:build,decodePlayers:decodePlayers,hitrates:hitrates,prepStrength:prepStrength,pRank:pRank,pwin:pwin,mapRounds:mapRounds,series:series,elo:elo,project:project,filters:filters,finish:finish,grade:grade,gradeCombo:gradeCombo};
+ build:build,decodePlayers:decodePlayers,hitrates:hitrates,isBait:isBait,prepStrength:prepStrength,pRank:pRank,pwin:pwin,mapRounds:mapRounds,series:series,elo:elo,project:project,filters:filters,finish:finish,grade:grade,gradeCombo:gradeCombo};
 if(typeof module!=='undefined'&&module.exports)module.exports=api;else root.GPModel=api;
 })(typeof window!=='undefined'?window:this);

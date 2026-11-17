@@ -13,7 +13,7 @@ const d=M.decodePlayers(JSON.parse(fs.readFileSync('players.json','utf8')));cons
 const S=process.env.STRENGTH?JSON.parse(fs.readFileSync(process.env.STRENGTH,'utf8')):null;
 const ctx=M.build(d.players,cases.length&&cases[0].params||null,S);
 const out=cases.map(c=>{const p=d.players[c.i];const g=M.grade(ctx,p,c.st,c.line,c.opp,{team:c.team,book:c.book,odds:c.odds,before:c.before});
- return g?{proj:g.proj,p_over:g.pOver,grade:g.grade,pick:g.pick,edge_pp:g.edgePP,reasons:g.reasons,flag:g.flag,hits:g.hits,p_hr:g.pHr,kd:g.kd,kpm:g.kpm,hsp:g.hsp}:null});
+ return g?{proj:g.proj,p_over:g.pOver,grade:g.grade,pick:g.pick,edge_pp:g.edgePP,reasons:g.reasons,flag:g.flag,hits:g.hits,p_hr:g.pHr,kd:g.kd,kpm:g.kpm,hsp:g.hsp,bait:!!g.bait}:null});
 process.stdout.write(JSON.stringify({params:M.PARAMS,ctxp:ctx.P,aliases:M.TEAM_ALIASES,out:out}));
 """
 
@@ -79,13 +79,13 @@ def run(d, extra, strength=None):
         if g is None:
             continue
         if abs(g["mu_model"] - j["proj"]) > 0.01 or abs(g["p_over"] - j["p_over"]) > 1e-3 or g["grade"] != j["grade"] or g["pick"] != j["pick"] or g["reasons"] != j["reasons"] or g["flag"] != j["flag"] \
-                or g["hits"] != j["hits"] or abs(g["p_hr"] - j["p_hr"]) > 1e-4 \
+                or g["hits"] != j["hits"] or abs(g["p_hr"] - j["p_hr"]) > 1e-4 or bool(g.get("bait")) != bool(j.get("bait")) \
                 or (g["kd"] is None) != (j["kd"] is None) or (g["kd"] is not None and abs(g["kd"] - j["kd"]) > 1e-3) \
                 or any((g["kpm"][k] is None) != (j["kpm"][k] is None) or (g["kpm"][k] is not None and abs(g["kpm"][k] - j["kpm"][k]) > 0.01) for k in g["kpm"]) \
                 or any((g["hsp"][k] is None) != (j["hsp"][k] is None) or (g["hsp"][k] is not None and abs(g["hsp"][k] - j["hsp"][k]) > 1e-4) for k in g["hsp"]):
             bad += 1
             if bad < 10:
-                print("MISMATCH", c, {k: g[k] for k in ("mu_model", "p_over", "grade", "pick", "reasons", "hits", "p_hr")}, j)
+                print("MISMATCH", c, {k: g[k] for k in ("mu_model", "p_over", "grade", "pick", "reasons", "hits", "p_hr", "bait")}, j)
     print("parity (strength %s, param overrides %s): %d cases, %d mismatches, grades %s" % (strength or "none", extra, len(cases), bad,
           dict(__import__("collections").Counter(j["grade"] for j in js["out"] if j))))
     return bad
