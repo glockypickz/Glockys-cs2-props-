@@ -16,3 +16,4 @@ cito_cache
 cito_ids.json
 tests
 __pycache__
+season_state.json

@@ -68,9 +68,9 @@ def parse_time(t):
 def load_grader():
     """Grader built from players.json, so each pick can be locked in. Returns None if it can't be built."""
     try:
-        from grader import Grader, load_strength
+        from grader import Grader, load_strength, load_players
         global STATS_STAMP
-        d = json.load(open("players.json", encoding="utf-8"))
+        d = load_players("players.json")
         STATS_STAMP = str(d.get("updated") or "")
         return Grader(d.get("players", []), d.get("ranks") or {}, strength=load_strength())  # team_strength.json: file read, no Cito call
     except Exception as e:

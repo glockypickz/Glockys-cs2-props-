@@ -3,23 +3,23 @@
    Runs without team_strength data (exactly the pre-Cito grader) and with the MOCK Cito file
    tests/fixtures/team_strength_mock.json (ranking win chance + map-stat rounds switched on)."""
 import json, re, subprocess, sys, random, os
-from grader import Grader, PARAMS, TEAM_ALIASES, load_strength
+from grader import Grader, PARAMS, TEAM_ALIASES, load_strength, load_players
 
 MOCK = os.path.join("tests", "fixtures", "team_strength_mock.json")
 
 JS = r"""
 const M=require('./model.js');const fs=require('fs');
-const d=JSON.parse(fs.readFileSync('players.json','utf8'));const cases=JSON.parse(fs.readFileSync(0,'utf8'));
+const d=M.decodePlayers(JSON.parse(fs.readFileSync('players.json','utf8')));const cases=JSON.parse(fs.readFileSync(0,'utf8'));
 const S=process.env.STRENGTH?JSON.parse(fs.readFileSync(process.env.STRENGTH,'utf8')):null;
 const ctx=M.build(d.players,cases.length&&cases[0].params||null,S);
 const out=cases.map(c=>{const p=d.players[c.i];const g=M.grade(ctx,p,c.st,c.line,c.opp,{team:c.team,book:c.book,odds:c.odds,before:c.before});
- return g?{proj:g.proj,p_over:g.pOver,grade:g.grade,pick:g.pick,edge_pp:g.edgePP,reasons:g.reasons,flag:g.flag,hits:g.hits,p_hr:g.pHr}:null});
+ return g?{proj:g.proj,p_over:g.pOver,grade:g.grade,pick:g.pick,edge_pp:g.edgePP,reasons:g.reasons,flag:g.flag,hits:g.hits,p_hr:g.pHr,kd:g.kd,kpm:g.kpm}:null});
 process.stdout.write(JSON.stringify({params:M.PARAMS,ctxp:ctx.P,aliases:M.TEAM_ALIASES,out:out}));
 """
 
 
 def main():
-    d = json.load(open("players.json", encoding="utf-8"))
+    d = load_players("players.json")
     bad = 0
     for extra in (None, {"w_line": 0.0}, {"w_line": 0.5}):
         bad += run(d, extra)
@@ -28,7 +28,9 @@ def main():
             bad += run(d, extra, MOCK)
     else:
         print("no", MOCK, "(run python tests/make_mock_cito.py): Cito-feature parity not checked")
-    for extra in ({"w_hr": 0.3}, {"w_hr": 0.3, "w_line": 0.0}):   # hit-rate signal switched on
+    for extra in ({"w_hr": 0.3}, {"w_hr": 0.3, "w_line": 0.0},   # hit-rate signal switched on
+                  {"w_line": 0.0, "w_l5": 0.2, "w_l10": 0.2, "w_l15": 0.1, "w_szn": 0.3, "w_kd": 0.5},  # kill form inputs on
+                  {"n_max": 20, "w_line": 0.0}):  # the old 20-series window
         bad += run(d, extra)
     sys.exit(1 if bad else 0)
 
@@ -75,7 +77,9 @@ def run(d, extra, strength=None):
         if g is None:
             continue
         if abs(g["mu_model"] - j["proj"]) > 0.01 or abs(g["p_over"] - j["p_over"]) > 1e-3 or g["grade"] != j["grade"] or g["pick"] != j["pick"] or g["reasons"] != j["reasons"] or g["flag"] != j["flag"] \
-                or g["hits"] != j["hits"] or abs(g["p_hr"] - j["p_hr"]) > 1e-4:
+                or g["hits"] != j["hits"] or abs(g["p_hr"] - j["p_hr"]) > 1e-4 \
+                or (g["kd"] is None) != (j["kd"] is None) or (g["kd"] is not None and abs(g["kd"] - j["kd"]) > 1e-3) \
+                or any((g["kpm"][k] is None) != (j["kpm"][k] is None) or (g["kpm"][k] is not None and abs(g["kpm"][k] - j["kpm"][k]) > 0.01) for k in g["kpm"]):
             bad += 1
             if bad < 10:
                 print("MISMATCH", c, {k: g[k] for k in ("mu_model", "p_over", "grade", "pick", "reasons", "hits", "p_hr")}, j)

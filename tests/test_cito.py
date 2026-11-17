@@ -225,7 +225,8 @@ def m_gr(work):
 
 def test_grader():
     from grader import Grader, load_strength, PARAMS
-    pj = json.load(open("players.json", encoding="utf-8"))
+    from grader import load_players
+    pj = load_players("players.json")
     # 1) without team_strength the grader is exactly the committed one
     old_src = subprocess.run(["git", "show", "HEAD:grader.py"], capture_output=True, text=True).stdout
     tmpd = tempfile.mkdtemp()
@@ -243,7 +244,9 @@ def test_grader():
                     GN.grade(p, st, 30.5 if st == "kills" else 14.5, opp, None, "PrizePicks", None, before), \
                     GE.grade(p, st, 30.5 if st == "kills" else 14.5, opp, None, "PrizePicks", None, before)
                 for x in (b, c):
-                    if (a is None) != (x is None) or (a and any(a[k] != x[k] for k in a)):
+                    # compare HEAD's fields only (new display-only fields such as kd / kpm / hits.l15 are ignored)
+                    same = lambda u, v: ({kk: v.get(kk) for kk in u} == u) if isinstance(u, dict) and isinstance(v, dict) else u == v
+                    if (a is None) != (x is None) or (a and any(not same(a[k], x[k]) for k in a)):
                         diff += 1
     check("no Cito data -> grades identical to HEAD grader (1600 cases x2)", diff == 0)
     # 2) leakage: a snapshot dated D is not used for a match on D, only from D+1

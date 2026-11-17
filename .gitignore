@@ -7,3 +7,4 @@ cito_cache/*.tmp
 *.tmp
 __pycache__/
 node_modules/
+*.json.tmp

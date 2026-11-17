@@ -86,7 +86,8 @@ def day_replies(rows, D, ids):
 
 
 def main():
-    pj = json.load(open(os.path.join(HERE, "..", "players.json"), encoding="utf-8"))
+    from grader import load_players
+    pj = load_players(os.path.join(HERE, "..", "players.json"))
     rows = team_maps(pj["players"])
     dates = sorted({r[0] for r in rows})
     start = (datetime.date.fromisoformat(dates[0]) + datetime.timedelta(days=21))
