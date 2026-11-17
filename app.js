@@ -35,11 +35,11 @@ function fmt(iso){if(!iso)return '';var d=new Date(iso);if(isNaN(d))return '';
 function ftime(iso){var d=iso?new Date(iso):new Date();return new Intl.DateTimeFormat('en-US',{timeZone:'America/Chicago',hour:'numeric',minute:'2-digit',hour12:true}).format(d)}
 function toast(m){var t=$('toast');t.textContent=m;t.classList.remove('hide');clearTimeout(toast.t);toast.t=setTimeout(function(){t.classList.add('hide')},2600)}
 // ---- stats
-function combos(p){var by={};(p.logs||[]).forEach(function(l){if((l.n===1||l.n===2)&&l.mid!=null){var g=by[l.mid]=by[l.mid]||{mid:l.mid,date:l.date,opp:l.opp,m:{},kills:0,hs:0,hsOk:true,rd:0,rdOk:true,d:0,dOk:true,a:0,aOk:true,adr:[],ev:{},x:{}};g.m[l.n]=l.map;g.kills+=Number(l.kills)||0;
+function combos(p){var by={};(p.logs||[]).forEach(function(l){if((l.n===1||l.n===2)&&l.mid!=null){var g=by[l.mid]=by[l.mid]||{mid:l.mid,date:l.date,opp:l.opp,m:{},kills:0,hs:0,hsOk:true,rd:0,rdOk:true,d:0,dOk:true,a:0,aOk:true,adr:[],ev:{},x:{}};g.m[l.n]=l.map;g.kills+=Number(l.kills)||0;if(l.n===1&&l.kills!=null)g.kills1=Number(l.kills);
  if(l.hs==null)g.hsOk=false;else g.hs+=Number(l.hs)||0;if(l.rd==null)g.rdOk=false;else g.rd+=Number(l.rd)||0;if(l.d==null)g.dOk=false;else g.d+=Number(l.d)||0;if(l.a==null)g.aOk=false;else g.a+=Number(l.a)||0;if(l.adr!=null)g.adr.push(Number(l.adr));if(l.ev)g.ev[l.ev]=1;
  if(l.x)for(var k in l.x){(g.x[k]=g.x[k]||[]).push(l.x[k])}}});
  return Object.keys(by).map(function(k){return by[k]}).filter(function(g){return g.m[1]&&g.m[2]}).map(function(g){var evs=Object.keys(g.ev),x={};for(var k in g.x)x[k]=g.x[k].reduce(function(a,b){return a+b},0);
-  return{mid:g.mid,date:g.date,opp:g.opp,maps:g.m[1]+' + '+g.m[2],kills:g.kills,hs:g.hsOk?g.hs:null,rounds:g.rdOk?g.rd:null,deaths:g.dOk?g.d:null,assists:g.aOk?g.a:null,adr:g.adr.length?g.adr.reduce(function(a,b){return a+b},0)/g.adr.length:null,ev:evs.length===1?evs[0]:null,x:x}}).sort(function(a,b){return a.date<b.date?1:a.date>b.date?-1:(String(a.mid)<String(b.mid)?1:String(a.mid)>String(b.mid)?-1:0)})}
+  return{mid:g.mid,date:g.date,opp:g.opp,maps:g.m[1]+' + '+g.m[2],kills:g.kills,kills1:g.kills1,hs:g.hsOk?g.hs:null,rounds:g.rdOk?g.rd:null,deaths:g.dOk?g.d:null,assists:g.aOk?g.a:null,adr:g.adr.length?g.adr.reduce(function(a,b){return a+b},0)/g.adr.length:null,ev:evs.length===1?evs[0]:null,x:x}}).sort(function(a,b){return a.date<b.date?1:a.date>b.date?-1:(String(a.mid)<String(b.mid)?1:String(a.mid)>String(b.mid)?-1:0)})}
 function mean(a){return a.length?a.reduce(function(x,y){return x+y},0)/a.length:null}
 function sd(a){var m=mean(a);return a.length?Math.sqrt(mean(a.map(function(x){return (x-m)*(x-m)}))):0}
 function nums(cs,st){return cs.map(function(c){return c[st]}).filter(function(x){return x!=null})}
@@ -397,7 +397,7 @@ function viewGrader(){var combo=isCombo(sel.player),p=combo?{name:sel.player}:fi
  else if(!p)h+='<div class="card"><div class="warn">No player named "'+esc(sel.player)+'" in the data.</div></div>';
  else if(!g&&miss)h+='<div class="card"><div class="warn">Cannot grade this combo: no usable Maps 1-2 stats for '+esc(miss)+'. Every player in a combo needs stats.</div></div>';
  else if(!g)h+='<div class="card"><div class="warn">Not enough Maps 1-2 data for '+esc(p.name)+' yet (needs matches where both Map 1 and Map 2 were played) or the line is empty.</div></div>';
- else h+=gradeCard(g);return h+'</div>'+opts()}
+ else h+='<div>'+(window.GPCards?GPCards.html(g):'')+gradeCard(g)+'</div>';return h+'</div>'+opts()}
 // ---- bar chart: real number on every bar, dashed line = the prop line, green over / red under
 function chart(cs,st,line,n){var rows=cs.slice(0,n||10).filter(function(c){return c[st]!=null}).reverse();if(!rows.length)return '<div class="muted">No '+(st==='hs'?'headshot':'kill')+' data for this selection.</div>';
  var hasL=line!=null&&!isNaN(line),mx=Math.max.apply(null,rows.map(function(c){return c[st]}).concat([hasL?line:0,1]))*1.25;
@@ -555,8 +555,8 @@ document.addEventListener('click',function(e){var b=e.target.closest('[data-act]
  else if(a==='pg'){sel.player=b.dataset.p;var p=find(sel.player);sel.opp='';go('grader');toast('Loaded '+sel.player+'. Enter a line')}
  else if(a==='grade'){var np=$('gp').value;if(np!==sel.player)sel.team='';sel.player=np;sel.stat=$('gs').value;sel.line=$('gl').value;sel.opp=$('go').value;var nb=$('gb')?$('gb').value:'PrizePicks';if(nb!==sel.book||String(parseFloat(sel.line))!==String(sel.oddsLine))sel.odds=null;sel.book=nb;render();toast('Graded')}
  else if(a==='gadd'){var g=curGrade();if(g)addSlip(g)}
- else if(a==='gimg'){var g2=curGrade();if(g2)img({g:g2},function(c){dl(c,'grade-1080x1350.png')})}
- else if(a==='gshare'){var g3=curGrade();if(g3)img({g:g3},function(c){share(c,'grade.png')})}
+ else if(a==='gimg'){var g2=curGrade();if(g2)(window.GPCards?GPCards.img:function(g,f){img({g:g},f)})(g2,function(c){dl(c,'glocky-card.png')})}
+ else if(a==='gshare'){var g3=curGrade();if(g3)(window.GPCards?GPCards.img:function(g,f){img({g:g},f)})(g3,function(c){share(c,'glocky-card.png')})}
  else if(a==='madd'){var n=$('mp').value.trim(),l=parseFloat($('ml').value);if(!n||isNaN(l)){toast('Enter a player and a line');return}var p2=find(n);manual.push({player:p2?p2.name:n,team:p2?p2.team:'',stat:$('ms').value,line:l,opponent:$('mo').value,period:'Maps 1-2',src:'manual'});save('gp_manual',manual);render();toast('Line saved')}
  else if(a==='ldel'){manual.splice(i-LINES.length,1);save('gp_manual',manual);render();toast('Line removed')}
  else if(a==='lg'){var l2=allLines()[i];sel={player:l2.player,stat:l2.stat,line:String(l2.line),opp:l2.opp,team:l2.team,book:l2.book||'PrizePicks',odds:l2.odds,oddsLine:String(+l2.line)};go('grader');toast('Loaded '+l2.player)}

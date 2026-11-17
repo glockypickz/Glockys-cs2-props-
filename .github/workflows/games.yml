@@ -19,11 +19,15 @@ jobs:
           python-version: "3.12"
       - run: pip install aiohttp
       - run: python update_games.py
+      # Team logos for the Grader trading card (display only). Looks up only teams with no logo yet; never fails the job.
+      - run: python team_logos.py
+        continue-on-error: true
       - name: Commit games
         run: |
           git config user.name "actions-user"
           git config user.email "actions@github.com"
           if [ -f games.json ]; then git add games.json; fi
+          if [ -f team_logos.json ]; then git add team_logos.json; fi
           git diff --staged --quiet || git commit -m "Update games"
           git pull --rebase
           git push
