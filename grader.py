@@ -35,31 +35,35 @@ How a prop is graded
 import re, math, bisect
 
 # ---- model parameters. Tuned by backtest.py on the early slice only. MUST match PARAMS in model.js.
-HS_WIN = ("5", "10", "15", "szn")
+HS_WIN = ("5", "10", "20", "szn")   # projection windows (L15 is display-only)
 PARAMS = {"m": 100, "half_life": 8, "n_max": 200, "m_team": 1500, "elo_k": 16, "beta": 0.25,
           "rd_a": 17.34, "rd_b": 16.18, "h2h_min": 3, "h2h_w": 0.0, "w_line": 0.7,
           "g_kills": 0.6573, "g_hs": 0.3404, "size_kills": 20.0, "size_hs": 16.0,
           "min_series": 8, "grade_a": 6.0, "grade_b": 3.0,
           "w_rank": 0.25, "rank_s": 1.0, "w_maps": 0.25, "k_maps": 6.0, "w_hr": 0.0, "k_hr": 5.0, "w_hr_l5": 0.25, "w_hr_l10": 0.25, "w_hr_l20": 0.25, "w_hr_szn": 0.25,
           "hr_upgrade_a": 0.85, "hr_upgrade_b": 0.75, "hr_szn_min": 8,
-          "w_l5": 0.1, "w_l10": 0.1, "w_l15": 0.0, "w_szn": 0.0, "w_kd": 0.1, "k_kd": 40.0,
-          "w_hs5": 0.3, "w_hs10": 0.2, "w_hs15": 0.0, "w_hsszn": 0.1,
-          "w_khs5": 0.1, "w_khs10": 0.0, "w_khs15": 0.0, "w_khsszn": 0.0, "k_hsp": 30.0, "w_hkd": -0.1}
+          "w_l5": 0.1, "w_l10": 0.05, "w_l20": 0.05, "w_szn": 0.0, "w_kd": 0.1, "k_kd": 40.0,
+          "w_hs5": 0.3, "w_hs10": 0.2, "w_hs20": 0.15, "w_hsszn": 0.1,
+          "w_khs5": 0.1, "w_khs10": 0.0, "w_khs20": 0.0, "w_khsszn": 0.0, "k_hsp": 30.0, "w_hkd": -0.1}
 # Kill-model form inputs (kills props only; series before the match only; tuned by backtest.py --tune-form):
-#   w_l5 / w_l10 / w_l15 / w_szn: the per-round kill rate moves toward the player's raw rate over his last 5 / 10 / 15
+#   w_l5 / w_l10 / w_l20 / w_szn: the per-round kill rate moves toward the player's raw rate over his last 5 / 10 / 20
 #           series / this season: rate += w * (window rate - rate). 0 = not used.
 #   w_hkd: the same season K/D factor on the headshots projection (hs rate x kd ** w_hkd).
 #   w_kd: kill rate x kd ** w_kd, kd = season (kills + k_kd) / (deaths + k_kd) (shrunk toward 1). 0 = not used.
 #   Backtest (Nov 2026): every non-zero weight made kills MAE, NB log-lik and locked-line log loss slightly worse (tuned
 #   value 0). By owner decision w_l5 0.1, w_l10 0.1 and w_kd 0.1 ship anyway (small, active; full season stays the base).
 # HS% form inputs (HS% = hs / kills, Maps 1-2 series before the match only; tuned by backtest.py --tune-hs):
-#   shrunk HS%: season = (HS + k_hsp * team HS%) / (K + k_hsp); last 5 / 10 / 15 = (HS + k_hsp * season HS%) / (K + k_hsp)
-#   w_hs5 / w_hs10 / w_hs15 / w_hsszn (headshots): hs rate += w * (player kill rate x shrunk HS% - hs rate)
-#   w_khs5 / w_khs10 / w_khs15 / w_khsszn (kills): kill rate x (shrunk HS% / reference) ** w, reference = season HS%
+#   shrunk HS%: season = (HS + k_hsp * team HS%) / (K + k_hsp); last 5 / 10 / 15 / 20 = (HS + k_hsp * season HS%) / (K + k_hsp)
+#   w_hs5 / w_hs10 / w_hs20 / w_hsszn (headshots): hs rate += w * (player kill rate x shrunk HS% - hs rate)
+#   w_khs5 / w_khs10 / w_khs20 / w_khsszn (kills): kill rate x (shrunk HS% / reference) ** w, reference = season HS%
 #           for the last-N windows and team HS% for the season window. 0 = not used.
 #   Backtest (Nov 2026, early-slice tuning, holdout from 2026-10-20): headshots MAE 3.997 -> 3.974, NB log-lik -3.0211 ->
 #   -3.0151, so w_hs5 0.3 / w_hs10 0.2 / w_hsszn 0.1 ship. The kills weights were tuned to ~0 (holdout slightly worse);
 #   by owner decision w_khs5 0.1 ships (the closest-to-neutral non-zero value). w_hkd -0.1 (best non-zero; +0.1 was worse).
+#   Nov 17 2026 (owner): projections use only last 5 / 10 / 20 + season; L15 is display-only (kpm / HS% / hit-rate cards).
+#   w_hs20 0.15 added (headshots: holdout MAE 3.908 -> 3.907, early 3.905 -> 3.903, locked hs lines Brier .2516 -> .2515).
+#   Kills: w_l10 0.1 split into w_l10 0.05 + w_l20 0.05 (holdout MAE 6.277 -> 6.275, locked kills lines Brier .2552 -> .2551).
+#   w_khs20 stays 0: 0.05 / 0.1 made kills MAE and locked-line Brier slightly worse.
 # n_max 200: the rate uses every series this season (players.json holds the full calendar-year season), decayed with
 #   half_life 8; it was 20 when players.json held only the last 15 matches per team.
 # Hit rates vs the current line (L5 / L10 / L20 / season / H2H, series-level Maps 1-2, earlier series only).
@@ -615,7 +619,7 @@ class Grader:
             rate = (1 - P["h2h_w"]) * rate + P["h2h_w"] * hr
         form = self.form(cs, rows, before)
         if st == "kills":
-            for k in ("l5", "l10", "l15", "szn"):
+            for k in ("l5", "l10", "l20", "szn"):
                 if P["w_" + k] > 0 and form["rate"][k] is not None:
                     rate += P["w_" + k] * (form["rate"][k] - rate)
             if P["w_kd"] > 0 and form["kd_s"] is not None:
@@ -654,14 +658,14 @@ class Grader:
                 "n": len(cs), "n_rate": len(rows), "h2h": len(h2h), "cs": cs, "form": form, "hsf": hsf}
 
     def hs_form(self, cs, team, before="9999"):
-        """HS% (hs / kills) over the last 5 / 10 / 15 series with headshot data and the season (calendar year), only
+        """HS% (hs / kills) over the last 5 / 10 / 15 / 20 series with headshot data and the season (calendar year), only
         series before the match: raw (for display) and shrunk (season toward the team HS%, last-N toward the season)."""
         P = self.P
         yr = str(before)[:4] if before != "9999" else (cs[0]["date"][:4] if cs else "")
         hc = [c for c in cs if c.get("hs") is not None and c["kills"] > 0]
         tk = self.team_prior(team, "kills", before)
         team_hsp = self.team_prior(team, "hs", before) / tk if tk > 0 else 0.5
-        win = {"5": hc[:5], "10": hc[:10], "15": hc[:15], "szn": [c for c in hc if c["date"][:4] == yr]}
+        win = {"5": hc[:5], "10": hc[:10], "15": hc[:15], "20": hc[:20], "szn": [c for c in hc if c["date"][:4] == yr]}
         out = {"raw": {}, "s": {}, "n": {}, "team": team_hsp}
         for k, w in win.items():
             H, K = sum(c["hs"] for c in w), sum(c["kills"] for c in w)
@@ -669,16 +673,16 @@ class Grader:
             out["raw"][k] = H / K if K > 0 else None
         Hs, Ks = sum(c["hs"] for c in win["szn"]), sum(c["kills"] for c in win["szn"])
         out["s"]["szn"] = (Hs + P["k_hsp"] * team_hsp) / (Ks + P["k_hsp"])
-        for k in ("5", "10", "15"):
+        for k in ("5", "10", "15", "20"):
             H, K = sum(c["hs"] for c in win[k]), sum(c["kills"] for c in win[k])
             out["s"][k] = (H + P["k_hsp"] * out["s"]["szn"]) / (K + P["k_hsp"])
         return out
 
     def form(self, cs, rows, before="9999"):
-        """Kill form, series before the match only: kills per map (kpm) and per-round rate over the last 5 / 10 / 15
+        """Kill form, series before the match only: kills per map (kpm) and per-round rate over the last 5 / 10 / 15 / 20
         series and this season (calendar year), and season K/D (raw, and shrunk with k_kd for the model)."""
         yr = str(before)[:4] if before != "9999" else (cs[0]["date"][:4] if cs else "")
-        win = {"l5": rows[:5], "l10": rows[:10], "l15": rows[:15], "szn": [c for c in rows if c["date"][:4] == yr]}
+        win = {"l5": rows[:5], "l10": rows[:10], "l15": rows[:15], "l20": rows[:20], "szn": [c for c in rows if c["date"][:4] == yr]}
         out = {"rate": {}, "kpm": {}, "n": {}}
         for k, w in win.items():
             out["n"][k] = len(w)
