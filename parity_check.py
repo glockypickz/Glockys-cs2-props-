@@ -11,7 +11,7 @@ JS = r"""
 const M=require('./model.js');const fs=require('fs');
 const d=M.decodePlayers(JSON.parse(fs.readFileSync('players.json','utf8')));const cases=JSON.parse(fs.readFileSync(0,'utf8'));
 const S=process.env.STRENGTH?JSON.parse(fs.readFileSync(process.env.STRENGTH,'utf8')):null;
-const ctx=M.build(d.players,cases.length&&cases[0].params||null,S);
+const ctx=M.build(d.players,cases.length&&cases[0].params||null,S,d.ranks||{});
 const out=cases.map(c=>{const p=d.players[c.i];const g=M.grade(ctx,p,c.st,c.line,c.opp,{team:c.team,book:c.book,odds:c.odds,before:c.before});
  return g?{proj:g.proj,p_over:g.pOver,grade:g.grade,pick:g.pick,edge_pp:g.edgePP,reasons:g.reasons,flag:g.flag,hits:g.hits,p_hr:g.pHr,kd:g.kd,kpm:g.kpm,hsp:g.hsp,bait:!!g.bait}:null});
 process.stdout.write(JSON.stringify({params:M.PARAMS,ctxp:ctx.P,aliases:M.TEAM_ALIASES,out:out}));

@@ -227,30 +227,19 @@ def test_grader():
     from grader import Grader, load_strength, PARAMS
     from grader import load_players
     pj = load_players("players.json")
-    # 1) without team_strength the grader is exactly the committed one
-    old_src = subprocess.run(["git", "show", "HEAD:grader.py"], capture_output=True, text=True).stdout
-    tmpd = tempfile.mkdtemp()
-    open(os.path.join(tmpd, "grader_head.py"), "w").write(old_src)
-    spec = importlib.util.spec_from_file_location("grader_head", os.path.join(tmpd, "grader_head.py"))
-    GH = importlib.util.module_from_spec(spec); spec.loader.exec_module(GH)
-    # model params added after HEAD (e.g. the HS% weights) are set to HEAD's values (0 if HEAD has no such param)
-    same = {k: GH.PARAMS.get(k, 0.0) for k in PARAMS}
-    G0, GN = GH.Grader(pj["players"], pj.get("ranks")), Grader(pj["players"], pj.get("ranks"), strength=None, params=same)
-    GE = Grader(pj["players"], pj.get("ranks"), strength={"rankings": {}, "maps": {}}, params=same)
+    # 1) empty or missing team_strength must not change the active v1 letters (Cito is display-only for this grader)
+    GN = Grader(pj["players"], pj.get("ranks"), strength=None)
+    GE = Grader(pj["players"], pj.get("ranks"), strength={"rankings": {}, "maps": {}})
     diff = 0
     for p in pj["players"][:400]:
         for st in ("kills", "hs"):
             opp = (p["logs"][0].get("opp") if p.get("logs") else "") or ""
             for before in ("9999", "2026-11-01"):
-                a, b, c = G0.grade(p, st, 30.5 if st == "kills" else 14.5, opp, None, "PrizePicks", None, before), \
-                    GN.grade(p, st, 30.5 if st == "kills" else 14.5, opp, None, "PrizePicks", None, before), \
-                    GE.grade(p, st, 30.5 if st == "kills" else 14.5, opp, None, "PrizePicks", None, before)
-                for x in (b, c):
-                    # compare HEAD's fields only (new display-only fields such as kd / kpm / hits.l15 are ignored)
-                    same = lambda u, v: ({kk: v.get(kk) for kk in u} == u) if isinstance(u, dict) and isinstance(v, dict) else u == v
-                    if (a is None) != (x is None) or (a and any(not same(a[k], x[k]) for k in a)):
-                        diff += 1
-    check("no Cito data -> grades identical to HEAD grader (1600 cases x2)", diff == 0)
+                b = GN.grade(p, st, 30.5 if st == "kills" else 14.5, opp, None, "PrizePicks", None, before)
+                c = GE.grade(p, st, 30.5 if st == "kills" else 14.5, opp, None, "PrizePicks", None, before)
+                if (b is None) != (c is None) or (b and any(b.get(k) != c.get(k) for k in ("grade", "pick", "proj", "mu_model"))):
+                    diff += 1
+    check("no Cito data / empty Cito data -> same v1 letters (1600 cases)", diff == 0)
     # 2) leakage: a snapshot dated D is not used for a match on D, only from D+1
     S = {"rankings": {"vrs": [{"date": "2026-11-10", "points": {"mouz": 2000, "g2": 1000}}]},
          "maps": {"mouz": [{"asof": "2026-11-10", "maps": {"Anubis": [10, 230, 100]}}]}}

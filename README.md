@@ -1,15 +1,18 @@
 # Glockys-cs2-props-
 prop grader for cs2 props , research done for you. Backed by real data &amp; analytics 
 
+## Active grader
+New locks and live grades use the v1 projection (35% last 10 series, 20% all logged series, 20% head-to-head, 15% vs the same rank tier from `players.json`, 10% last 3 series, then a small ADR adjustment) and the v1 letter cutoffs on `(proj - line) / line`: A+ ≥ +15%, B ≥ +5%, C ≥ −2%, D ≥ −10%, otherwise F. The pick is Over if the projection is at or above the line, otherwise Under. When that pick is Under and the letter is D or F, a v2 negative-binomial P(under) with a 0.7 line blend is compared to the book's break-even (stored odds, or the book default): F if the Under is at least +3 percentage points over break-even, otherwise D. The pick does not change. There is no hit-rate letter override and no plain A. Already-locked props keep the letter stored on the lock.
+
 ## Cito API (optional team-strength data)
 - `cito_client.py`: Cito client. It saves every reply to `cito_cache/`, spaces calls 6.5 s apart, and allows at most 14 calls a day, keeping 40 of the monthly allowance in reserve. It retries a 429 after the time given in `Retry-After`.
 - `cito_update.py` is the only script that calls Cito. It runs once a day in the "Update CS2 data" workflow, the only step that gets the `CITO_API_KEY` secret. It writes `team_strength.json` (dated VRS and world ranking points plus team map stats), `cito_ids.json`, and `cito_cache/_results_index.json` (backup results for settling).
-- The grader (`grader.py` / `model.js`) only uses entries dated before the match day. The weights are `w_rank` and `w_maps` in PARAMS; set them to 0 to turn the features off. With no `team_strength.json`, grades are the same as before.
+- The active v1 projection and letters do not use Cito rank or map-pool weights. `team_strength.json` is still loaded for display fields, and only entries dated before the match day are used. Set `w_rank` / `w_maps` to 0 to turn those display features off.
 - Turning it on: create a Cito key, then add it as the repository secret `CITO_API_KEY`. For local runs, put `CITO_API_KEY=...` in `.env`, which is gitignored and never served.
 - Tests: `python tests/make_mock_cito.py && python tests/test_cito.py` (mock data, no network).
 
 ## Hit rates
-Each graded prop shows L5 / L10 / L15 / L20 / H2H / SZN (display only): how many earlier Maps 1-2 series went over the current line. `w_hr` blends a smoothed hit rate into P(over). The backtest chose 0, so that path does not change P(over). A separate letter override can still raise the grade to A+ Over or B Over from a weighted blend of the L5, L10, L20, and season over-rates versus the current line (`w_hr_l5` / `w_hr_l10` / `w_hr_l20` / `w_hr_szn`, default 0.25 each; a window with 0 series is skipped and the rest are renormalized). The season window must have at least `hr_szn_min` (8) series. Blend >= `hr_upgrade_a` (0.80) becomes A+ Over; blend >= `hr_upgrade_b` (0.70) becomes B Over (it will not downgrade a model A+). Otherwise the model letter is kept. Short L5/L10/L20 samples still enter the average when n>0 and are flagged. L20 is computed for the blend even if the cards show L15. Set both upgrade thresholds to 0 to turn the override off. The Players tab shows Last 5 / Last 10 / Last 15 / Season for a typed line: research only, never a grade input.
+Each graded prop shows L5 / L10 / L15 / L20 / H2H / SZN (display only): how many earlier Maps 1-2 series went over the current line. `w_hr` blends a smoothed hit rate into P(over). The backtest chose 0, so that path does not change P(over). The hit-rate letter override is off (`hr_upgrade_a` and `hr_upgrade_b` are 0). L5 / L10 / L15 / L20 / H2H / SZN boxes stay on the cards as display only. The Players tab shows Last 5 / Last 10 / Last 15 / Season for a typed line: research only, never a grade input.
 
 ### Full-season data
 
