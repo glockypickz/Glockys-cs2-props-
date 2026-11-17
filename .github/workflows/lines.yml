@@ -21,6 +21,8 @@ jobs:
         env:
           KASHROCK_API_KEY: ${{ secrets.KASHROCK_API_KEY }}
         run: python fetch_lines.py
+      - name: Cache player photos
+        run: python player_photos.py
       - name: Commit lines
         run: |
           git config user.name "actions-user"
@@ -28,6 +30,8 @@ jobs:
           if [ -f lines.json ]; then git add lines.json; fi
           if [ -f lines_history.json ]; then git add lines_history.json; fi
           if [ -f pregame.json ]; then git add pregame.json; fi
+          if [ -f player_photos.json ]; then git add player_photos.json; fi
+          if [ -d assets/players ]; then git add assets/players; fi
           git diff --staged --quiet || git commit -m "Update lines"
           git pull --rebase
           git push

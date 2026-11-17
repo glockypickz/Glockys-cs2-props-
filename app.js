@@ -405,7 +405,7 @@ function chart(cs,st,line,n){var rows=cs.slice(0,n||10).filter(function(c){retur
  var ds=rows.map(function(c){return '<div class="bd">'+esc(String(c.date||'').slice(5))+'</div>'}).join('');
  return '<div class="bars">'+(hasL?'<div class="ln" style="bottom:'+(line/mx*100)+'%"><span>'+line+'</span></div>':'')+cols+'</div><div class="bdates">'+ds+'</div>'}
 function gradeCard(g){return '<div class="card"><div class="muted">'+esc(g.player)+' · '+esc(g.team)+(g.opp?' vs '+esc(g.opp):'')+' · '+sname(g.stat)+' · line '+g.line+'</div><div class="grade'+gclass(g.grade)+'">'+g.grade+'</div>'+baitBadge(g)+'<div><span class="pill '+(g.pick==='UNDER'?'u':'')+'">'+esc(g.label)+'</span></div>'+
- '<div class="stats"><div class="st"><b>'+g.proj+'</b><span>Projection</span></div><div class="st"><b>'+pc1(g.pPick)+'</b><span>Chance '+esc(g.pick)+'</span></div><div class="st"><b>'+(g.edgePP>=0?'+':'')+g.edgePP.toFixed(1)+'pp</b><span>Edge vs break-even '+pc1(g.be)+'</span></div><div class="st"><b>'+g.over+'/'+g.of+'</b><span>Over, this season</span></div></div>'+
+ '<div class="stats"><div class="st"><b>'+g.over+'/'+g.of+'</b><span>Over, this season</span></div></div>'+
  (g.hits?'<h2 style="margin-top:12px">Hit rate vs '+g.line+'</h2>'+hitBoxes(g.hits)+'<div class="muted">Series (Maps 1-2) that went over this exact line: the last 5 / 10 / 15 / 20, vs '+esc(g.opp||'this opponent')+' this season, and the full season. Display only: the letter comes from the v1 projection versus the line, not from these hit rates. '+(GPModel.PARAMS.w_hr>0?'Blended into the chance at weight '+GPModel.PARAMS.w_hr+'.':'Shown for reference only: the backtest found it does not improve the grade, so it is not used in it.')+'</div>':'')+
  '<h2 style="margin-top:12px">Last 20 '+(g.stat==='hs'?'headshots':'kills')+' (Maps 1-2)</h2>'+chart(g.cs,g.stat,g.line,20)+'<div class="muted">Oldest to newest, with the date under each bar. The grade uses every series this season ('+g.of+'); the chart shows the latest 20. Dashed line = '+g.line+'. Green = over, red = under.</div>'+
  '<h2 style="margin-top:12px">Breakdown</h2><div class="scroll"><table class="comp-table"><tr><th>Part</th><th>Value</th><th>Series used</th></tr>'+g.comp.map(function(c){return '<tr><td>'+esc(c.k)+'</td><td class="comp-val">'+(c.txt!=null?esc(c.txt):c.v==null?'no data':c.v.toFixed(c.f==null?1:c.f)+(c.u||''))+'</td><td>'+(c.n==null?'':c.n)+'</td></tr>'}).join('')+'</table></div>'+
@@ -437,13 +437,13 @@ function buildSlip(n,mode){
  if(short>0)take(both,short);
  if(out.length<n){ // still short: use the best remaining graded lines, any grade
   take(all.slice().sort(function(a,b){return Math.abs(b.pct)-Math.abs(a.pct)}),n-out.length)}
- var res=out.map(function(x){return{player:x.l.player,stat:x.l.stat,line:x.l.line,pick:x.l.g.pick,grade:x.l.g.grade}});
+ var res=out.map(function(x){var g=x.l.g||{};return{player:x.l.player,team:x.l.team||g.team||'',opp:x.l.opp||x.l.opponent||g.opp||'',stat:x.l.stat,line:x.l.line,pick:g.pick,grade:g.grade,book:x.l.book||g.book||''}});
  var no=res.filter(function(x){return x.pick==='OVER'}).length,nu=res.length-no,weak=out.filter(function(x){return !isPlay(x.l.g)}).length;
  var msg='Built '+res.length+'-leg slip: '+no+' Over'+(no===1?'':'s')+', '+nu+' Under'+(nu===1?'':'s')+(res.length<n?' (only '+res.length+' lines available)':'');
  if(res.length&&(!(no&&nu)||weak)&&mode!=='safe')msg+=weak?'. Not enough plays (A, B, F without a flag), so '+weak+' weaker leg'+(weak===1?' was':'s were')+' added (below break-even or flagged)':'. Only one side had strong picks';
  return{out:res,msg:msg+skipNote}}
 function viewSlip(){var h='<div class="grid c2"><div class="card"><h2>Slip builder</h2><div class="btns"><button class="g" data-act="auto" data-n="2" data-m="safe">Safe 2-Leg</button><button class="g" data-act="auto" data-n="3" data-m="bal">Balanced 3-Leg</button><button class="g" data-act="auto" data-n="4" data-m="bal">Balanced 4-Leg</button><button class="g" data-act="auto" data-n="4" data-m="deg">Degenerate 4-Leg</button></div><div class="btns" style="margin-top:8px"><button class="'+(svar==='var'?'b':'g')+'" data-act="svar" data-v="var">Variety</button><button class="'+(svar==='best'?'b':'g')+'" data-act="svar" data-v="best">Best edges</button><button class="g" data-act="sskip">Skip these players</button>'+(Object.keys(excl).length?'<button class="g" data-act="sskipclr">Reset skips ('+Object.keys(excl).length+')</button>':'')+'</div><div class="muted" style="margin-top:6px">Variety picks from the top 10 plays on each side, so every tap gives a new mix. Best edges always takes the biggest edges. Skip these players leaves the players on your current slip out of the next builds.</div><div class="muted" style="margin-top:6px">Auto slips use only plays: Overs graded A+ or B (projection at least 5% above the line) and Unders graded F (Under chance at least +3pp vs break-even, or a v1 projection more than 10% below the line that still passes that test), with no filter flag, one leg per player. When there are not enough plays the slip is filled with C / D legs and says so: those are below break-even. Safe 2-Leg takes the two biggest edges on either side. Balanced 3-Leg is 2 of one side and 1 of the other. Balanced 4-Leg is 2 Overs and 2 Unders. Degenerate 4-Leg takes the four biggest edges with at least one of each side. If a side runs short, the slip fills from the other side and says so.</div></div>';
- h+='<div class="card"><h2>Your slip · '+slip.length+' legs</h2>'+(slip.length?slip.map(function(s,i){return '<div class="item"><div><b>'+esc(s.player)+'</b> <span class="pill '+(s.pick==='UNDER'?'u':'')+'">'+s.pick+' '+s.line+'</span><br><span class="muted">'+sname(s.stat)+(s.grade?' · grade '+esc(s.grade):'')+'</span></div><button class="g" data-act="sdel" data-i="'+i+'">✕</button></div>'}).join('')+'<div class="btns"><button class="b" data-act="scopy">Copy</button><button class="g" data-act="spp">Open PrizePicks</button><button class="g" data-act="simg">Download image</button><button class="g" data-act="sshare">Share</button><button class="g" data-act="sclear">Clear</button></div>':'<div class="muted">Empty. Add legs from Lines or Grader.</div>')+'</div></div>';return h}
+ h+='<div class="card"><h2>Your slip · '+slip.length+' legs</h2>'+(slip.length?slip.map(function(s,i){return '<div class="item"><div><b>'+esc(s.player)+'</b> <span class="pill '+(s.pick==='UNDER'?'u':'')+'">'+s.pick+' '+s.line+'</span><br><span class="muted">'+sname(s.stat)+(s.grade?' · grade '+esc(s.grade):'')+'</span></div><button class="g" data-act="sdel" data-i="'+i+'">✕</button></div>'}).join('')+'<div class="btns"><button class="b" data-act="scopy">Copy</button><button class="g" data-act="spp">Open PrizePicks</button><button class="g" data-act="simg">Download cards</button><button class="g" data-act="sshare">Share cards</button><button class="g" data-act="sclear">Clear</button></div>':'<div class="muted">Empty. Add legs from Lines or Grader.</div>')+'</div></div>';return h}
 function fv(x,d){return x==null||isNaN(x)?'–':x.toFixed(d==null?1:d)}
 function pct(a,b){return b?(a/b*100):null}
 function summ(cs){var n=cs.length,o={n:n,maps:n*2},kk=cs.reduce(function(a,c){return a+c.kills},0);o.kpm=n?kk/(2*n):null;
@@ -514,7 +514,29 @@ function showImg(url,blob,name){var old=document.getElementById('imgov');if(old)
 function dl(c,name){c.toBlob(function(b){if(!b){toast('Could not build the image');return}showImg(URL.createObjectURL(b),b,name)},'image/png')}
 function share(c,name){dl(c,name)}
 function curGrade(){var g=gradeFor(sel.player,sel.team||'',sel.stat,parseFloat(sel.line),sel.opp,{book:sel.book||'PrizePicks',odds:sel.odds});return g&&!g.missing?g:null}
-function addSlip(g){if(slip.some(function(s){return norm(s.player)===norm(g.player)&&s.stat===g.stat})){toast('Already on slip');return}slip.push({player:g.player,stat:g.stat,line:g.line,pick:g.pick,grade:g.grade});save('gp_slip',slip);toast('Added '+g.player+' '+g.pick+' '+g.line)}
+function addSlip(g){if(slip.some(function(s){return norm(s.player)===norm(g.player)&&s.stat===g.stat})){toast('Already on slip');return}slip.push({player:g.player,team:g.team||'',opp:g.opp||'',stat:g.stat,line:g.line,pick:g.pick,grade:g.grade,book:g.book||''});save('gp_slip',slip);toast('Added '+g.player+' '+g.pick+' '+g.line)}
+function slipGrade(s){var team=s.team||'',p=find(s.player,team);return gradeFor(s.player,team||(p&&p.team)||'',s.stat,parseFloat(s.line),s.opp||'',{book:s.book||'PrizePicks'})}
+function exportSlipCards(){if(!window.GPCards){toast('Cards are not loaded');return}var i=0,out=[];
+ function next(){if(i>=slip.length){if(!out.length){toast('Could not build slip cards');return}showCards(out);return}
+  var s=slip[i++],g=slipGrade(s);if(!g||g.missing){next();return}
+  GPCards.img(g,function(c){out.push({c:c,name:'glocky-card-'+(s.player||'player').replace(/[^A-Za-z0-9]+/g,'-')+'.png'});next()})}
+ next()}
+function showCards(items){if(items.length===1){dl(items[0].c,items[0].name);return}
+ var old=document.getElementById('imgov');if(old)old.remove();
+ var ov=document.createElement('div');ov.id='imgov';ov.style.cssText='position:fixed;left:0;top:0;right:0;bottom:0;z-index:100;background:rgba(0,0,0,.96);overflow:auto;-webkit-overflow-scrolling:touch;padding:16px;text-align:center';
+ var hint=document.createElement('div');hint.textContent='One trading card per slip prop. Press and hold a card to save it.';hint.style.cssText='color:#c8cdd2;font:600 14px system-ui;margin-bottom:12px';
+ ov.appendChild(hint);
+ var files=[],urls=[];
+ function btn(t,green){var b=document.createElement('button');b.textContent=t;b.style.cssText='font:800 15px system-ui;padding:13px 22px;border-radius:12px;border:1px solid #00FF66;cursor:pointer;margin:4px;'+(green?'background:#00FF66;color:#000':'background:#111;color:#00FF66');return b}
+ var pending=items.length;
+ items.forEach(function(it,i){it.c.toBlob(function(b){var url=URL.createObjectURL(b);urls.push(url);var im=document.createElement('img');im.src=url;im.alt=it.name;im.style.cssText='display:block;margin:0 auto 14px;max-width:min(360px,92%);border-radius:12px';ov.insertBefore(im,ov.children[1]||null);
+  try{files.push(new File([b],it.name,{type:'image/png'}))}catch(e){}
+  if(--pending===0){var row=document.createElement('div');row.style.cssText='display:flex;gap:10px;justify-content:center;flex-wrap:wrap;padding:8px 0 24px;position:sticky;bottom:0;background:linear-gradient(#0000,#000 30%)';
+   if(files.length&&navigator.canShare&&navigator.canShare({files:files})){var sb=btn('Share all',true);sb.onclick=function(){navigator.share({files:files}).then(function(){toast('Shared')}).catch(function(){})};row.appendChild(sb)}
+   var db=btn('Download all',!row.children.length);db.onclick=function(){items.forEach(function(it2,j){var a=document.createElement('a');a.href=urls[j];a.download=it2.name;document.body.appendChild(a);a.click();a.remove()});toast('If nothing saved, press and hold a card')};row.appendChild(db);
+   var cb=btn('Close',false);cb.onclick=function(){ov.remove();urls.forEach(function(u){setTimeout(function(){URL.revokeObjectURL(u)},500)})};row.appendChild(cb);
+   ov.appendChild(row)}},'image/png')});
+ document.body.appendChild(ov)}
 function rp(l){if(l.g||String(l.player||'').indexOf('+')>=0)return '';var p=find(l.player,l.team);return p?p.name:''}
 function openP(n){gpClose();sel.pl=n;sel.v='all';sel.o='';var r=recents().filter(function(x){return x!==n});r.unshift(n);save('gp_recent',r.slice(0,8));tab='players';render();window.scrollTo(0,0);toast('Stats for '+n)}
 // ---- game props side panel: tap See props on a game and that match's lines slide in on the right
@@ -569,8 +591,7 @@ document.addEventListener('click',function(e){var b=e.target.closest('[data-act]
  else if(a==='sclear'){slip=[];save('gp_slip',slip);render();toast('Slip cleared')}
  else if(a==='scopy'){var t=slip.map(function(s){return s.player+' '+sname(s.stat)+' '+s.pick+' '+s.line}).join('\n');(navigator.clipboard?navigator.clipboard.writeText(t):Promise.reject()).then(function(){toast('Copied')}).catch(function(){toast('Copy not allowed here')})}
  else if(a==='spp'){window.open('https://app.prizepicks.com','_blank','noopener');toast('Opening PrizePicks. Enter your picks there')}
- else if(a==='simg'){if(!slip.length){toast('Slip is empty');return}img({},function(c){dl(c,'slip-1080x1350.png')})}
- else if(a==='sshare'){if(!slip.length){toast('Slip is empty');return}img({},function(c){share(c,'slip.png')})}
+ else if(a==='simg'||a==='sshare'){if(!slip.length){toast('Slip is empty');return}exportSlipCards()}
 });
 document.addEventListener('input',function(e){if(e.target.id==='pq'){sel.q=e.target.value;var pos=e.target.selectionStart;render();var n=$('pq');n.focus();n.setSelectionRange(pos,pos)}});
 document.addEventListener('change',function(e){var i=e.target.id,m={pt:'tm',pn:'n',pv:'v',po:'o',pl1:'l1',pl2:'l2'};if(m[i]){sel[m[i]]=e.target.value;render();toast('Updated')}});
@@ -627,4 +648,6 @@ function send(){if(chatBusy)return;var inp=$('aiq'),q=(inp.value||'').trim();if(
   .catch(function(){wait.textContent='Could not reach the AI. Check your connection and try again.'})
   .then(function(){chatBusy=false;var m=$('aimsgs');m.scrollTop=m.scrollHeight})}
 nav();boot();chatUI();
+document.addEventListener('gp-photos',function(){if(tab==='grader')render()});
 })();
+
