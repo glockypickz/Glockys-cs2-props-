@@ -35,6 +35,13 @@ function loadLogos(){try{fetch('team_logos.json',{cache:'no-cache'}).then(functi
 function whenLogos(cb){if(LOGOS)cb();else{waiting.push(cb);setTimeout(function(){var i=waiting.indexOf(cb);if(i>=0){waiting.splice(i,1);cb()}},2500)}}
 function badge(team){var u=logoUrl(team);return u?'<img src="'+esc(u)+'" alt="'+esc(team)+'" crossorigin="anonymous" loading="lazy" onerror="this.parentNode.classList.add(\'mono\');this.remove()">':''}
 function patch(){var els=document.querySelectorAll('.tc-logo[data-team]');for(var i=0;i<els.length;i++){var e=els[i];if(e.querySelector('img'))continue;var b=badge(e.getAttribute('data-team'));if(b){e.classList.remove('mono');e.insertAdjacentHTML('afterbegin',b)}}}
+// Player photos: player_photos.json + same-origin files in assets/players/ (cached from the lines feed so the export is not blocked by CORS).
+var PHOTOS=null,photowait=[];
+function pkey(s){return String(s||'').toLowerCase().replace(/[^a-z0-9]/g,'')}
+function photoSrc(player){if(!PHOTOS||!player)return null;var p=PHOTOS[pkey(player)];return (p&&typeof p.file==='string'&&p.file.indexOf('assets/players/')===0)?p.file:null}
+function loadPhotos(){try{fetch('player_photos.json',{cache:'no-cache'}).then(function(r){return r.ok?r.json():{}}).then(function(d){var m={},l=(d&&d.photos)||{};Object.keys(l).forEach(function(k){var f=l[k]&&l[k].file;if(typeof f==='string'&&f.indexOf('assets/players/')===0)m[k]=l[k]});PHOTOS=m;photowait.splice(0).forEach(function(f){f()})}).catch(function(){PHOTOS={};photowait.splice(0).forEach(function(f){f()})})}catch(e){PHOTOS={}}}
+function whenPhotos(cb){if(PHOTOS)cb();else{photowait.push(cb);setTimeout(function(){var i=photowait.indexOf(cb);if(i>=0){photowait.splice(i,1);cb()}},2500)}}
+function picHtml(player){var u=photoSrc(player);return u?'<div class="tc-pic"><img src="'+esc(u)+'" alt=""></div>':'<div class="tc-pic tc-sil" aria-hidden="true"><i></i><span>'+esc(mono(player))+'</span></div>'}
 
 // ---- HTML card
 function spark(g){var v=vals(g);if(!v.length)return '';var mx=Math.max.apply(null,v.concat([g.line||0,1]))*1.15;
@@ -43,7 +50,7 @@ function html(g){if(!g)return '';var t=tier(g.grade),u=g.pick==='UNDER',fo=t.foi
  return '<div class="tc-wrap"><div class="tc t-'+(g.grade==='A+'?'ap':String(g.grade||'d').toLowerCase())+'" style="--foil:linear-gradient(135deg,'+fo+');--acc:'+t.accent+';--ink:'+t.ink+'">'+
  '<div class="tc-in"><div class="tc-pat" aria-hidden="true"></div><div class="tc-wm" aria-hidden="true">'+('GLOCKY PICKS   '.repeat(28))+'</div><div class="tc-top"><div class="tc-rate"><b>'+esc(g.grade)+'</b><span>'+t.name+'</span></div>'+
  '<div class="tc-logo'+(logoUrl(g.team)?'':' mono')+'" data-team="'+esc(g.team)+'">'+badge(g.team)+'<span>'+esc(mono(g.team))+'</span></div></div>'+
- '<div class="tc-art"><div class="tc-stat">'+esc(sname(g.stat))+' · Maps 1-2</div><div class="tc-pick'+(u?' u':'')+'">'+esc(g.pick)+' '+esc(g.line)+'</div>'+
+ '<div class="tc-art">'+picHtml(g.player)+'<div class="tc-stat">'+esc(sname(g.stat))+' · Maps 1-2</div><div class="tc-pick'+(u?' u':'')+'">'+esc(g.pick)+' '+esc(g.line)+'</div>'+
  '<div class="tc-proj"><span>PROJ</span><b>'+esc(g.proj)+'</b></div>'+'<div class="tc-meta">'+pct(g.pPick)+' chance · '+edge(g)+' edge · L10 '+l10(g)+'</div>'+spark(g)+'<div class="tc-book">'+esc(g.book||'PrizePicks')+'</div></div>'+
  '<div class="tc-name"><b>'+esc(g.player)+'</b><span>'+esc(g.team||'')+(g.opp?' vs '+esc(g.opp):'')+'</span></div>'+
  (function(){var q=pstats(g);return '<div class="tc-back"><div class="tc-bh">Season · Maps 1-2 · '+q.n+' series</div><div><b>'+q.hsp+'</b><i>HS%</i></div><div><b>'+q.kd+'</b><i>K/D</i></div><div><b>'+q.k1+'</b><i>Kills Map 1</i></div><div><b>'+q.hpm+'</b><i>HS / Map</i></div><div><b>'+q.kl10+'</b><i>Kills 1-2 L10</i></div><div><b>'+q.hsl10+'</b><i>HS 1-2 L10</i></div></div>'})()+
@@ -55,9 +62,16 @@ function rr(x,X,Y,w,h,r){x.beginPath();x.moveTo(X+r,Y);x.arcTo(X+w,Y,X+w,Y+h,r);
 function grad(x,cols,x0,y0,x1,y1){var gr=x.createLinearGradient(x0,y0,x1,y1);cols.forEach(function(c,i){gr.addColorStop(i/(cols.length-1),c)});return gr}
 function fit(x,t,size,maxW,weight){var f=function(){x.font=(weight||'')+' '+size+'px '+FONT};f();while(size>14&&x.measureText(t).width>maxW){size-=2;f()}return size}
 function loadImg(src,cors,cb){if(!src)return cb(null);var im=new Image();if(cors)im.crossOrigin='anonymous';var done=false;function fin(v){if(!done){done=true;cb(v)}}im.onload=function(){fin(im)};im.onerror=function(){fin(null)};setTimeout(function(){fin(null)},4000);im.src=src}
+function drawPic(x,pic,g,t,P){var x0=P+20,y0=236,w=W-2*P-40,h=390;x.save();rr(x,x0,y0,w,h,22);x.clip();
+ if(pic&&pic.width){var s=Math.max(w/pic.width,(h*1.05)/pic.height),dw=pic.width*s,dh=pic.height*s,dx=x0+(w-dw)/2,dy=y0+h-dh-8;
+  x.shadowColor=t.accent;x.shadowBlur=28;x.drawImage(pic,dx,dy,dw,dh);x.shadowBlur=0;
+  var gd=x.createLinearGradient(0,y0,0,y0+h);gd.addColorStop(0,'rgba(10,10,10,.88)');gd.addColorStop(.16,'rgba(10,10,10,0)');gd.addColorStop(.72,'rgba(10,10,10,0)');gd.addColorStop(1,'rgba(8,8,8,.96)');
+  x.fillStyle=gd;x.fillRect(x0,y0,w,h)}
+ else{x.fillStyle=t.accent;x.globalAlpha=.16;x.beginPath();x.ellipse(W/2,y0+118,78,92,0,0,7);x.fill();x.beginPath();x.moveTo(W/2-130,y0+h);x.quadraticCurveTo(W/2-130,y0+200,W/2,y0+190);x.quadraticCurveTo(W/2+130,y0+200,W/2+130,y0+h);x.closePath();x.fill();x.globalAlpha=.7;var m=mono(g.player);fit(x,m,54,200);x.textAlign='center';x.textBaseline='middle';x.fillText(m,W/2,y0+200);x.textBaseline='alphabetic';x.globalAlpha=1}
+ x.restore()}
 function tilePat(x,tile,P){if(!tile)return;x.save();rr(x,P,P,W-2*P,H-2*P,30);x.clip();x.translate(W/2,H/2);x.rotate(-Math.PI/9);x.globalAlpha=.17;
  var tw=168,th=tw*tile.height/tile.width,gx=tw*1.15,gy=th*1.15;for(var row=0,yy=-H-gy;yy<H+gy;yy+=gy,row++){var ox=row%2?gx/2:0;for(var xx=-W-gx;xx<W+gx;xx+=gx)x.drawImage(tile,xx+ox-tw/2,yy-th/2,tw,th)}x.restore()}
-function draw(g,logo,mark,tile){var c=document.createElement('canvas');c.width=W;c.height=H;var x=c.getContext('2d'),t=tier(g.grade),u=g.pick==='UNDER',pc=u?'#ff4d6d':'#00FF66';
+function draw(g,logo,mark,tile,pic){var c=document.createElement('canvas');c.width=W;c.height=H;var x=c.getContext('2d'),t=tier(g.grade),u=g.pick==='UNDER',pc=u?'#ff4d6d':'#00FF66';
  x.fillStyle='#000';x.fillRect(0,0,W,H);
  // foil border + holo sheen
  rr(x,0,0,W,H,44);x.fillStyle=grad(x,t.foil,0,0,W,H);x.fill();
@@ -75,7 +89,8 @@ function draw(g,logo,mark,tile){var c=document.createElement('canvas');c.width=W
  var bx=W-150,by=147,br=82;x.save();x.beginPath();x.arc(bx,by,br+8,0,7);x.fillStyle=grad(x,t.foil,bx-br,by-br,bx+br,by+br);x.fill();x.beginPath();x.arc(bx,by,br,0,7);x.fillStyle='#0d0d0d';x.fill();x.clip();
  if(logo){var s=Math.min(br*1.5/logo.width,br*1.5/logo.height);x.drawImage(logo,bx-logo.width*s/2,by-logo.height*s/2,logo.width*s,logo.height*s)}
  else{x.fillStyle=t.accent;var m=mono(g.team);fit(x,m,m.length>2?54:66,br*1.6);x.textBaseline='middle';x.fillText(m,bx,by+3);x.textBaseline='alphabetic'}x.restore();
- // art window: stat, pick, projection, sparkline
+ // art window: player photo (or silhouette), then stat, pick, projection, sparkline
+ drawPic(x,pic,g,t,P);
  x.fillStyle='#c8cdd2';x.font='26px '+FONT;x.fillText((sname(g.stat)+' · Maps 1-2').toUpperCase(),W/2,290);
  var pk=g.pick+' '+g.line;x.shadowColor=pc;x.shadowBlur=26;x.fillStyle=pc;fit(x,pk,86,600);x.fillText(pk,W/2,372);x.shadowBlur=0;
  x.font='22px '+FONT;var pl='PROJ ',pw=x.measureText(pl).width;x.font='50px '+FONT;var pv=String(g.proj),vw=x.measureText(pv).width;var px0=W/2-(pw+vw)/2;
@@ -106,8 +121,8 @@ function draw(g,logo,mark,tile){var c=document.createElement('canvas');c.width=W
  return c}
 function fontReady(cb){var d=false;function go(){if(!d){d=true;cb()}}setTimeout(go,1500);try{document.fonts.load('60px "Russo One"').then(go,go)}catch(e){go()}}
 // cb(canvas). Draws with the team logo when it can; if the logo would block the export (no CORS), redraws with the monogram.
-function img(g,cb){fontReady(function(){whenLogos(function(){loadImg(logoUrl(g.team),true,function(logo){loadImg('assets/logo.png',false,function(mark){loadImg('assets/logo-tile.png',false,function(tile){
- var c=draw(g,logo,mark,tile);if(logo){try{c.getContext('2d').getImageData(0,0,1,1)}catch(e){c=draw(g,null,mark,tile)}}cb(c)})})})})})}
-loadLogos();
+function img(g,cb){fontReady(function(){whenLogos(function(){whenPhotos(function(){loadImg(logoUrl(g.team),true,function(logo){loadImg('assets/logo.png',false,function(mark){loadImg('assets/logo-tile.png',false,function(tile){loadImg(photoSrc(g.player),false,function(pic){
+ var c=draw(g,logo,mark,tile,pic);if(logo||pic){try{c.getContext('2d').getImageData(0,0,1,1)}catch(e){c=draw(g,null,mark,tile,null)}}cb(c)})})})})})})})}
+loadLogos();loadPhotos();
 window.GPCards={html:html,img:img,logoUrl:logoUrl};
 })();
