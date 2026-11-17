@@ -312,6 +312,7 @@ def line_rows(players, params):
                 continue
             mu = g["mu_model"]
             win_hits, base_reasons = None, list(g.get("reasons") or [])
+            bait = False
         else:
             p = G.find(e["player"], e.get("team"))
             pr = G.project(p, st, e.get("opponent"), e.get("team") or p.get("team"), date)
@@ -322,11 +323,13 @@ def line_rows(players, params):
             g = G.finish(pr["mu"], line, st, e["book"], e.get("odds"), base_reasons, hr=hits["p"], hits=hits)
             mu = pr["mu"]
             win_hits = hits
+            bait = G.bait(p, st, line, date)
         rows.append({"start": e["start"], "book": e["book"], "stat": st, "line": line, "act": act, "mid": mid, "dup": dup,
                      "push": act == line, "over": act > line, "mu": mu, "v2": g,
                      "hr": None if win_hits is None else win_hits["p"], "hits": win_hits, "reasons": base_reasons,
                      "old_grade": lk["grade"], "old_pick": lk["pick"],
-                     "old_hit": (act > line) if lk["pick"] == "OVER" else (act < line)})
+                     "old_hit": (act > line) if lk["pick"] == "OVER" else (act < line),
+                     "bait": bait})
     return rows
 
 
@@ -384,6 +387,57 @@ def grade_table(rows, w, P, label, whr=None, quiet=False):
     return out
 
 
+def synthetic_grade_rows(players, params, slice_fn, st, min_prior=8):
+    """Walk-forward synthetic lines: floor(last-10 mean)+0.5, graded with earlier series only."""
+    G = Grader(players, params=params)
+    out = []
+    for p, c, n in events(G, min_prior):
+        if not slice_fn(c["date"]):
+            continue
+        prior = [x[st] for x in G.series(p) if x["date"] < c["date"] and x.get(st) is not None][:10]
+        if len(prior) < 1 or c.get(st) is None:
+            continue
+        line = math.floor(S.mean(prior)) + 0.5
+        g = G.grade(p, st, line, c["opp"], p.get("team"), before=c["date"])
+        if not g:
+            continue
+        act = c[st]
+        out.append({"stat": st, "line": line, "act": act, "mid": c["mid"], "date": c["date"],
+                    "push": act == line, "over": act > line, "bait": g["bait"], "pick": g["pick"], "grade": g["grade"],
+                    "hit": (act > line) if g["pick"] == "OVER" else (act < line)})
+    return out
+
+
+def _rate(xs):
+    return None if not xs else S.mean(xs)
+
+
+def bait_block(rows, label):
+    """Count / share of bait flags, over hit rate and pick hit rate, bait vs not, by stat.
+
+    Over and pick hit rates use the repo convention: pushes (actual == line) are left out,
+    over = actual > line, pick hit = over if the grade leaned Over else not over.
+    """
+    print("\n  Bait flag on %s:" % label)
+    print("    (bait = last 5 Maps 1-2 series before the match all met or beat this line; needs 5 series)")
+    groups = [("all", rows), ("kills", [r for r in rows if r["stat"] == "kills"]),
+              ("headshots", [r for r in rows if r["stat"] == "hs"])]
+    print("    %-10s %6s %6s %8s  %s" % ("group", "n", "bait", "share", "non-push over hit rate and pick hit rate, bait vs not"))
+    for name, rs in groups:
+        n = len(rs)
+        b = sum(1 for r in rs if r.get("bait"))
+        share = pct(b / n) if n else "–"
+        def side(pred):
+            a = [r for r in rs if pred(r) and not r["push"]]
+            over = _rate([1.0 if r["over"] else 0.0 for r in a])
+            pick = _rate([1.0 if r["hit"] else 0.0 for r in a])
+            return a, over, pick
+        ba, bo, bp = side(lambda r: r.get("bait"))
+        na, no, np_ = side(lambda r: not r.get("bait"))
+        print("    %-10s %6d %6d %8s  bait n=%d over %s pick %s  |  not n=%d over %s pick %s" % (
+            name, n, b, share, len(ba), pct(bo), pct(bp), len(na), pct(no), pct(np_)))
+
+
 def main():
     global STRENGTH
     if "--no-cito" in sys.argv:
@@ -433,6 +487,10 @@ def main():
     for b in sorted(bins):
         a = bins[b]
         print("    P(over) %.1f-%.1f: n=%5d  predicted %s  actual %s" % (b / 10, (b + 1) / 10, len(a), pct(S.mean(o for o, _ in a)), pct(S.mean(y for _, y in a))))
+    syn = []
+    for st in ("kills", "hs"):
+        syn.extend(synthetic_grade_rows(players, P, late, st))
+    bait_block(syn, "HOLDOUT synthetic lines (floor(last-10 mean)+0.5, 8+ prior series, kills and headshots)")
 
     if form is not None and any(form.values()):
         print("\n== Locked lines, kill-form weights 0 vs tuned (shipped w_line=%.2f):" % P["w_line"])
@@ -485,6 +543,13 @@ def main():
         grade_table(rs, w, P, label)
         if w > 0:
             grade_table(rs, 0.0, P, label + " -- MODEL ONLY, no line blend (for information; NOT what ships)")
+        # shipped grades (w_line as in PARAMS, w_hr as shipped) already sit on r["v2"]; use those picks for bait vs not
+        bait_rows = []
+        for r in rs:
+            g = r["v2"]
+            hit = r["over"] if g["pick"] == "OVER" else (not r["over"])
+            bait_rows.append(dict(r, pick=g["pick"], grade=g["grade"], hit=hit))
+        bait_block(bait_rows, label + ", shipped v2 grades")
     return P, w
 
 
