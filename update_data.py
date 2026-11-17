@@ -76,7 +76,7 @@ STATS_WAIT = {}   # game id -> in-flight fetch (concurrent callers share it, so 
 EVENT_WAIT = {}   # tournament id -> in-flight event-type lookup
 SEM = None        # asyncio.Semaphore(CONCURRENCY), made in main()
 PAUSE = {"until": 0.0}   # global back-off after a 429: every worker waits until this time
-STAT_KEEP = ["kills", "headshots", "death", "assists", "adr", "team_clan", "steam_profile"] + EXTRA_KEYS
+STAT_KEEP = ["kills", "headshots", "death", "assists", "adr", "team_clan", "enemy_clan_name", "steam_profile"] + EXTRA_KEYS
 
 async def get(s, path, params=None):
     """One bo3.gg request. At most CONCURRENCY in flight; a 429 pauses ALL workers (shared back-off)."""
@@ -114,10 +114,91 @@ async def ranked_teams(s):
             break
     return out[:MAX_TEAMS]
 
+def opp_name(m, p):
+    """The player's opponent in match m, as the bo3.gg team name (the same names the books and players.json use).
+    From the match's two teams: the one that is not the player's team (by team id, else by clan name).
+    Falls back to bo3.gg's enemy_clan_name only when the match teams can't tell (it is often blank, or a clan
+    alias such as "IC Esports" for Inner Circle)."""
+    t1, t2 = m.get("team1") or {}, m.get("team2") or {}
+    tc = p.get("team_clan") or {}
+    pt = tc.get("team_id")
+    if pt is not None and t1.get("id") == pt and t2.get("name"):
+        return t2["name"]
+    if pt is not None and t2.get("id") == pt and t1.get("name"):
+        return t1["name"]
+    cn = _tn(tc.get("clan_name") or tc.get("name") or "")
+    if cn and t1.get("name") and t2.get("name"):
+        if cn == _tn(t1["name"]):
+            return t2["name"]
+        if cn == _tn(t2["name"]):
+            return t1["name"]
+    return p.get("enemy_clan_name") or ""
+
+
+def fill_blank_opp(players):
+    """Fills a blank 'opp' on stored logs from the other team that played the same match (no API calls).
+    Per (match, map): players whose team won the same number of rounds ('rw') were on the same side; each side is
+    named by the team most of its players are listed under. A side with no stored players can't be named, so logs
+    against an untracked team stay blank. Without round data the match's two team labels are used instead.
+    Only blank 'opp' values are written. Returns (filled, still_blank)."""
+    groups = {}
+    for e in players:
+        t = e.get("team") or ""
+        for l in e.get("logs") or []:
+            if l.get("mid") is not None:
+                groups.setdefault((l["mid"], l.get("n")), []).append((t, l))
+    by_mid = {}
+    for (mid, _), items in groups.items():
+        by_mid.setdefault(mid, []).extend(items)
+    filled = 0
+
+    def major(items):
+        c = {}
+        for t, _ in items:
+            if t:
+                c[t] = c.get(t, 0) + 1
+        return max(c, key=lambda k: (c[k], k)) if c else None
+
+    for (mid, _), items in groups.items():
+        if not any(not l.get("opp") for _, l in items):
+            continue
+        sides = {}
+        if all(isinstance(l.get("rw"), (int, float)) and isinstance(l.get("rd"), (int, float)) and l["rw"] * 2 != l["rd"]
+               for _, l in items):
+            for t, l in items:
+                sides.setdefault(l["rw"], []).append((t, l))
+        if len(sides) == 2:
+            a, b = list(sides.values())
+            na, nb = major(a), major(b)
+            if na and nb and _tn(na) != _tn(nb):
+                for side, other in ((a, nb), (b, na)):
+                    for _, l in side:
+                        if not l.get("opp"):
+                            l["opp"] = other
+                            filled += 1
+            continue
+        # no usable round split: the two most common team labels in the whole match
+        c = {}
+        for t, _ in by_mid[mid]:
+            if t:
+                c[_tn(t)] = (c.get(_tn(t), (0, t))[0] + 1, t)
+        top = sorted(c.values(), reverse=True)[:2]
+        if len(top) == 2 and top[1][0] >= 2:
+            x, y = top[0][1], top[1][1]
+            for t, l in items:
+                if not l.get("opp"):
+                    if _tn(t) == _tn(x):
+                        l["opp"] = y; filled += 1
+                    elif _tn(t) == _tn(y):
+                        l["opp"] = x; filled += 1
+    blank = sum(1 for e in players for l in e.get("logs") or [] if not l.get("opp"))
+    return filled, blank
+
+
 def mk_log(date, m, g, p, et):
     log = {"date": date, "mid": m["id"], "n": g.get("number"),
            "map": (g.get("map_name") or "").replace("de_", "").capitalize(),
-           "opp": p.get("enemy_clan_name", ""), "kills": p["kills"], "hs": p["headshots"],
+           "opp": opp_name(m, p), "kills": p["kills"], "hs": p["headshots"],
            "d": p.get("death"), "a": p.get("assists"), "adr": p.get("adr")}
     if et:
         log["ev"] = et
@@ -542,6 +623,8 @@ async def main():
         print("wrote games.json:", len(games), "games")
     players = [e for e in out.values() if e["logs"]]
     data = {"updated": today, "season_start": SEASON_START, "ranks": ranks, "players": players}
+    f, b = fill_blank_opp(players)
+    print("blank opponents filled from the other team's logs:", f, "| still blank:", b)
     size = write_players(data)
     save_state(state)   # only together with players.json, so the two always match
     print("wrote players.json: %d players, %d logs, %.1f MB" % (len(players), sum(len(p["logs"]) for p in players), size / 1e6))

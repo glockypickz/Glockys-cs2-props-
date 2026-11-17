@@ -168,7 +168,7 @@ function avgRounds(team,before){var a=teamSeries(team).filter(function(x){return
 function roundsProj(past,st,opp,team,date){var cs=combos(past).filter(function(c){return c.rounds&&c[st]!=null}).slice(0,10);if(cs.length<4)return null;var k=0,r=0;cs.forEach(function(c){k+=c[st];r+=c.rounds});var e1=avgRounds(team,date),e2=opp?avgRounds(opp,date):null;if(e1==null&&e2==null)return null;var E=e1==null?e2:e2==null?e1:(e1+e2)/2;return Math.round(k/r*E*10)/10}
 function recordData(){TS_CACHE={};var rows=[],pending=0,nodata=0,seen={},pushes=0,voids=0;
  (HIST||[]).forEach(function(e){var st=normStat(e.stat);if(!st||!e.start)return;var t=new Date(e.start).getTime();if(isNaN(t))return;
-  if(t>NOW()-5*3600000){pending++;return}
+  if(t>NOW()-1*3600000){pending++;return}
   var rs=e.result||null;if(rs&&rs.outcome==='void'){voids++;return}
   if(isCombo(e.player)){ // combo: needs the locked pick, and every player's result for that match added up
    if(!(e.lock&&e.lock.grade)){nodata++;return}
@@ -212,7 +212,7 @@ function recordCard(){if(HIST==null)return '';var h='<div class="card" style="ma
  function rt(r){var pc=(r.rproj-r.line)/r.line,m=Math.abs(pc),t=m>=.10?'Strong':m>=.06?'Good':m>=.03?'Lean':m>=.01?'Weak':'Toss-up',pk=pc>=0?'OVER':'UNDER';return{m:m,tier:t,pick:pk,hit:pk==='OVER'?r.act>r.line:r.act<r.line}}
  var rr=rv.map(function(r){return{r:r,q:rt(r)}});
  h+='<h2 style="margin-top:12px">Rounds model</h2>';
- if(rr.length<10)h+='<div class="muted">Only '+rr.length+' of '+vis.length+' picks have round data so far. Round counts are saved by the daily update and the 5-hour results job, so this fills in as new matches finish.</div>';
+ if(rr.length<10)h+='<div class="muted">Only '+rr.length+' of '+vis.length+' picks have round data so far. Round counts are saved by the daily update and the results job (every 5 hours), so this fills in as new matches finish.</div>';
  else{var nR=Math.ceil(rr.length/3),tl=rr.slice().sort(function(a,b){return Math.abs((b.r.proj-b.r.line)/b.r.line)-Math.abs((a.r.proj-a.r.line)/a.r.line)}).slice(0,nR),tr=rr.slice().sort(function(a,b){return b.q.m-a.q.m}).slice(0,nR);
   var mae=function(f){return fv(mean(rr.map(function(x){return Math.abs(f(x.r)-x.r.act)})))},bias=function(f){var b=mean(rr.map(function(x){return f(x.r)-x.r.act}));return (b>=0?'+':'')+fv(b)};
   h+='<div class="muted" style="margin-bottom:6px">Projection = the player\'s kills (or headshots) per round over his last 10 Map 1+2 series, times the expected rounds for this matchup (the average of both teams\' recent Map 1+2 round totals). Only picks with enough round data ('+rr.length+' of '+vis.length+'). Live grades are untouched.</div><div class="scroll"><table><tr><th>Rounds tier</th><th>Picks</th><th>Record</th><th>Over / Under</th></tr>'+['Strong','Good','Lean','Weak','Toss-up'].map(function(T){var q=rr.filter(function(x){return x.q.tier===T});return '<tr><td>'+T+'</td><td>'+q.length+'</td><td>'+wls(q.map(function(x){return x.q.hit}))+'</td><td>'+q.filter(function(x){return x.q.pick==='OVER'}).length+' / '+q.filter(function(x){return x.q.pick==='UNDER'}).length+'</td></tr>'}).join('')+'</table></div>'

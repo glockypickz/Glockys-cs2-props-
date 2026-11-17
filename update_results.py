@@ -94,7 +94,9 @@ def main():
     data = load_players("players.json")
     cutoff = (datetime.date.today() - datetime.timedelta(days=LOOKBACK_DAYS)).isoformat()
     added = asyncio.run(run(data, cutoff))
-    if added:
+    f, b = U.fill_blank_opp(data["players"])
+    print("blank opponents filled from the other team's logs:", f, "| still blank:", b)
+    if added or f:
         data["results_updated"] = datetime.datetime.utcnow().isoformat(timespec="seconds") + "Z"
         save_players(data, "players.json")   # compact fmt 2 (see grader.encode_players)
         print("players.json updated")
