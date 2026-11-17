@@ -117,3 +117,10 @@ header img{filter:drop-shadow(0 0 10px rgba(0,255,102,.35));animation:gpglow 3.5
 .player-frame{position:relative;width:100%;padding-top:56.25%;background:#000;border-radius:10px;overflow:hidden;border:1px solid var(--line)}
 .player-frame iframe{position:absolute;inset:0;width:100%;height:100%;border:0}
 .player .slinks button.on{border-color:var(--green);color:var(--green)}
+
+/* started games: pre-game line + live prop tracker */
+.trk table td{vertical-align:top}.trk tr.cashed td{background:#00ff6614}.trk tr.lostrow td{background:#ff4d6d12}
+.tst{display:inline-block;padding:3px 8px;border-radius:99px;font-size:12px;font-weight:800;background:#262626;color:var(--silver)}
+.tst.cash{background:var(--green);color:#000}.tst.lost{background:var(--red);color:#fff}.tst.run{background:#ffc53d22;color:var(--amber)}
+.bar{height:5px;background:#262626;border-radius:99px;margin-top:5px;min-width:90px;overflow:hidden}.bar i{display:block;height:100%;background:var(--amber)}
+.bar i.cash{background:var(--green)}.bar i.lost{background:var(--red)}
