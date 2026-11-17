@@ -268,7 +268,7 @@ def grade_table(rows, w, P, label):
         out.append(dict(r, ng=g["grade"], npick=g["pick"], nhit=hit, epp=g["edge_pp"]))
     print("\n  v2 grades on %s (w=%.2f):" % (label, w))
     print("  %-6s %5s %9s %8s %16s %16s" % ("grade", "n", "record", "hit", "Wilson 95%", "match-clustered"))
-    for gname in ("A", "B", "PASS"):
+    for gname in ("A+", "B", "C", "D", "F"):
         a = [x for x in out if x["ng"] == gname]
         k = sum(x["nhit"] for x in a)
         lo, hi = wilson(k, len(a))
