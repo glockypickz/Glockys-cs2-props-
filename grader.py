@@ -46,7 +46,7 @@ PARAMS = {"m": 100, "half_life": 8, "n_max": 200, "m_team": 1500, "elo_k": 16, "
           "min_series": 8, "grade_a": 6.0, "grade_b": 3.0,
           "w_rank": 0.25, "rank_s": 1.0, "w_maps": 0.25, "k_maps": 6.0, "w_hr": 0.0, "k_hr": 5.0, "w_hr_l5": 0.25, "w_hr_l10": 0.25, "w_hr_l20": 0.25, "w_hr_szn": 0.25,
           "hr_upgrade_a": 0.85, "hr_upgrade_b": 0.75, "hr_szn_min": 8,
-          "w_l5": 0.1, "w_l10": 0.05, "w_l20": 0.05, "w_szn": 0.0, "w_kd": 0.1, "k_kd": 40.0,
+          "w_l5": 0.1, "w_l10": 0.05, "w_l20": 0.05, "w_szn": 0.05, "w_kd": 0.1, "k_kd": 40.0,
           "w_hs5": 0.3, "w_hs10": 0.2, "w_hs20": 0.15, "w_hsszn": 0.1,
           "w_khs5": 0.1, "w_khs10": 0.05, "w_khs15": 0.025, "w_khsszn": 0.0, "k_hsp": 30.0, "w_hkd": -0.1}
 # Kill-model form inputs (kills props only; series before the match only; tuned by backtest.py --tune-form):
@@ -69,6 +69,8 @@ PARAMS = {"m": 100, "half_life": 8, "n_max": 200, "m_team": 1500, "elo_k": 16, "
 #   Kills: w_l10 0.1 split into w_l10 0.05 + w_l20 0.05 (holdout MAE 6.277 -> 6.275, locked kills lines Brier .2552 -> .2551).
 #   Kills HS% factor uses L5 / L10 / L15 + season (KHS_WIN, owner: no L20): w_khs5 0.1, w_khs10 0.05, w_khs15 0.025 (least
 #   harmful ladder tried: kills holdout MAE 6.2745 -> 6.2750, locked kills lines Brier unchanged .2551).
+#   w_szn 0.05 (owner, Nov 17: season must count for kills; raw season per-round rate, applied after L5/L10/L20).
+#   Backtest vs 0: kills holdout MAE 6.2717 -> 6.2705, real lines Brier .25241 -> .25239, picks 283 -> 284 hits of 630.
 #   h2h_w 0.1 (owner: use head-to-head; h2h_min 3 series, Maps 1-2, rate vs this opponent shrunk toward the player rate
 #   with m): locked lines Brier .25340 -> .25339, kills holdout MAE +0.0003; 0.05-0.2 and h2h_min 2/3/5 all within noise.
 # n_max 200: the rate uses every series this season (players.json holds the full calendar-year season), decayed with
