@@ -15,18 +15,18 @@ How a prop is graded
   5. P(over) from a negative binomial with mean mu and a per-stat dispersion fitted by backtest.py.
   6. Letter = direction + strength. Lean side = Over if P(over) >= P(under), else Under. Edge (pp) = P(lean side)
      minus the book's break-even, in percentage points:
-       A = Over,  edge >= +6pp   (excellent Over)
-       B = Over,  edge >= +3pp   (lean Over)
-       C = Over,  edge <  +3pp   (slight Over lean, weaker than B; can be below break-even)
+       A = Over,  edge >= +4pp   (excellent Over)            grade_a
+       B = Over,  edge >= 0pp    (lean Over, at/above break-even)  grade_b
+       C = Over,  edge <  0pp    (slight Over lean, below break-even)
        D = Under, edge <  +3pp   (slight Under lean)
-       F = Under, edge >= +3pp   (take the Under)
+       F = Under, edge >= +3pp   (take the Under)            grade_f (falls back to grade_b if missing)
      No A+ and no E.
      Break-even comes from the line's odds when stored, else the book default.
      Then a hit-rate override can raise the letter to A or B Over: the equal-weight blend of L5 / L10 / L20 /
      season over-rates vs this line (w_hr_l5 / w_hr_l10 / w_hr_l20 / w_hr_szn, default 0.25 each). A window with
      0 series is skipped and the rest are renormalized. Season must have hr_szn_min (8) series or the override
-     does not fire (and a low-sample flag is shown). Blend >= hr_upgrade_a (0.85) -> A Over; >= hr_upgrade_b
-     (0.75) -> B Over unless the model letter is already A. Below that the model letter is unchanged. This is
+     does not fire (and a low-sample flag is shown). Blend >= hr_upgrade_a (0.80) -> A Over; >= hr_upgrade_b
+     (0.70) -> B Over unless the model letter is already A. Below that the model letter is unchanged. This is
      not w_hr (which stays 0 and does not enter P(over)).
   7. Filters, shown as a flag next to the letter (the letter itself is not changed, except the hit-rate override
      above): fewer than 8 earlier series, player not on the line's team,
@@ -43,9 +43,9 @@ KHS_WIN = ("5", "10", "15", "szn")  # kills-projection HS% factor windows (no L2
 PARAMS = {"m": 100, "half_life": 8, "n_max": 200, "m_team": 1500, "elo_k": 16, "beta": 0.25,
           "rd_a": 17.34, "rd_b": 16.18, "h2h_min": 1, "h2h_w": 0.1, "w_line": 0.7,
           "g_kills": 0.6573, "g_hs": 0.3404, "size_kills": 20.0, "size_hs": 16.0,
-          "min_series": 8, "grade_a": 6.0, "grade_b": 3.0,
+          "min_series": 8, "grade_a": 4.0, "grade_b": 0.0, "grade_f": 3.0,
           "w_rank": 0.25, "rank_s": 1.0, "w_maps": 0.25, "k_maps": 6.0, "w_hr": 0.0, "k_hr": 5.0, "w_hr_l5": 0.25, "w_hr_l10": 0.25, "w_hr_l20": 0.25, "w_hr_szn": 0.25,
-          "hr_upgrade_a": 0.85, "hr_upgrade_b": 0.75, "hr_szn_min": 8,
+          "hr_upgrade_a": 0.8, "hr_upgrade_b": 0.7, "hr_szn_min": 8,
           "w_l5": 0.1, "w_l10": 0.05, "w_l20": 0.05, "w_szn": 0.05, "w_kd": 0.1, "k_kd": 40.0,
           "w_hs5": 0.3, "w_hs10": 0.2, "w_hs20": 0.15, "w_hsszn": 0.1,
           "w_khs5": 0.1, "w_khs10": 0.05, "w_khs15": 0.025, "w_khsszn": 0.0, "k_hsp": 30.0, "w_hkd": -0.1}
@@ -85,7 +85,7 @@ PARAMS = {"m": 100, "half_life": 8, "n_max": 200, "m_team": 1500, "elo_k": 16, "
 # Hit-rate letter override (separate from w_hr; w_hr stays 0). w_hr_l5 / w_hr_l10 / w_hr_l20 / w_hr_szn: weights
 #   of the L5 / L10 / L20 / season over-rate vs the current line, averaged (a window with 0 series is skipped).
 #   Default 0.25 each. L20 is computed for this even though prop cards display L15. hr_upgrade_a / hr_upgrade_b:
-#   blend >= 0.85 -> A Over; >= 0.75 -> B Over unless the model letter is already A; else the model letter stays.
+#   blend >= 0.80 -> A Over; >= 0.70 -> B Over unless the model letter is already A; else the model letter stays.
 #   hr_szn_min: season needs this many series or the override does not fire (low-sample flag). Thresholds 0 = off.
 # Cito features (only active when team_strength.json is present; with no file the grader is exactly as before):
 #   w_rank: weight of the ranking win chance (dated VRS + world points, latest list strictly before the match day)
@@ -205,7 +205,7 @@ def letter(pick, epp, P=PARAMS):
     """A / B / C = Over (strongest to weakest), D / F = Under (F = take the Under)."""
     if pick == "OVER":
         return "A" if epp >= P["grade_a"] else "B" if epp >= P["grade_b"] else "C"
-    return "F" if epp >= P["grade_b"] else "D"
+    return "F" if epp >= P.get("grade_f", P["grade_b"]) else "D"
 
 
 HR_BLEND_WINS = (("l5", 5, "w_hr_l5"), ("l10", 10, "w_hr_l10"), ("l20", 20, "w_hr_l20"), ("szn", None, "w_hr_szn"))

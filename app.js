@@ -3,12 +3,12 @@
 var $=function(i){return document.getElementById(i)};
 // Grades come from model.js (GPModel, grader v2): probability of the pick vs the book's break-even.
 // Letter = direction + strength, from the lean side's chance vs the book break-even (edge in percentage points):
-//   A = Over +6pp or more (excellent Over) · B = Over +3pp (lean Over) · C = Over under +3pp (slight Over lean)
+//   A = Over +4pp or more (excellent Over) · B = Over 0pp or more (lean Over) · C = Over below break-even (slight Over lean)
 //   D = Under under +3pp (slight Under lean) · F = Under +3pp or more (take the Under). No A+, no E.
 // Filter reasons (few series, team mismatch, stand-in) show as a flag next to the letter. The old +4% Over shift is gone.
 // Locked picks never change; old-grader locks show as e.g. "A+ (old)".
 var GLABEL={'A':'Excellent Over','B':'Lean Over','C':'Slight Over lean','D':'Slight Under lean','F':'Take the Under'};
-var GRADE_LEGEND='Grades (chance of the lean side minus the book break-even): A = Over +6pp or more, B = Over +3pp or more, C = slight Over lean (under +3pp), D = slight Under lean (under +3pp), F = Under +3pp or more. A flag means a filter fired (few series, team mismatch, stand-in).';
+var GRADE_LEGEND='Grades (chance of the lean side minus the book break-even): A = Over +4pp or more, B = Over at or above break-even, C = slight Over lean (below break-even), D = slight Under lean (under +3pp), F = Under +3pp or more. A flag means a filter fired (few series, team mismatch, stand-in).';
 function isPlay(g){return !!g&&(g.grade==='A'||g.grade==='B'||g.grade==='F')&&!(g.reasons&&g.reasons.length)}
 // hit-rate boxes vs the current line (x/n series over, earlier Maps 1-2 series only): green above 50%, red below
 // keys: which boxes. Prop cards (grading) show the season view: SZN, H2H, L20. L5 / L10 / L15 are research windows for the Players tab only.
