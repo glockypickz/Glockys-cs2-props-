@@ -204,12 +204,70 @@ function citoBlock(g){if(!STRENGTH)return '<div class="cito muted">No Cito data 
  if(od&&od.p)src.push('odds: '+esc(String(od.src||'').replace(/_/g,' '))+', '+esc(ftime(od.at)));else src.push(STRENGTH.odds?'odds: n/a for this match':'odds: n/a (needs Cito Pro)');
  return h+'<div class="muted cs">'+notes.concat(src).join(' · ')+'</div></div>'}
 function liveCard(g){var sc=(g.s1!=null&&g.s2!=null)?' <span style="color:var(--green);margin-left:8px">'+g.s1+' – '+g.s2+'</span>':'';
- return '<div class="card"><div class="muted"><span class="pill">LIVE</span> '+esc(g.tournament||'')+' · started '+esc(ftime(g.start))+(g.bo?' · Bo'+esc(g.bo):'')+'</div><div class="big">'+esc(g.team1)+' <span class="vs">vs</span> '+esc(g.team2)+sc+'</div>'+citoBlock(g)+'<div class="btns"><button class="g" data-act="gamegrade" data-i="'+g.id+'">See props</button></div>'+streamBlock(g,true)+'</div>'}
+ return '<div class="card"><div class="muted"><span class="pill">LIVE</span> '+esc(g.tournament||'')+' · started '+esc(ftime(g.start))+(g.bo?' · Bo'+esc(g.bo):'')+'</div><div class="big">'+esc(g.team1)+' <span class="vs">vs</span> '+esc(g.team2)+sc+'</div>'+citoBlock(g)+(function(){var m=matchFor(g);return m&&Object.keys(m.props).length?'<h3 style="margin:10px 0 4px">Prop tracker</h3>'+trackerBlock(m,true):''})()+'<div class="btns"><button class="g" data-act="gamegrade" data-i="'+g.id+'">See props</button><button class="g" data-act="gsub" data-v="started">Pre-game lines</button></div>'+streamBlock(g,true)+'</div>'}
+// ---- Started games: pre-game line + live prop tracker (display only; nothing is saved).
+// Pre-game line = the last line the lines feed saw before the start (lines_history.json keeps updating a line only until
+// the match starts). Opening line = first seen. "Now" = the book's current line in lines.json when it differs.
+// Live numbers: Maps 1-2 kills / headshots per player. bo3.gg posts a map's player stats only after that map ends, so
+// the tracker moves map by map (Worker route /live/<match id>, polled about every minute while the Games tab is open),
+// then from players.json once the results run has saved the match. There is no round-by-round feed.
+var LIVE={},LIVE_T=0,LIVE_OK=null,PREG=null; // PREG: pregame.json (public: started props' pre-game lines only)
+function pairKey(a,b,start){return [tn(a),tn(b)].sort().join('|')+'|'+cday(start)}
+// display-only team match: same key, or one key is the start of the other (books write "ex-INOX" and "ex-INOX Division")
+function sameTeam(a,b){a=tn(a);b=tn(b);if(!a||!b)return false;if(a===b)return true;var s=a.length<b.length?a:b,l=a.length<b.length?b:a;return s.length>=4&&l.indexOf(s)===0}
+function sameMatch(m,a,b,start){return cday(m.start)===cday(start)&&((sameTeam(m.t1,a)&&sameTeam(m.t2,b))||(sameTeam(m.t1,b)&&sameTeam(m.t2,a)))}
+function per12(l){var per=String(l.period||'Maps 1-2');return per.replace(/\s/g,'').toLowerCase().indexOf('maps1-2')>-1||per.indexOf('1-2')>-1}
+function startedMatches(){var now=NOW(),today=cday(),M={},order=[];
+ function mt(team,opp,start){var k=null;for(var i=0;i<order.length;i++)if(sameMatch(M[order[i]],team,opp,start)){k=order[i];break}
+  if(!k){k=pairKey(team,opp,start);M[k]={key:k,t1:team,t2:opp,start:start,props:{},game:null};order.push(k)}else if(start<M[k].start)M[k].start=start;return M[k]}
+ function started(s){var t=new Date(s).getTime();return !isNaN(t)&&t<=now&&cday(s)===today}
+ (HIST||PREG||[]).forEach(function(e){var st=normStat(e.stat);if(!st||!e.start||!started(e.start))return;var m=mt(e.team,e.opponent,e.start),k=norm(e.book)+'|'+norm(e.player)+'|'+st,o=m.props[k];
+  if(o&&o.lock&&!e.lock)return; // same rule as the Track Record: a locked entry wins
+  m.props[k]={book:e.book,player:e.player,team:e.team,opp:e.opponent,stat:st,open:e.first_line,pre:+e.line,now:null,lock:e.lock&&e.lock.grade?e.lock:null,result:e.result||null,odds:e.odds,start:e.start,hist:true}});
+ LINES.forEach(function(l){var st=normStat(l.stat);if(!st||!l.starts_at||!started(l.starts_at)||!per12(l))return;var m=mt(l.team,l.opponent,l.starts_at),k=norm(l.book)+'|'+norm(l.player)+'|'+st,o=m.props[k];
+  if(o){if(+l.line!==o.pre)o.now=+l.line}else m.props[k]={book:l.book,player:l.player,team:l.team,opp:l.opponent,stat:st,open:null,pre:+l.line,now:null,lock:null,result:null,odds:l.odds,start:l.starts_at,hist:false}});
+ GAMES.forEach(function(g){if(!g.start||new Date(g.start).getTime()>now)return;var k=null;order.forEach(function(x){if(!k&&sameMatch(M[x],g.team1,g.team2,g.start))k=x});
+  if(k){M[k].game=g;M[k].t1=g.team1;M[k].t2=g.team2;M[k].key=pairKey(g.team1,g.team2,g.start)}else if(isLive(g)){k=pairKey(g.team1,g.team2,g.start);M[k]={key:k,t1:g.team1,t2:g.team2,start:g.start,props:{},game:g};order.push(k)}});
+ return order.map(function(k){return M[k]}).sort(function(a,b){return a.start<b.start?1:-1})}
+function matchFor(g){return startedMatches().filter(function(m){return m.game===g||sameMatch(m,g.team1,g.team2,g.start)})[0]||null}
+// Maps 1-2 total for one player: bo3.gg live (finished maps), else players.json logs. {v, maps:[n..], done}
+function oneLive(m,name,team,opp,st){var L=m.game&&LIVE[m.game.id],got={},nm=norm(name),cn=canon(name);
+ if(L&&L.players)L.players.forEach(function(p){if((p.n===1||p.n===2)&&(norm(p.name)===nm||canon(p.name)===cn)&&(!team||sameTeam(p.team,team)||!L.players.some(function(q){return q!==p&&q.n===p.n&&norm(q.name)===nm})))got[p.n]=st==='hs'?p.hs:p.kills});
+ var p=find(name,team),day=cday(m.start);
+ if(p)(p.logs||[]).forEach(function(l){if((l.n===1||l.n===2)&&got[l.n]==null&&sameTeam(l.opp,opp)&&Math.abs((new Date(l.date)-new Date(day))/864e5)<=1){var x=st==='hs'?l.hs:l.kills;if(x!=null)got[l.n]=x}});
+ var ns=Object.keys(got).map(Number).sort();if(!ns.length)return null;var v=0;ns.forEach(function(n){v+=+got[n]});return{v:v,maps:ns}}
+function propLive(m,r){var names=isCombo(r.player)?r.player.split('+').map(function(s){return s.trim()}):[r.player],tot=0,maps=null;
+ for(var i=0;i<names.length;i++){var x=oneLive(m,names[i],r.team,r.opp,r.stat);if(!x)return r.result&&r.result.act!=null?{v:r.result.act,done:true,src:'result'}:null;tot+=x.v;maps=maps?maps.filter(function(n){return x.maps.indexOf(n)>-1}):x.maps}
+ var done=maps.length===2;if(!done&&r.result&&r.result.act!=null)return{v:r.result.act,done:true,src:'result'};return{v:tot,maps:maps,done:done}}
+function propPick(r){if(r.lock)return r.lock.pick;if(isCombo(r.player))return null;var p=find(r.player,r.team);if(!p)return null;var g=grade(p,r.stat,r.pre,r.opp,{team:r.team,book:r.book,odds:r.odds,before:cday(r.start)});return g?g.pick:null}
+function trackStatus(pick,line,lv){if(!lv)return{c:'',t:'waiting for map stats'};var v=lv.v;
+ if(pick==='UNDER'){if(v>line)return{c:'lost',t:'Under lost'};if(lv.done)return v===line?{c:'',t:'push'}:{c:'cash',t:'Under cashed'};return{c:'run',t:(line-v).toFixed(1)+' under so far'}}
+ if(v>line)return{c:'cash',t:'Over cashed'};if(lv.done)return v===line?{c:'',t:'push'}:{c:'lost',t:pick==='OVER'?'Over missed':'stayed under'};return{c:'run',t:'needs '+(Math.floor(line)+1-v)+' more'}}
+function trackerBlock(m,compact){var rows=Object.keys(m.props).map(function(k){return m.props[k]}).sort(function(a,b){return (a.player<b.player?-1:a.player>b.player?1:0)||(a.stat<b.stat?-1:1)||(a.book<b.book?-1:1)});
+ if(!rows.length)return '<div class="muted trk-none">No saved props for this match, so there is no pre-game line to show.</div>';
+ var h='<div class="scroll trk"><table><tr><th>Player</th><th>Prop</th><th>Pre-game line</th><th>Now</th><th>Pick</th><th>Maps 1-2 so far</th><th>Status</th></tr>';
+ rows.forEach(function(r){var lv=propLive(m,r),pick=propPick(r),s=trackStatus(pick,r.pre,lv),pct=lv?Math.min(100,Math.round(lv.v/Math.max(r.pre,1)*100)):0;
+  var mv=(r.open!=null&&+r.open!==r.pre)?'<span class="muted"> (opened '+esc(r.open)+')</span>':'';
+  h+='<tr class="'+(s.c==='cash'?'cashed':s.c==='lost'?'lostrow':'')+'"><td><b>'+esc(r.player)+'</b><div class="muted">'+esc(r.book||'')+'</div></td><td>'+(r.stat==='hs'?'HS':'Kills')+'</td>'+
+   '<td><b>'+esc(r.pre)+'</b>'+mv+(r.hist?'':'<div class="muted">last line seen</div>')+'</td><td>'+(r.now!=null?'<b>'+esc(r.now)+'</b> <span class="muted">'+(r.now>r.pre?'▲':'▼')+' '+Math.abs(r.now-r.pre).toFixed(1)+'</span>':'<span class="muted">–</span>')+'</td>'+
+   '<td>'+(pick?'<span class="pill'+(pick==='UNDER'?' u':'')+'">'+pick+'</span>'+(r.lock?' <span class="muted">'+esc(oldG(r.lock))+'</span>':''):'<span class="muted">–</span>')+'</td>'+
+   '<td>'+(lv?'<b>'+esc(lv.v)+'</b> <span class="muted">/ '+esc(r.pre)+(lv.src==='result'?' · final':lv.done?' · both maps':' · map '+lv.maps.join('+')+' done')+'</span><div class="bar"><i class="'+(s.c||'run')+'" style="width:'+pct+'%"></i></div>':'<span class="muted">–</span>')+'</td>'+
+   '<td><span class="tst '+s.c+'">'+esc(s.t)+'</span></td></tr>'});
+ return h+'</table></div>'+(compact?'':'<div class="muted cs">Pre-game line = last line seen before the start (opening line in brackets when it moved). Maps 1-2 so far comes from bo3.gg per finished map (it posts a map\'s stats only after the map ends, sometimes late), checked about every minute; there is no round-by-round feed.</div>')}
+function startedCard(m){var g=m.game,live=g&&isLive(g),sc=g&&g.s1!=null&&g.s2!=null?' <span style="color:var(--green);margin-left:8px">'+g.s1+' – '+g.s2+'</span>':'';
+ var L=g&&LIVE[g.id],maps=L&&L.maps?L.maps.map(function(x){return 'Map '+x.n+(x.map?' '+esc(String(x.map).replace(/^de_/,'')):'')+': '+esc(x.status||'?')+(x.score&&x.score[0]!=null?' '+x.score[0]+'-'+x.score[1]:'')}).join(' · '):'';
+ return '<div class="card">'+'<div class="muted">'+(live?'<span class="pill">LIVE</span> ':'')+'started '+esc(ftime(m.start))+(g&&g.tournament?' · '+esc(g.tournament):'')+'</div><div class="big">'+esc(m.t1)+' <span class="vs">vs</span> '+esc(m.t2)+sc+'</div>'+(maps?'<div class="muted">'+maps+'</div>':'')+trackerBlock(m)+'</div>'}
+function pollLive(force){if(LIVE_OK===false)return;if(typeof location!=='undefined'&&/github\.io$|^$/.test(location.hostname||''))return;if(!force&&NOW()-LIVE_T<55000)return;LIVE_T=NOW();
+ var ids=startedMatches().filter(function(m){return m.game&&isLive(m.game)}).map(function(m){return m.game.id});if(!ids.length)return;
+ Promise.all(ids.map(function(id){return fetch('/live/'+encodeURIComponent(id)).then(function(r){if(r.status===404){LIVE_OK=false;return null}return r.ok?r.json():null}).then(function(d){if(d&&d.maps)LIVE[id]=d}).catch(function(){})})).then(function(){if(tab==='games'&&!document.getElementById('imgov'))render()})}
 function viewGames(){if(!GAMES.length)return '<div class="card"><h2>Games</h2><div class="warn">No schedule loaded yet. Run the "Update CS2 games" workflow once to create games.json.</div></div>';
  var lv=liveGames(),up=upGames(),v=sel.gv||(lv.length?'live':'up'),age=gamesAge();
- var h='<div class="btns" style="margin-bottom:10px"><button class="'+(v==='live'?'b':'g')+'" data-act="gsub" data-v="live">Live · '+lv.length+'</button><button class="'+(v==='up'?'b':'g')+'" data-act="gsub" data-v="up">Upcoming · '+up.length+'</button></div>';
+ var sm=startedMatches();pollLive();var h='<div class="btns" style="margin-bottom:10px"><button class="'+(v==='live'?'b':'g')+'" data-act="gsub" data-v="live">Live · '+lv.length+'</button><button class="'+(v==='started'?'b':'g')+'" data-act="gsub" data-v="started">Started today · '+sm.length+'</button><button class="'+(v==='up'?'b':'g')+'" data-act="gsub" data-v="up">Upcoming · '+up.length+'</button></div>';
  h+='<div class="muted" style="margin-bottom:8px">From bo3.gg, updated '+esc(META.games_at||'')+(age!=null?' ('+Math.round(age)+' min ago)':'')+'. Times are Central. Refreshes about every 10 minutes.</div>';
  if(age!=null&&age>90)h+='<div class="warn">This game data is '+(Math.round(age/6)/10)+' hours old, so live status may be out of date.</div>';
+ if(v==='started'){if(!sm.length)return h+'<div class="card"><h2>Started today</h2><div class="muted">No match with saved props has started yet today (Central).</div></div>';
+  var wp=sm.filter(function(m){return Object.keys(m.props).length}),np=sm.filter(function(m){return !Object.keys(m.props).length});
+  return h+'<h2>Started today · props from their pre-game line</h2><div class="grid c2">'+wp.map(startedCard).join('')+'</div>'+(np.length?'<div class="muted" style="margin-top:8px">Started with no saved props (no pre-game line): '+np.map(function(m){return esc(m.t1)+' vs '+esc(m.t2)}).join(' · ')+'</div>':'')}
  if(v==='live'){
   if(!lv.length)return h+'<div class="card"><h2>Live</h2><div class="muted">No matches are live right now. A match shows here only while bo3.gg marks it live, and drops off when it finishes.</div></div>';
   return h+'<div class="grid c2">'+lv.map(liveCard).join('')+'</div><div class="muted" style="margin-top:8px">Stream links come from bo3.gg. Watch opens an official Twitch or YouTube embed in this page (one at a time). Kick and other platforms open in a new tab. The app does not rebroadcast or proxy video.</div>'}
@@ -456,7 +514,7 @@ document.addEventListener('click',function(e){var b=e.target.closest('[data-act]
  var a=b.dataset.act,i=+b.dataset.i;
  if(a==='go')go(b.dataset.t);
  else if(a==='reload'){toast('Reloading…');boot()}
- else if(a==='gsub'){sel.gv=b.dataset.v;render()}
+ else if(a==='gsub'){sel.gv=b.dataset.v;render();pollLive(true)}
  else if(a==='watch'){var id=b.dataset.i,si=+b.dataset.s;if(sel.watch&&String(sel.watch.id)===String(id)&&+sel.watch.s===si)sel.watch=null;else sel.watch={id:id,s:si};render()}
  else if(a==='lday'){sel.ld=b.dataset.d;render()}
  else if(a==='rday'){sel.rd=b.dataset.d;render()}
@@ -495,16 +553,16 @@ document.addEventListener('change',function(e){var i=e.target.id,m={pt:'tm',pn:'
 (function(){try{var m=/admin=([^&]*)/.exec(location.hash||'');if(m){var k=decodeURIComponent(m[1]);if(k==='off')localStorage.removeItem('gp_admin');else localStorage.setItem('gp_admin',k);history.replaceState(null,'',location.pathname+location.search)}}catch(e){}})();
 function adminKey(){try{return localStorage.getItem('gp_admin')||''}catch(e){return ''}}
 function getJSON(u){var o={};if(u==='lines_history.json'&&adminKey())o={headers:{'X-Admin-Key':adminKey()}};return fetch(u+'?'+Date.now(),o).then(function(r){if(!r.ok)throw 0;return r.json()})}
-function applyFeeds(g,l,h){
+function applyFeeds(g,l,h,p){
  if(g){GAMES=(g.games||[]).filter(function(x){return x.start}).sort(function(a,b){return a.start<b.start?-1:1});META.games_iso=g.updated||'';META.games_at=(g.updated&&g.updated.indexOf('T')>-1)?fmt(g.updated):(g.updated||'')}
  if(l){LINES=l.lines||[];META.lines_at=l.observed_at?fmt(l.observed_at):''}
- if(h&&h.entries)HIST=h.entries}
-function feeds(){return Promise.all([getJSON('games.json').catch(function(){return null}),getJSON('lines.json').catch(function(){return null}),getJSON('lines_history.json').catch(function(){return null})])}
+ if(h&&h.entries)HIST=h.entries;if(p&&p.entries)PREG=p.entries}
+function feeds(){return Promise.all([getJSON('games.json').catch(function(){return null}),getJSON('lines.json').catch(function(){return null}),getJSON('lines_history.json').catch(function(){return null}),HIST?Promise.resolve(null):getJSON('pregame.json').catch(function(){return null})])}
 function boot(){Promise.all([getJSON('players.json'),feeds(),getJSON('team_strength.json').catch(function(){return null})]).then(function(r){
- STRENGTH=r[2]||null;MCTX=null;r[0]=GPModel.decodePlayers(r[0])||{};DB=r[0].players||[];RANK=r[0].ranks||{};META.updated=r[0].updated||'';applyFeeds(r[1][0],r[1][1],r[1][2]);render();
+ STRENGTH=r[2]||null;MCTX=null;r[0]=GPModel.decodePlayers(r[0])||{};DB=r[0].players||[];RANK=r[0].ranks||{};META.updated=r[0].updated||'';applyFeeds(r[1][0],r[1][1],r[1][2],r[1][3]);render();
  }).catch(function(){$('main').innerHTML='<div class="card"><div class="warn">Could not load players.json. Open this from the hosted site.</div></div>';nav()})}
 setInterval(function(){if(document.hidden||!DB.length)return;var ae=document.activeElement;if(ae&&/INPUT|SELECT|TEXTAREA/.test(ae.tagName))return;if(['games','lines','dash'].indexOf(tab)<0)return;
- feeds().then(function(r){applyFeeds(r[0],r[1],r[2]);if(!document.getElementById('imgov'))render()})},60000);
+ feeds().then(function(r){applyFeeds(r[0],r[1],r[2],r[3]);if(!document.getElementById('imgov'))render();if(tab==='games')pollLive(true)})},60000);
 // ---- AI chat: answers only from the app's own numbers. The page builds a small facts sheet; the Cloudflare Worker adds the key.
 var chatLog=[],chatBusy=false;
 function f1(x,d){return x==null||isNaN(x)?'n/a':x.toFixed(d==null?1:d)}
