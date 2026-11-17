@@ -55,6 +55,14 @@ function addDays(ymd,n){var d=new Date(ymd+'T12:00:00Z');d.setUTCDate(d.getUTCDa
 function dayLabel(ymd){var t=cday();if(ymd===t)return 'Today';if(ymd===addDays(t,1))return 'Tomorrow';return new Intl.DateTimeFormat('en-US',{timeZone:'UTC',weekday:'short',month:'short',day:'numeric'}).format(new Date(ymd+'T12:00:00Z'))}
 var TN_M={};function tn(s){var k=s==null?'':String(s);return TN_M.hasOwnProperty(k)?TN_M[k]:(TN_M[k]=GPModel.tn(k))} // team key with book/bo3.gg aliases (model.js TEAM_ALIASES)
 function teq(a,b){a=tn(a);b=tn(b);return !!a&&a===b}
+// Display only: this-season Maps 1-2 average vs opp over the last `n` meetings dated strictly before `before`.
+// Not an input to the v1be projection or letter. If fewer than n meetings exist, uses those. None -> "–".
+function h2hSeasonWindow(cs,st,opp,n,before){before=before||'9999';if(!opp)return{n:0,avg:null,txt:'–'};
+ var yr=before!=='9999'?String(before).slice(0,4):(cs.length&&cs[0].date?String(cs[0].date).slice(0,4):String(new Date().getFullYear()));
+ var rows=cs.filter(function(c){return c.date<before&&String(c.date).slice(0,4)===yr&&teq(c.opp,opp)&&c[st]!=null});
+ var w=rows.slice(0,n),avg=mean(nums(w,st));if(!w.length||avg==null)return{n:0,avg:null,txt:'–'};
+ return{n:w.length,avg:avg,txt:'avg '+avg.toFixed(1)+' over '+w.length+' meeting'+(w.length===1?'':'s')}}
+function h2hSeasonRows(cs,st,opp,before){return[10,15].map(function(n){var h=h2hSeasonWindow(cs,st,opp,n,before);return{k:'H2H last '+n+' (this season)',txt:h.txt,v:null,n:h.n||'',f:1}})}
 function NOW(){return Date.now()}
 function boN(b){var n=parseInt(String(b==null?'':b).replace(/\D/g,''),10);return isNaN(n)?null:n}
 function isLive(g){if(g.status!=='live')return false;var n=boN(g.bo),age=(NOW()-new Date(g.start).getTime())/3600000;
@@ -95,6 +103,7 @@ function grade(p,st,line,opp,o){o=o||{};var cs=combos(p);var v=nums(cs,st);if(!v
  var m=GPModel.grade(mctx(),p,st,line,opp,{team:o.team||'',book:o.book,odds:o.odds,before:o.before});if(!m)return null;
  var yr=cs.length?cs[0].date.slice(0,4):'',last=nums(cs.filter(function(c){return c.date.slice(0,4)===yr}),st),over=last.filter(function(x){return x>line}).length; // full season (calendar year), not a short window
  var det=m.v1||{},comp=(det.parts||[]).map(function(p){return{k:p.label+' (weight '+p.w.toFixed(2)+')',v:p.v,n:p.n,f:1}});
+ if(opp)comp=comp.concat(h2hSeasonRows(cs,st,opp,o.before));
  if(det.adr5!=null||det.adrc!=null){comp.push({k:'ADR nudge (last 5 vs all series, cap 5%)',v:det.adrUsed?((det.adrMult-1)*100):null,n:det.adrN5,f:1,u:'%'});
   if(det.adr5!=null)comp.push({k:'ADR, last 5 series',v:det.adr5,n:det.adrN5,f:1});
   if(det.adrc!=null)comp.push({k:'ADR, all series',v:det.adrc,n:det.adrN,f:1})}
@@ -103,6 +112,7 @@ function grade(p,st,line,opp,o){o=o||{};var cs=combos(p);var v=nums(cs,st);if(!v
  var redis=det.weightSum!=null&&Math.abs(det.weightSum-1)>1e-6,nudgeTxt=det.adrUsed?(', then an ADR nudge of '+(det.adrMult>=1?'+':'')+((det.adrMult-1)*100).toFixed(1)+'% (capped at 5%) from last 5 series vs overall ADR'):', with no ADR nudge';
  var beNote='When the pick is Under and the letter is D or F, F requires P(under) at least +3pp over the book\'s break-even; otherwise D';
  if(m.underBe&&m.underBe.applied)beNote+=' (here P(under) '+pc1(m.underBe.pu)+', break-even '+pc1(m.underBe.be)+', '+(m.underBe.epp>=0?'+':'')+m.underBe.epp.toFixed(1)+'pp, so '+m.grade+')';
+ if(opp)beNote+='. H2H last 10 / last 15 (this season) are shown for reference only and are not used in the projection or the letter';
  var adj='Projection '+m.proj.toFixed(1)+' is the v1 mix'+(mix?': '+mix:'')+(redis?' (missing windows dropped, their weight redistributed)':'')+nudgeTxt+'. P(over) '+pc1(m.pOver)+(m.pPush>0.0005?' (push '+pc1(m.pPush)+')':'')+'. Break-even '+pc1(m.be)+(o.book?' ('+o.book+')':' (PrizePicks default)')+'. Edge '+(m.edgePP>=0?'+':'')+m.edgePP.toFixed(1)+'pp. '+beNote+(m.reasons.length?'. No play: '+m.reasons.join('; '):'');
  var label=glabel(m);
  return{player:p.name,team:p.team,stat:st,line:line,opp:opp||'',proj:+m.proj.toFixed(1),edge:+m.edge.toFixed(1),grade:m.grade,label:label,pick:m.pick,pOver:m.pOver,pPick:m.pPick,be:m.be,edgePP:m.edgePP,reasons:m.reasons,comp:comp,over:over,of:last.length,sd:+sd(last).toFixed(1),cs:cs,adj:adj,book:o.book||'',hits:m.hits||null,bait:!!m.bait}}
@@ -120,7 +130,7 @@ function gradeCombo(name,team,st,line,opp,o){o=o||{};
  var label=glabel(m);
  var last=nums(joint.slice(0,10),st),over=last.filter(function(x){return x>line}).length;
  return{player:name,team:team||'',stat:st,line:line,opp:opp||'',proj:proj,edge:+edge.toFixed(1),grade:m.grade,label:label,pick:m.pick,pOver:m.pOver,pPick:m.pPick,be:m.be,edgePP:m.edgePP,reasons:m.reasons,
-  comp:parts.map(function(x){return{k:x.name+' projection',v:x.proj,n:x.n,f:1}}),over:over,of:last.length,sd:+sd(last).toFixed(1),cs:joint,book:o.book||'',
+  comp:parts.map(function(x){return{k:x.name+' projection',v:x.proj,n:x.n,f:1}}).concat(opp?h2hSeasonRows(joint,st,opp,o.before):[]),over:over,of:last.length,sd:+sd(last).toFixed(1),cs:joint,book:o.book||'',
   adj:'Combo: the sum of each player\'s own projection ('+parts.map(function(x){return x.name+' '+x.proj}).join(' + ')+'), P(over) '+pc1(m.pOver)+', break-even '+pc1(m.be)+', edge '+(m.edgePP>=0?'+':'')+m.edgePP.toFixed(1)+'pp'+(m.reasons.length?'. No play: '+m.reasons.join('; '):'')+'. When the pick is Under and the letter is D or F, F requires P(under) at least +3pp over the book\'s break-even; otherwise D. Chart and over count use only series where all '+names.length+' played together'+(joint.length?' ('+joint.length+' found)':' (none found yet)'),bait:false}}
 function gradeFor(name,team,st,line,opp,o){o=o||{};if(isCombo(name))return gradeCombo(name,team,st,line,opp,o);var p=find(name,team);return p?grade(p,st,line,opp,{team:team||'',book:o.book,odds:o.odds,before:o.before}):null}
 function gclass(g){return g==='A+'||g==='A'||g==='B'||g==='F'?'':g==='C'||g==='D'?' mid':' low'}
@@ -398,7 +408,7 @@ function gradeCard(g){return '<div class="card"><div class="muted">'+esc(g.playe
  '<div class="stats"><div class="st"><b>'+g.proj+'</b><span>Projection</span></div><div class="st"><b>'+pc1(g.pPick)+'</b><span>Chance '+esc(g.pick)+'</span></div><div class="st"><b>'+(g.edgePP>=0?'+':'')+g.edgePP.toFixed(1)+'pp</b><span>Edge vs break-even '+pc1(g.be)+'</span></div><div class="st"><b>'+g.over+'/'+g.of+'</b><span>Over, this season</span></div></div>'+
  (g.hits?'<h2 style="margin-top:12px">Hit rate vs '+g.line+'</h2>'+hitBoxes(g.hits)+'<div class="muted">Series (Maps 1-2) that went over this exact line: the last 5 / 10 / 15 / 20, vs '+esc(g.opp||'this opponent')+' this season, and the full season. Display only: the letter comes from the v1 projection versus the line, not from these hit rates. '+(GPModel.PARAMS.w_hr>0?'Blended into the chance at weight '+GPModel.PARAMS.w_hr+'.':'Shown for reference only: the backtest found it does not improve the grade, so it is not used in it.')+'</div>':'')+
  '<h2 style="margin-top:12px">Last 20 '+(g.stat==='hs'?'headshots':'kills')+' (Maps 1-2)</h2>'+chart(g.cs,g.stat,g.line,20)+'<div class="muted">Oldest to newest, with the date under each bar. The grade uses every series this season ('+g.of+'); the chart shows the latest 20. Dashed line = '+g.line+'. Green = over, red = under.</div>'+
- '<h2 style="margin-top:12px">Breakdown</h2><div class="scroll"><table><tr><th>Part</th><th>Value</th><th>Series used</th></tr>'+g.comp.map(function(c){return '<tr><td>'+esc(c.k)+'</td><td>'+(c.v==null?'no data':c.v.toFixed(c.f==null?1:c.f)+(c.u||''))+'</td><td>'+(c.n==null?'':c.n)+'</td></tr>'}).join('')+'</table></div>'+
+ '<h2 style="margin-top:12px">Breakdown</h2><div class="scroll"><table class="comp-table"><tr><th>Part</th><th>Value</th><th>Series used</th></tr>'+g.comp.map(function(c){return '<tr><td>'+esc(c.k)+'</td><td class="comp-val">'+(c.txt!=null?esc(c.txt):c.v==null?'no data':c.v.toFixed(c.f==null?1:c.f)+(c.u||''))+'</td><td>'+(c.n==null?'':c.n)+'</td></tr>'}).join('')+'</table></div>'+
  '<div class="muted" style="margin-top:6px">'+esc(g.adj)+'. '+GRADE_LEGEND+' Role and map veto are not in the data.</div>'+
  '<div class="btns"><button class="b" data-act="gadd">Add to slip</button><button class="g" data-act="gimg">Download image</button><button class="g" data-act="gshare">Share</button></div>'+
  '<h2 style="margin-top:12px">Last 10 (Maps 1-2)</h2><div class="scroll"><table><tr><th>Date</th><th>Opp</th><th>Maps</th><th>'+(g.stat==='hs'?'HS':'Kills')+'</th></tr>'+g.cs.slice(0,10).map(function(c){return '<tr><td>'+esc(c.date)+'</td><td>'+esc(c.opp)+'</td><td>'+esc(c.maps)+'</td><td>'+(c[g.stat]==null?'':c[g.stat])+'</td></tr>'}).join('')+'</table></div></div>'}
@@ -459,6 +469,10 @@ function pcard(){var p=find(sel.pl);if(!p)return '<div class="card"><div class="
  h+='<div class="stats"><div class="st"><b>'+S.n+'</b><span>Series ('+S.maps+' maps)</span></div><div class="st"><b>'+fv(S.kills)+'</b><span>Kills M1-2</span></div><div class="st"><b>'+fv(S.hs)+'</b><span>HS M1-2</span></div><div class="st"><b>'+fv(S.kpm)+'</b><span>Kills / map</span></div><div class="st"><b>'+fv(S.hsp,0)+'%</b><span>Headshot %</span></div><div class="st"><b>'+fv(S.kd,2)+'</b><span>K/D</span></div><div class="st"><b>'+fv(S.apm)+'</b><span>Assists / map</span></div><div class="st"><b>'+fv(S.adr,0)+'</b><span>ADR</span></div>'+ov('kills',l1)+ov('hs',l2)+'</div>'+hbr('kills',l1,'Kills')+hbr('hs',l2,'Headshots');
  var xs=Object.keys(S.x);if(xs.length)h+='<div class="stats">'+xs.map(function(k){return '<div class="st"><b>'+fv(S.x[k],2)+'</b><span>'+esc(k.replace(/_/g,' '))+' / map</span></div>'}).join('')+'</div>';
  else h+='<div class="muted">Clutches, first kills and shot accuracy appear here once bo3.gg returns them in the per-map rows. Check the Actions log line "players_stats keys".</div>';
+  if(o){var hk=h2hSeasonRows(all,'kills',o),hh=h2hSeasonRows(all,'hs',o);
+  h+='<h2 style="margin-top:12px">Breakdown · head-to-head this season vs '+esc(o)+'</h2><div class="scroll"><table class="comp-table"><tr><th>Part</th><th>Value</th><th>Series used</th></tr>'+
+  hk.concat(hh).map(function(c,i){var lab=c.k+', '+(i<2?'kills':'headshots');return '<tr><td>'+esc(lab)+'</td><td class="comp-val">'+esc(c.txt)+'</td><td>'+(c.n||'')+'</td></tr>'}).join('')+
+  '</table></div><div class="muted">Display only: this season\'s last 10 / last 15 Maps 1-2 meetings vs this opponent. If fewer meetings exist, those are used. Not an input to the grade. The venue filter above does not apply here.</div>';}
  var cn=Math.min(cs.length,15);h+='<h2 style="margin-top:12px">Last '+cn+' kills (Maps 1-2)</h2>'+chart(cs,'kills',l1,cn)+'<h2 style="margin-top:12px">Last '+cn+' headshots (Maps 1-2)</h2>'+chart(cs,'hs',l2,cn)+'<div class="muted">Follows the venue and opponent filters above. Type a kills or HS line to draw the dashed line and color the bars.</div>';
  h+='<h2 style="margin-top:12px">Series (Maps 1-2)</h2><div class="scroll"><table><tr><th>Date</th><th>Opp</th><th>Event</th><th>Maps</th><th>K</th><th>HS</th><th>D</th><th>A</th><th>ADR</th></tr>'+cs.map(function(c){return '<tr><td>'+esc(c.date)+'</td><td>'+esc(c.opp)+'</td><td>'+(c.ev?c.ev.toUpperCase():'–')+'</td><td>'+esc(c.maps)+'</td><td>'+c.kills+'</td><td>'+(c.hs==null?'–':c.hs)+'</td><td>'+(c.deaths==null?'–':c.deaths)+'</td><td>'+(c.assists==null?'–':c.assists)+'</td><td>'+fv(c.adr,0)+'</td></tr>'}).join('')+'</table></div>';
  // per-opponent breakdown (venue filter applies, sample size does not)
