@@ -6,7 +6,7 @@
 (function(root){
 'use strict';
 // PARAMS: tuned by backtest.py on the early slice. MUST match PARAMS in grader.py.
-var PARAMS={"m": 100, "half_life": 8, "n_max": 200, "m_team": 1500, "elo_k": 16, "beta": 0.25, "rd_a": 17.34, "rd_b": 16.18, "h2h_min": 3, "h2h_w": 0.0, "w_line": 0.7, "g_kills": 0.6573, "g_hs": 0.3404, "size_kills": 20.0, "size_hs": 16.0, "min_series": 8, "grade_a": 6.0, "grade_b": 3.0, "w_rank": 0.25, "rank_s": 1.0, "w_maps": 0.25, "k_maps": 6.0, "w_hr": 0.0, "k_hr": 5.0, "w_l5": 0.1, "w_l10": 0.1, "w_l15": 0.0, "w_szn": 0.0, "w_kd": 0.1, "k_kd": 40.0,
+var PARAMS={"m": 100, "half_life": 8, "n_max": 200, "m_team": 1500, "elo_k": 16, "beta": 0.25, "rd_a": 17.34, "rd_b": 16.18, "h2h_min": 3, "h2h_w": 0.0, "w_line": 0.7, "g_kills": 0.6573, "g_hs": 0.3404, "size_kills": 20.0, "size_hs": 16.0, "min_series": 8, "grade_a": 6.0, "grade_b": 3.0, "w_rank": 0.25, "rank_s": 1.0, "w_maps": 0.25, "k_maps": 6.0, "w_hr": 0.0, "k_hr": 5.0, "w_l5": 0.1, "w_l10": 0.1, "w_l15": 0.1, "w_szn": 0.1, "w_kd": 0.1, "k_kd": 40.0,
  "w_hs5": 0.3, "w_hs10": 0.2, "w_hs15": 0.0, "w_hsszn": 0.1, "w_khs5": 0.1, "w_khs10": 0.0, "w_khs15": 0.0, "w_khsszn": 0.0, "k_hsp": 30.0, "w_hkd": -0.1};
 // w_hs* / w_khs* / k_hsp: HS% form inputs for the headshots / kills projection. See grader.py.
 var HS_WIN=["5","10","15","szn"];
@@ -104,7 +104,7 @@ function hsFormOf(ctx,cs,team,before){var P=ctx.P;before=before||'9999';var yr=b
 function formOf(ctx,cs,rows,before){before=before||'9999';var yr=before!=='9999'?String(before).slice(0,4):(cs.length?cs[0].date.slice(0,4):''),win={l5:rows.slice(0,5),l10:rows.slice(0,10),l15:rows.slice(0,15),szn:rows.filter(function(c){return c.date.slice(0,4)===yr})},out={rate:{},kpm:{},n:{}};
  Object.keys(win).forEach(function(k){var w=win[k],sk=0,sr=0;w.forEach(function(c){sk+=c.kills;sr+=c.rd});out.n[k]=w.length;out.rate[k]=w.length?sk/sr:null;out.kpm[k]=w.length?sk/(2*w.length):null});
  var sz=cs.filter(function(c){return c.date.slice(0,4)===yr&&c.deaths!=null}),K=0,D=0;sz.forEach(function(c){K+=c.kills;D+=c.deaths});out.kd=D>0?K/D:null;out.kdS=sz.length?(K+ctx.P.k_kd)/(D+ctx.P.k_kd):null;return out}
-// Hit rates vs this exact line (equal = not over), Maps 1-2 series dated before `before`: l5/l10/l20, szn (calendar year), h2h. Same as grader.py hitrates.
+// Hit rates vs this exact line (equal = not over), Maps 1-2 series dated before `before`: l5/l10/l15/l20, szn (calendar year), h2h. Same as grader.py hitrates. Prop cards display l15, not l20.
 function hitrates(ctx,p,st,line,opp,before){var P=ctx.P;before=before||'9999';var cs=series(ctx,p).filter(function(c){return c.date<before&&c[st]!=null});
  var yr=before!=='9999'?String(before).slice(0,4):(cs.length?cs[0].date.slice(0,4):'');function hx(rows){return[rows.filter(function(c){return c[st]>line}).length,rows.length]}
  var out={l5:hx(cs.slice(0,5)),l10:hx(cs.slice(0,10)),l15:hx(cs.slice(0,15)),l20:hx(cs.slice(0,20)),szn:hx(cs.filter(function(c){return c.date.slice(0,4)===yr})),h2h:hx(cs.filter(function(c){return opp&&teq(c.opp,opp)}))};

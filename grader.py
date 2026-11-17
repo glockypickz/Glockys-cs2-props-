@@ -34,7 +34,7 @@ PARAMS = {"m": 100, "half_life": 8, "n_max": 200, "m_team": 1500, "elo_k": 16, "
           "g_kills": 0.6573, "g_hs": 0.3404, "size_kills": 20.0, "size_hs": 16.0,
           "min_series": 8, "grade_a": 6.0, "grade_b": 3.0,
           "w_rank": 0.25, "rank_s": 1.0, "w_maps": 0.25, "k_maps": 6.0, "w_hr": 0.0, "k_hr": 5.0,
-          "w_l5": 0.1, "w_l10": 0.1, "w_l15": 0.0, "w_szn": 0.0, "w_kd": 0.1, "k_kd": 40.0,
+          "w_l5": 0.1, "w_l10": 0.1, "w_l15": 0.1, "w_szn": 0.1, "w_kd": 0.1, "k_kd": 40.0,
           "w_hs5": 0.3, "w_hs10": 0.2, "w_hs15": 0.0, "w_hsszn": 0.1,
           "w_khs5": 0.1, "w_khs10": 0.0, "w_khs15": 0.0, "w_khsszn": 0.0, "k_hsp": 30.0, "w_hkd": -0.1}
 # Kill-model form inputs (kills props only; series before the match only; tuned by backtest.py --tune-form):
@@ -43,7 +43,7 @@ PARAMS = {"m": 100, "half_life": 8, "n_max": 200, "m_team": 1500, "elo_k": 16, "
 #   w_hkd: the same season K/D factor on the headshots projection (hs rate x kd ** w_hkd).
 #   w_kd: kill rate x kd ** w_kd, kd = season (kills + k_kd) / (deaths + k_kd) (shrunk toward 1). 0 = not used.
 #   Backtest (Nov 2026): every non-zero weight made kills MAE, NB log-lik and locked-line log loss slightly worse (tuned
-#   value 0). By owner decision w_l5 0.1, w_l10 0.1 and w_kd 0.1 ship anyway (small, active; full season stays the base).
+#   value 0). By owner decision w_l5 0.1, w_l10 0.1, w_l15 0.1, w_szn 0.1 and w_kd 0.1 ship anyway (small, active).
 # HS% form inputs (HS% = hs / kills, Maps 1-2 series before the match only; tuned by backtest.py --tune-hs):
 #   shrunk HS%: season = (HS + k_hsp * team HS%) / (K + k_hsp); last 5 / 10 / 15 = (HS + k_hsp * season HS%) / (K + k_hsp)
 #   w_hs5 / w_hs10 / w_hs15 / w_hsszn (headshots): hs rate += w * (player kill rate x shrunk HS% - hs rate)
@@ -54,7 +54,7 @@ PARAMS = {"m": 100, "half_life": 8, "n_max": 200, "m_team": 1500, "elo_k": 16, "
 #   by owner decision w_khs5 0.1 ships (the closest-to-neutral non-zero value). w_hkd -0.1 (best non-zero; +0.1 was worse).
 # n_max 200: the rate uses every series this season (players.json holds the full calendar-year season), decayed with
 #   half_life 8; it was 20 when players.json held only the last 15 matches per team.
-# Hit rates vs the current line (L5 / L10 / L20 / season / H2H, series-level Maps 1-2, earlier series only).
+# Hit rates vs the current line (L5 / L10 / L15 / season / H2H, series-level Maps 1-2, earlier series only; L20 is still computed for old stored hits).
 #   w_hr: weight of a decayed, shrunk hit rate blended into P(over): P = (1 - w_hr) * P_model + w_hr * hr, where
 #         hr = (sum w_i * over_i + k_hr * 0.5) / (sum w_i + k_hr) over the last n_max series (pushes left out,
 #         w_i = 0.5 ** (i / half_life)). 0 = shown on the site but not used in the grade. Chosen by backtest.py
@@ -637,7 +637,7 @@ class Grader:
 
     def hitrates(self, p, st, line, opp=None, before="9999"):
         """Series that went OVER this exact line (equal = not over), Maps 1-2, only series dated before `before`.
-        l5 / l10 / l15 / l20 = last 5 / 10 / 15 / 20 (l5-l15: Players-tab research only, not graded); szn = this calendar year (the match's year, else the newest series' year);
+        l5 / l10 / l15 / l20 = last 5 / 10 / 15 / 20 (prop cards display l5 / l10 / l15; l20 is kept for old stored hits, not shown); szn = this calendar year (the match's year, else the newest series' year);
         h2h = vs this opponent. Each is [over, series]. p = decayed, shrunk hit rate used when w_hr > 0."""
         P = self.P
         cs = [c for c in self.series(p) if c["date"] < before and c.get(st) is not None]

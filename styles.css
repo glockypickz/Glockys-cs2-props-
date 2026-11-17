@@ -98,7 +98,7 @@ header img{filter:drop-shadow(0 0 10px rgba(0,255,102,.35));animation:gpglow 3.5
 #gpanel .gp-x{margin:0;min-width:44px;min-height:44px;font-size:20px}
 #gpanel .gp-body{flex:1;overflow-y:auto;-webkit-overflow-scrolling:touch;padding:12px 14px calc(18px + var(--safe-bot))}
 
-/* hit-rate boxes (L5 / L10 / L20 / H2H / SZN vs the current line) */
+/* hit-rate boxes (L5 / L10 / L15 / H2H / SZN vs the current line) */
 .hbs{display:flex;flex-wrap:wrap;gap:5px;margin-top:5px}
 .hb{display:inline-flex;flex-direction:column;align-items:center;min-width:44px;padding:3px 6px;border-radius:8px;border:1px solid #333;background:#1a1a1a;font-size:12px;font-weight:800;line-height:1.2}
 .hb i{font-style:normal;font-size:10px;font-weight:600;opacity:.75}
