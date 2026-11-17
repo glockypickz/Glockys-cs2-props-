@@ -1,13 +1,13 @@
 /* Grader v2 model (browser + node). JS copy of grader.py: keep the two in step (python parity_check.py compares them).
    Per-round rate (decayed, shrunk to the team) x Elo strength adjustment x expected rounds -> negative binomial P(over),
    letter = direction + strength, by edge (pp) of the lean side over the book's break-even:
-   A = Over >= +6pp, B = Over >= +3pp, C = Over < +3pp (slight lean), D = Under < +3pp (slight lean), F = Under >= +3pp.
+   A+ = Over >= +4pp, B = Over >= 0pp (at/above break-even), C = Over < 0pp (slight lean), D = Under < +3pp (slight lean), F = Under >= +3pp.
    Filter reasons are a flag next to the letter; they do not change it.
    Bait is a separate flag (last 5 Maps 1-2 series all met or beat this line); it does not change the projection, probability, or letter. */
 (function(root){
 'use strict';
 // PARAMS: tuned by backtest.py on the early slice. MUST match PARAMS in grader.py.
-var PARAMS={"m": 100, "half_life": 8, "n_max": 200, "m_team": 1500, "elo_k": 16, "beta": 0.25, "rd_a": 17.34, "rd_b": 16.18, "h2h_min": 1, "h2h_w": 0.1, "w_line": 0.7, "g_kills": 0.6573, "g_hs": 0.3404, "size_kills": 20.0, "size_hs": 16.0, "min_series": 8, "grade_a": 6.0, "grade_b": 3.0, "w_rank": 0.25, "rank_s": 1.0, "w_maps": 0.25, "k_maps": 6.0, "w_hr": 0.0, "k_hr": 5.0, "w_hr_l5": 0.25, "w_hr_l10": 0.25, "w_hr_l20": 0.25, "w_hr_szn": 0.25, "hr_upgrade_a": 0.85, "hr_upgrade_b": 0.75, "hr_szn_min": 8, "w_l5": 0.1, "w_l10": 0.05, "w_l20": 0.05, "w_szn": 0.05, "w_kd": 0.1, "k_kd": 40.0,
+var PARAMS={"m": 100, "half_life": 8, "n_max": 200, "m_team": 1500, "elo_k": 16, "beta": 0.25, "rd_a": 17.34, "rd_b": 16.18, "h2h_min": 1, "h2h_w": 0.1, "w_line": 0.7, "g_kills": 0.6573, "g_hs": 0.3404, "size_kills": 20.0, "size_hs": 16.0, "min_series": 8, "grade_a": 4.0, "grade_b": 0.0, "grade_f": 3.0, "w_rank": 0.25, "rank_s": 1.0, "w_maps": 0.25, "k_maps": 6.0, "w_hr": 0.0, "k_hr": 5.0, "w_hr_l5": 0.25, "w_hr_l10": 0.25, "w_hr_l20": 0.25, "w_hr_szn": 0.25, "hr_upgrade_a": 0.8, "hr_upgrade_b": 0.7, "hr_szn_min": 8, "w_l5": 0.1, "w_l10": 0.05, "w_l20": 0.05, "w_szn": 0.05, "w_kd": 0.1, "k_kd": 40.0,
  "w_hs5": 0.3, "w_hs10": 0.2, "w_hs20": 0.15, "w_hsszn": 0.1, "w_khs5": 0.1, "w_khs10": 0.05, "w_khs15": 0.025, "w_khsszn": 0.0, "k_hsp": 30.0, "w_hkd": -0.1};
 // w_hs* / w_khs* / k_hsp: HS% form inputs for the headshots / kills projection. See grader.py.
 var HS_WIN=["5","10","20","szn"];  // headshots-projection HS% windows
@@ -131,13 +131,13 @@ function hitrateUpgrade(hits,P){var reasons=[],blend=null,up=null;
  for(var i=0;i<wins.length;i++){var k=wins[i][0],need=wins[i][1],w=P[wins[i][2]]||0;if(w<=0)continue;var v=hits[k]||[0,0],n=v[1]||0;if(n<=0)continue;num+=w*(v[0]/n);den+=w;if(need&&n<need)thin.push(k.toUpperCase()+' '+n)}
  if(den<=0)return{blend:blend,upgrade:up,reasons:reasons};blend=num/den;
  if(thin.length)reasons.push('thin hit-rate windows ('+thin.join(', ')+')');
- if(blend>=P.hr_upgrade_a)up='A';else if(blend>=P.hr_upgrade_b)up='B';
+ if(blend>=P.hr_upgrade_a)up='A+';else if(blend>=P.hr_upgrade_b)up='B';
  return{blend:blend,upgrade:up,reasons:reasons}}
 function finish(ctx,mu,line,st,book,odds,reasons,hr,hits){var P=ctx.P,size=st==='kills'?P.size_kills:P.size_hs,muF=blendMean(mu,line,size,P.w_line),r=nbProbs(muF,size,line),np=Math.max(1e-12,1-r[1]),
  po=r[0]/np,pu=r[2]/np;if(hr!=null&&P.w_hr>0){po=(1-P.w_hr)*po+P.w_hr*hr;pu=1-po}var be=breakEven(book,odds),pick=Math.abs(po-pu)<1e-6?(mu>=lineMean(line,size)?'OVER':'UNDER'):(po>pu?'OVER':'UNDER'),pp=Math.max(po,pu),epp=(pp-be)*100;reasons=(reasons||[]).slice();
- var g=pick==='OVER'?(epp>=P.grade_a?'A':epp>=P.grade_b?'B':'C'):(epp>=P.grade_b?'F':'D');
+ var g=pick==='OVER'?(epp>=P.grade_a?'A+':epp>=P.grade_b?'B':'C'):(epp>=(P.grade_f!=null?P.grade_f:P.grade_b)?'F':'D');
  var modelPick=pick,modelGrade=g,hu=hitrateUpgrade(hits,P);reasons=reasons.concat(hu.reasons);
- if(hu.upgrade==='A'||(hu.upgrade==='B'&&g!=='A')){if(modelPick==='UNDER')reasons.push('model leans Under; hit-rate grade is Over');pick='OVER';g=hu.upgrade}
+ if(hu.upgrade==='A+'||(hu.upgrade==='B'&&g!=='A+')){if(modelPick==='UNDER')reasons.push('model leans Under; hit-rate grade is Over');pick='OVER';g=hu.upgrade}
  return{proj:mu,muBlend:muF,edge:mu-line,grade:g,pick:pick,pOver:po,pPush:r[1],pPick:pp,be:be,edgePP:epp,reasons:reasons,flag:reasons.join('; '),model:VERSION,
   hrBlend:hu.blend,hrUpgrade:hu.upgrade,modelGrade:modelGrade,modelPick:modelPick}}
 function grade(ctx,p,st,line,opp,o){o=o||{};if(line==null||isNaN(line))return null;var pr=project(ctx,p,st,opp,o.team||p.team,o.before);if(!pr)return null;

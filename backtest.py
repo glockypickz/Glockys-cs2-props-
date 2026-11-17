@@ -354,7 +354,7 @@ def line_scores(rows, w, P, whr=0.0):
 def letter_summary(out, key="ng", hit="nhit"):
     return "  ".join("%s %d/%d %s" % (g, sum(x[hit] for x in out if x[key] == g), sum(1 for x in out if x[key] == g),
                                        pct(S.mean(x[hit] for x in out if x[key] == g)) if any(x[key] == g for x in out) else "–")
-                     for g in ("A", "B", "C", "D", "F"))
+                     for g in ("A+", "B", "C", "D", "F"))
 
 
 def grade_table(rows, w, P, label, whr=None, quiet=False):
@@ -372,7 +372,7 @@ def grade_table(rows, w, P, label, whr=None, quiet=False):
         return out
     print("\n  v2 grades on %s (w=%.2f, w_hr=%.2f):" % (label, w, whr))
     print("  %-6s %5s %9s %8s %16s %16s" % ("grade", "n", "record", "hit", "Wilson 95%", "match-clustered"))
-    for gname in ("A", "B", "C", "D", "F"):
+    for gname in ("A+", "B", "C", "D", "F"):
         a = [x for x in out if x["ng"] == gname]
         k = sum(x["nhit"] for x in a)
         lo, hi = wilson(k, len(a))

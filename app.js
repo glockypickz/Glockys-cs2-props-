@@ -3,13 +3,13 @@
 var $=function(i){return document.getElementById(i)};
 // Grades come from model.js (GPModel, grader v2): probability of the pick vs the book's break-even.
 // Letter = direction + strength, from the lean side's chance vs the book break-even (edge in percentage points):
-//   A = Over +6pp or more (excellent Over) · B = Over +3pp (lean Over) · C = Over under +3pp (slight Over lean)
-//   D = Under under +3pp (slight Under lean) · F = Under +3pp or more (take the Under). No A+, no E.
+//   A+ = Over +4pp or more (excellent Over) · B = Over 0pp or more (lean Over) · C = Over below break-even (slight Over lean)
+//   D = Under under +3pp (slight Under lean) · F = Under +3pp or more (take the Under). No plain A, no E.
 // Filter reasons (few series, team mismatch, stand-in) show as a flag next to the letter. The old +4% Over shift is gone.
-// Locked picks never change; old-grader locks show as e.g. "A+ (old)".
-var GLABEL={'A':'Excellent Over','B':'Lean Over','C':'Slight Over lean','D':'Slight Under lean','F':'Take the Under'};
-var GRADE_LEGEND='Grades (chance of the lean side minus the book break-even): A = Over +6pp or more, B = Over +3pp or more, C = slight Over lean (under +3pp), D = slight Under lean (under +3pp), F = Under +3pp or more. A flag means a filter fired (few series, team mismatch, stand-in).';
-function isPlay(g){return !!g&&(g.grade==='A'||g.grade==='B'||g.grade==='F')&&!(g.reasons&&g.reasons.length)}
+// Locked picks never change; old-grader locks show as e.g. "A+ (old)" (a different meaning from the v2 A+).
+var GLABEL={'A+':'Excellent Over','A':'Excellent Over','B':'Lean Over','C':'Slight Over lean','D':'Slight Under lean','F':'Take the Under'};
+var GRADE_LEGEND='Grades (chance of the lean side minus the book break-even): A+ = Over +4pp or more, B = Over at or above break-even, C = slight Over lean (below break-even), D = slight Under lean (under +3pp), F = Under +3pp or more. A flag means a filter fired (few series, team mismatch, stand-in).';
+function isPlay(g){return !!g&&(g.grade==='A+'||g.grade==='A'||g.grade==='B'||g.grade==='F')&&!(g.reasons&&g.reasons.length)}
 // hit-rate boxes vs the current line (x/n series over, earlier Maps 1-2 series only): green above 50%, red below
 // keys: which boxes. Prop cards (grading) show the season view: SZN, H2H, L20. L5 / L10 / L15 are research windows for the Players tab only.
 function hitBoxes(h,keys){if(!h)return '';var NAMES={l5:'L5',l10:'L10',l15:'L15',l20:'L20',h2h:'H2H',szn:'SZN'};return '<div class="hbs">'+(keys||['l5','l10','l15','l20','h2h','szn']).map(function(k){return[NAMES[k],k]}).map(function(a){var v=h[a[1]]||[0,0],x=v[0],n=v[1],c=n?(x/n>0.5?' g':x/n<0.5?' r':''):' na';return '<span class="hb'+c+'" title="'+a[0]+': went over this line in '+x+' of '+n+' series"><i>'+a[0]+'</i>'+(n?x+'/'+n:'–')+'</span>'}).join('')+'</div>'}
@@ -18,7 +18,7 @@ function baitBadge(g){return g&&g.bait?' <span class="pill bait" title="Hit this
 function gradePill(g){return '<span class="pill '+(g.pick==='UNDER'?'u':'')+'">'+pillTxt(g)+'</span>'+baitBadge(g)}
 function glabel(m){return GLABEL[m.grade]+' · '+m.pick+' '+pc1(m.pPick)+(m.reasons&&m.reasons.length?' · ⚑ '+m.reasons.join('; '):'')}
 function oldG(lk){return !lk?'':lk.model==='v2'?lk.grade:lk.grade+' (old)'} // old-grader letters meant something else: keep them apart
-function gradesIn(rows){var all=['A','B','C','D','F','A+ (old)','B (old)','C (old)','D (old)','F (old)'];rows.forEach(function(x){if(all.indexOf(x.grade)<0)all.push(x.grade)});return all.filter(function(G){return rows.some(function(x){return x.grade===G})})}
+function gradesIn(rows){var all=['A+','B','C','D','F','A+ (old)','B (old)','C (old)','D (old)','F (old)'];rows.forEach(function(x){if(all.indexOf(x.grade)<0)all.push(x.grade)});return all.filter(function(G){return rows.some(function(x){return x.grade===G})})}
 var MCTX=null,MCTXN=-1;
 function mctx(){if(!MCTX||MCTXN!==DB.length){MCTX=GPModel.build(DB,null,STRENGTH);MCTXN=DB.length}return MCTX} // STRENGTH = team_strength.json (Cito-derived), null if absent
 function pc1(x){return x==null||isNaN(x)?'–':(x*100).toFixed(1)+'%'}
@@ -119,7 +119,7 @@ function gradeCombo(name,team,st,line,opp,o){o=o||{};
   comp:parts.map(function(x){return{k:x.name+' projection',v:x.proj,n:x.n,f:1}}),over:over,of:last.length,sd:+sd(last).toFixed(1),cs:joint,book:o.book||'',
   adj:'Combo: the sum of each player\'s own projection ('+parts.map(function(x){return x.name+' '+x.proj}).join(' + ')+'), P(over) '+pc1(m.pOver)+', break-even '+pc1(m.be)+', edge '+(m.edgePP>=0?'+':'')+m.edgePP.toFixed(1)+'pp'+(m.reasons.length?'. No play: '+m.reasons.join('; '):'')+'. Chart and over count use only series where all '+names.length+' played together'+(joint.length?' ('+joint.length+' found)':' (none found yet)'),bait:false}}
 function gradeFor(name,team,st,line,opp,o){o=o||{};if(isCombo(name))return gradeCombo(name,team,st,line,opp,o);var p=find(name,team);return p?grade(p,st,line,opp,{team:team||'',book:o.book,odds:o.odds,before:o.before}):null}
-function gclass(g){return g==='A'||g==='B'||g==='F'?'':g==='C'||g==='D'?' mid':' low'}
+function gclass(g){return g==='A+'||g==='A'||g==='B'||g==='F'?'':g==='C'||g==='D'?' mid':' low'}
 function sname(s){return s==='hs'?'Headshots Maps 1-2':'Kills Maps 1-2'}
 function normStat(s){s=String(s||'').toLowerCase();return s.indexOf('head')>-1||s==='hs'?'hs':s.indexOf('kill')>-1?'kills':null}
 // ---- all lines = feed + manual
@@ -409,7 +409,7 @@ function img(kind,cb){fontReady(function(){var c=document.createElement('canvas'
  var im=new Image();im.onload=function(){x.globalAlpha=.12;var w=760,h=w*im.height/im.width;x.drawImage(im,(1080-w)/2,(1350-h)/2,w,h);x.globalAlpha=1;draw();cb(c)};im.onerror=function(){draw();cb(c)};im.src='assets/logo.png';
  function T(t,y,size,color,glow,maxW){x.font=size+'px '+IMGFONT;while(maxW&&size>20&&x.measureText(t).width>maxW){size-=2;x.font=size+'px '+IMGFONT}
   x.shadowColor=glow||'transparent';x.shadowBlur=glow?28:0;x.fillStyle=color;x.fillText(t,540,y);x.shadowBlur=0}
- function draw(){x.textAlign='center';if(kind.g){var g=kind.g,gc=g.grade==='A'||g.grade==='B'||g.grade==='F'?'#00FF66':g.grade==='C'||g.grade==='D'?'#ffc53d':'#ff4d6d';
+ function draw(){x.textAlign='center';if(kind.g){var g=kind.g,gc=g.grade==='A+'||g.grade==='A'||g.grade==='B'||g.grade==='F'?'#00FF66':g.grade==='C'||g.grade==='D'?'#ffc53d':'#ff4d6d';
   T(g.player.toUpperCase(),190,70,'#fff','#00FF66',960);T(sname(g.stat).toUpperCase(),262,44,'#00FF66',null,960);T('LINE '+g.line+'  ·  PROJ '+g.proj,335,48,'#fff',null,960);
   T(g.grade,640,320,gc,gc,900);T(g.label.toUpperCase(),770,64,gc,null,960);
   T('OVER '+g.over+'/'+g.of+' LAST '+g.of+(g.opp?'  ·  VS '+g.opp.toUpperCase():''),850,36,'#c8cdd2',null,960)}
