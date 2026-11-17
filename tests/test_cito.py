@@ -233,8 +233,10 @@ def test_grader():
     open(os.path.join(tmpd, "grader_head.py"), "w").write(old_src)
     spec = importlib.util.spec_from_file_location("grader_head", os.path.join(tmpd, "grader_head.py"))
     GH = importlib.util.module_from_spec(spec); spec.loader.exec_module(GH)
-    G0, GN = GH.Grader(pj["players"], pj.get("ranks")), Grader(pj["players"], pj.get("ranks"), strength=None)
-    GE = Grader(pj["players"], pj.get("ranks"), strength={"rankings": {}, "maps": {}})
+    # model params added after HEAD (e.g. the HS% weights) are set to HEAD's values (0 if HEAD has no such param)
+    same = {k: GH.PARAMS.get(k, 0.0) for k in PARAMS}
+    G0, GN = GH.Grader(pj["players"], pj.get("ranks")), Grader(pj["players"], pj.get("ranks"), strength=None, params=same)
+    GE = Grader(pj["players"], pj.get("ranks"), strength={"rankings": {}, "maps": {}}, params=same)
     diff = 0
     for p in pj["players"][:400]:
         for st in ("kills", "hs"):

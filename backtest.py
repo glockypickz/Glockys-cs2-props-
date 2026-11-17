@@ -2,6 +2,7 @@
 
   python backtest.py            report with the PARAMS in grader.py
   python backtest.py --tune     also tune the parameters on the EARLY slice only and report on the later holdout
+  python backtest.py --tune-hs     tune the HS% weights (w_hs5..w_hsszn for headshots, w_khs5..w_khsszn for kills)
   python backtest.py --tune-form   tune the kill-form weights (w_l5 / w_l10 / w_l15 / w_szn / w_kd) the same way
   python backtest.py --strength tests/fixtures/team_strength_mock.json   use a Cito team_strength file (default:
                                 team_strength.json if present); --no-cito ignores it. Cito features only ever use
@@ -209,6 +210,41 @@ def tune_form(players, P):
     return {k: Q[k] for k in FORM_KEYS}
 
 
+HS_GRID = {"hs": ("hs", {"w_hs5": [0.0, 0.1, 0.2, 0.3, 0.5], "w_hs10": [0.0, 0.1, 0.2, 0.3, 0.5],
+                          "w_hs15": [0.0, 0.1, 0.2, 0.3, 0.5], "w_hsszn": [0.0, 0.1, 0.2, 0.3, 0.5, 0.75, 1.0]}),
+           "kills": ("kills", {"w_khs5": [-0.5, -0.25, 0.0, 0.25, 0.5], "w_khs10": [-0.5, -0.25, 0.0, 0.25, 0.5],
+                               "w_khs15": [-0.5, -0.25, 0.0, 0.25, 0.5], "w_khsszn": [-1.0, -0.5, -0.25, 0.0, 0.25, 0.5, 1.0]})}
+HS_KEYS = tuple(k for _st, g in HS_GRID.values() for k in g)
+
+
+def tune_hs(players, P):
+    """HS% weights: headshots-projection weights (w_hs*) on the early-slice headshots NB log-lik, kills-projection
+    weights (w_khs*) on the early-slice kills NB log-lik; coordinate search, then reported on the holdout."""
+    early, late = (lambda d: d < SPLIT), (lambda d: d >= SPLIT)
+    Q = dict(P, **{k: 0.0 for k in HS_KEYS})
+    for label, (st, grid) in HS_GRID.items():
+        obj = lambda R: score(players, R, early)[st]["ll"]
+        best = obj(Q)
+        print("  %s: HS%% weights all 0: early %s log-lik %.4f" % (label, st, best))
+        for _round in range(2):
+            for k, vals in grid.items():
+                for v in vals:
+                    if v == Q[k]:
+                        continue
+                    R = dict(Q, **{k: v})
+                    s = obj(R)
+                    if s > best + 1e-5:
+                        best, Q = s, R
+                print("    after %s: %s = %s  (early %s log-lik %.4f)" % (k, k, Q[k], st, best))
+    Z = dict(P, **{k: 0.0 for k in HS_KEYS})
+    for name, fn in (("early <" + SPLIT, early), ("HOLDOUT >=" + SPLIT, late)):
+        a, b = score(players, Z, fn), score(players, Q, fn)
+        for st in ("hs", "kills"):
+            print("  %-22s %-5s n=%d  MAE %.3f -> %.3f | log-lik %.4f -> %.4f (HS%% 0 -> tuned)" % (
+                name, st, a[st]["n"], a[st]["mae"], b[st]["mae"], a[st]["ll"], b[st]["ll"]))
+    return {k: Q[k] for k in HS_KEYS}
+
+
 def legacy_mae(players, slice_fn, min_prior=3):
     G = Grader(players)
     L = GL.Grader(players, {})
@@ -368,6 +404,19 @@ def main():
         print("\n== tuning the kill-form weights (last 5 / 10 / 15 / season kill rate, season K/D)")
         form = tune_form(players, P)
         print("TUNED FORM WEIGHTS:", json.dumps(form))
+    hsw = None
+    if "--tune-hs" in sys.argv:
+        print("\n== tuning the HS% weights (last 5 / 10 / 15 / season HS%, headshots and kills projections)")
+        hsw = tune_hs(players, P)
+        print("TUNED HS% WEIGHTS:", json.dumps(hsw))
+        print("\n== Locked lines, HS%% weights 0 vs tuned (shipped w_line=%.2f):" % P["w_line"])
+        for lab, FP in (("HS% 0", dict(P, **{k: 0.0 for k in HS_KEYS})), ("HS% tuned", dict(P, **hsw))):
+            rows = [r for r in line_rows(players, FP) if not r["dup"]]
+            for st in ("hs", "kills"):
+                ks = [r for r in rows if r["stat"] == st]
+                br, ll, n = line_scores(ks, P["w_line"], FP)
+                print("  %-9s %-5s lines n=%d  Brier %.4f  log loss %.4f | hit %% by letter: %s" % (
+                    lab, st, n, br, ll, letter_summary(grade_table(ks, P["w_line"], FP, lab, quiet=True))))
     print("\n== Part 1: players.json walk-forward (every Map 1+2 series, predicted with earlier data only)")
     for name, fn in (("early (tuning) slice <" + SPLIT, early), ("HOLDOUT >=" + SPLIT, late)):
         r = score(players, P, fn)

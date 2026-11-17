@@ -6,7 +6,10 @@
 (function(root){
 'use strict';
 // PARAMS: tuned by backtest.py on the early slice. MUST match PARAMS in grader.py.
-var PARAMS={"m": 100, "half_life": 8, "n_max": 200, "m_team": 1500, "elo_k": 16, "beta": 0.25, "rd_a": 17.34, "rd_b": 16.18, "h2h_min": 3, "h2h_w": 0.0, "w_line": 0.7, "g_kills": 0.6573, "g_hs": 0.3404, "size_kills": 20.0, "size_hs": 16.0, "min_series": 8, "grade_a": 6.0, "grade_b": 3.0, "w_rank": 0.25, "rank_s": 1.0, "w_maps": 0.25, "k_maps": 6.0, "w_hr": 0.0, "k_hr": 5.0, "w_l5": 0.0, "w_l10": 0.0, "w_l15": 0.0, "w_szn": 0.0, "w_kd": 0.0, "k_kd": 40.0};
+var PARAMS={"m": 100, "half_life": 8, "n_max": 200, "m_team": 1500, "elo_k": 16, "beta": 0.25, "rd_a": 17.34, "rd_b": 16.18, "h2h_min": 3, "h2h_w": 0.0, "w_line": 0.7, "g_kills": 0.6573, "g_hs": 0.3404, "size_kills": 20.0, "size_hs": 16.0, "min_series": 8, "grade_a": 6.0, "grade_b": 3.0, "w_rank": 0.25, "rank_s": 1.0, "w_maps": 0.25, "k_maps": 6.0, "w_hr": 0.0, "k_hr": 5.0, "w_l5": 0.1, "w_l10": 0.1, "w_l15": 0.0, "w_szn": 0.0, "w_kd": 0.1, "k_kd": 40.0,
+ "w_hs5": 0.3, "w_hs10": 0.2, "w_hs15": 0.0, "w_hsszn": 0.1, "w_khs5": 0.1, "w_khs10": 0.0, "w_khs15": 0.0, "w_khsszn": 0.0, "k_hsp": 30.0, "w_hkd": -0.1};
+// w_hs* / w_khs* / k_hsp: HS% form inputs for the headshots / kills projection. See grader.py.
+var HS_WIN=["5","10","15","szn"];
 // w_l5..w_szn, w_kd, k_kd: kill-model form inputs (kills props only). See grader.py.
 // w_hr / k_hr: hit rate vs the current line blended into P(over) (0 = shown, not used). See grader.py.
 // Cito features (w_rank, rank_s, w_maps, k_maps): only active when team_strength.json is loaded; see grader.py for the meaning.
@@ -85,10 +88,18 @@ function project(ctx,p,st,opp,team,before){var P=ctx.P;team=team||p.team;before=
  var rate=(sk+P.m*prior)/(sr+P.m),h2h=rows.filter(function(c){return opp&&teq(c.opp,opp)});
  if(h2h.length>=P.h2h_min&&P.h2h_w>0){var hk=0,hr=0;h2h.forEach(function(c){hk+=c[st];hr+=c.rd});rate=(1-P.h2h_w)*rate+P.h2h_w*((hk+P.m*rate)/(hr+P.m))}
  var form=formOf(ctx,cs,rows,before);if(st==='kills'){['l5','l10','l15','szn'].forEach(function(k){if(P['w_'+k]>0&&form.rate[k]!=null)rate+=P['w_'+k]*(form.rate[k]-rate)});if(P.w_kd>0&&form.kdS!=null)rate*=Math.pow(form.kdS,P.w_kd)}
+ var hsf=hsFormOf(ctx,cs,team,before);if(st==='kills'){HS_WIN.forEach(function(k){var w=P['w_khs'+k];if(w!==0)rate*=Math.pow(hsf.s[k]/(k!=='szn'?hsf.s.szn:hsf.team),w)})}
+ else if(HS_WIN.some(function(k){return P['w_hs'+k]!==0})){var krows=cs.filter(function(c){return c.rd&&c.kills!=null}).slice(0,P.n_max),kp=teamPrior(ctx,team,'kills',before),ka=0,kb=0;krows.forEach(function(c,i){var w=Math.pow(0.5,i/P.half_life);ka+=w*c.kills;kb+=w*c.rd});var krate=(ka+P.m*kp)/(kb+P.m);HS_WIN.forEach(function(k){if(P['w_hs'+k]!==0)rate+=P['w_hs'+k]*(krate*hsf.s[k]-rate)})}
+ if(st==='hs'&&P.w_hkd!==0&&form.kdS!=null)rate*=Math.pow(form.kdS,P.w_hkd);
  var pbar=sp/sw,pw=opp?pwin(ctx,team,opp,before):pbar,adj=1+P.beta*(pw-pbar),base=P.rd_a+P.rd_b*pw*(1-pw),
   em=P.w_maps>0?mapRounds(ctx,team,opp,before,base):null,rounds=2*(em!=null?base+P.w_maps*(em-base):base);
  return{mu:rate*adj*rounds,rate:rate,prior:prior,adj:adj,pwin:pw,pbar:pbar,rounds:rounds,roundsElo:2*base,roundsMaps:em!=null?2*em:null,pRank:opp?pRank(ctx,team,opp,before):null,
-  n:cs.length,nRate:rows.length,h2h:h2h.length,cs:cs,form:form}}
+  n:cs.length,nRate:rows.length,h2h:h2h.length,cs:cs,form:form,hsf:hsf}}
+// HS% form (same as Grader.hs_form in grader.py)
+function hsFormOf(ctx,cs,team,before){var P=ctx.P;before=before||'9999';var yr=before!=='9999'?String(before).slice(0,4):(cs.length?cs[0].date.slice(0,4):''),hc=cs.filter(function(c){return c.hs!=null&&c.kills>0}),tk=teamPrior(ctx,team,'kills',before),th=tk>0?teamPrior(ctx,team,'hs',before)/tk:0.5,
+  win={'5':hc.slice(0,5),'10':hc.slice(0,10),'15':hc.slice(0,15),szn:hc.filter(function(c){return c.date.slice(0,4)===yr})},out={raw:{},s:{},n:{},team:th},sum=function(w,f){var t=0;w.forEach(function(c){t+=c[f]});return t};
+ HS_WIN.forEach(function(k){var H=sum(win[k],'hs'),K=sum(win[k],'kills');out.n[k]=win[k].length;out.raw[k]=K>0?H/K:null});
+ out.s.szn=(sum(win.szn,'hs')+P.k_hsp*th)/(sum(win.szn,'kills')+P.k_hsp);['5','10','15'].forEach(function(k){out.s[k]=(sum(win[k],'hs')+P.k_hsp*out.s.szn)/(sum(win[k],'kills')+P.k_hsp)});return out}
 // kill form (same as Grader.form in grader.py): kpm / per-round rate over last 5 / 10 / 15 series and the season, season K/D
 function formOf(ctx,cs,rows,before){before=before||'9999';var yr=before!=='9999'?String(before).slice(0,4):(cs.length?cs[0].date.slice(0,4):''),win={l5:rows.slice(0,5),l10:rows.slice(0,10),l15:rows.slice(0,15),szn:rows.filter(function(c){return c.date.slice(0,4)===yr})},out={rate:{},kpm:{},n:{}};
  Object.keys(win).forEach(function(k){var w=win[k],sk=0,sr=0;w.forEach(function(c){sk+=c.kills;sr+=c.rd});out.n[k]=w.length;out.rate[k]=w.length?sk/sr:null;out.kpm[k]=w.length?sk/(2*w.length):null});
@@ -111,7 +122,7 @@ function finish(ctx,mu,line,st,book,odds,reasons,hr){var P=ctx.P,size=st==='kill
  return{proj:mu,muBlend:muF,edge:mu-line,grade:g,pick:pick,pOver:po,pPush:r[1],pPick:pp,be:be,edgePP:epp,reasons:reasons,flag:reasons.join('; '),model:VERSION}}
 function grade(ctx,p,st,line,opp,o){o=o||{};if(line==null||isNaN(line))return null;var pr=project(ctx,p,st,opp,o.team||p.team,o.before);if(!pr)return null;
  var hits=hitrates(ctx,p,st,+line,opp,o.before),r=finish(ctx,pr.mu,+line,st,o.book,o.odds,filters(ctx,p,o.team,pr.n,o.before),hits.p);
- r.hits={l5:hits.l5,l10:hits.l10,l15:hits.l15,l20:hits.l20,szn:hits.szn,h2h:hits.h2h};r.pHr=hits.p;r.n=pr.n;r.rounds=pr.rounds;r.roundsElo=pr.roundsElo;r.roundsMaps=pr.roundsMaps;r.pRank=pr.pRank;r.kd=pr.form.kd;r.kpm=pr.form.kpm;r.formN=pr.form.n;r.pwin=pr.pwin;r.rate=pr.rate;r.prior=pr.prior;r.adj=pr.adj;r.cs=pr.cs;r.nRate=pr.nRate;return r}
+ r.hits={l5:hits.l5,l10:hits.l10,l15:hits.l15,l20:hits.l20,szn:hits.szn,h2h:hits.h2h};r.pHr=hits.p;r.n=pr.n;r.rounds=pr.rounds;r.roundsElo=pr.roundsElo;r.roundsMaps=pr.roundsMaps;r.pRank=pr.pRank;r.kd=pr.form.kd;r.kpm=pr.form.kpm;r.formN=pr.form.n;r.hsp={l5:pr.hsf.raw['5'],l10:pr.hsf.raw['10'],l15:pr.hsf.raw['15'],szn:pr.hsf.raw.szn};r.hspN={l5:pr.hsf.n['5'],l10:pr.hsf.n['10'],l15:pr.hsf.n['15'],szn:pr.hsf.n.szn};r.pwin=pr.pwin;r.rate=pr.rate;r.prior=pr.prior;r.adj=pr.adj;r.cs=pr.cs;r.nRate=pr.nRate;return r}
 function gradeCombo(ctx,ps,names,st,line,opp,o){o=o||{};var mu=0,reasons=[],nmin=999,parts=[];
  for(var i=0;i<ps.length;i++){var p=ps[i],pr=project(ctx,p,st,opp,o.team||p.team,o.before);if(!pr)return null;mu+=pr.mu;nmin=Math.min(nmin,pr.n);parts.push({name:p.name,proj:pr.mu,n:pr.n});
   filters(ctx,p,o.team,pr.n,o.before).forEach(function(x){reasons.push(names[i]+': '+x)})}
