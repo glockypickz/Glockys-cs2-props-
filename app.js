@@ -46,10 +46,15 @@ function sd(a){var m=mean(a);return a.length?Math.sqrt(mean(a.map(function(x){re
 function nums(cs,st){return cs.map(function(c){return c[st]}).filter(function(x){return x!=null})}
 function tier(r){return r<=5?'Top 5':r<=15?'Top 6-15':r<=30?'Top 16-30':'Top 31+'}
 // ---- days (Central), team matching, live status
-function cday(iso){var d=iso?new Date(iso):new Date();if(isNaN(d))return '';var o={};new Intl.DateTimeFormat('en-US',{timeZone:'America/Chicago',year:'numeric',month:'2-digit',day:'2-digit'}).formatToParts(d).forEach(function(p){o[p.type]=p.value});return o.year+'-'+o.month+'-'+o.day}
+// Central date: one shared formatter (building an Intl formatter per call was the Games-tab lag), memoized per timestamp string
+var CDAY_F=null,CDAY_M={},CDAY_N=0;
+function cday(iso){if(iso&&CDAY_M.hasOwnProperty(iso))return CDAY_M[iso];var d=iso?new Date(iso):new Date();if(isNaN(d))return '';
+ if(!CDAY_F)CDAY_F=new Intl.DateTimeFormat('en-US',{timeZone:'America/Chicago',year:'numeric',month:'2-digit',day:'2-digit'});
+ var o={};CDAY_F.formatToParts(d).forEach(function(p){o[p.type]=p.value});var r=o.year+'-'+o.month+'-'+o.day;
+ if(iso){if(++CDAY_N>20000){CDAY_M={};CDAY_N=0}CDAY_M[iso]=r}return r}
 function addDays(ymd,n){var d=new Date(ymd+'T12:00:00Z');d.setUTCDate(d.getUTCDate()+n);return d.toISOString().slice(0,10)}
 function dayLabel(ymd){var t=cday();if(ymd===t)return 'Today';if(ymd===addDays(t,1))return 'Tomorrow';return new Intl.DateTimeFormat('en-US',{timeZone:'UTC',weekday:'short',month:'short',day:'numeric'}).format(new Date(ymd+'T12:00:00Z'))}
-function tn(s){return GPModel.tn(s)} // team key with book/bo3.gg aliases (model.js TEAM_ALIASES)
+var TN_M={};function tn(s){var k=s==null?'':String(s);return TN_M.hasOwnProperty(k)?TN_M[k]:(TN_M[k]=GPModel.tn(k))} // team key with book/bo3.gg aliases (model.js TEAM_ALIASES)
 function teq(a,b){a=tn(a);b=tn(b);return !!a&&a===b}
 function NOW(){return Date.now()}
 function boN(b){var n=parseInt(String(b==null?'':b).replace(/\D/g,''),10);return isNaN(n)?null:n}
@@ -217,9 +222,12 @@ function pairKey(a,b,start){return [tn(a),tn(b)].sort().join('|')+'|'+cday(start
 function sameTeam(a,b){a=tn(a);b=tn(b);if(!a||!b)return false;if(a===b)return true;var s=a.length<b.length?a:b,l=a.length<b.length?b:a;return s.length>=4&&l.indexOf(s)===0}
 function sameMatch(m,a,b,start){return cday(m.start)===cday(start)&&((sameTeam(m.t1,a)&&sameTeam(m.t2,b))||(sameTeam(m.t1,b)&&sameTeam(m.t2,a)))}
 function per12(l){var per=String(l.period||'Maps 1-2');return per.replace(/\s/g,'').toLowerCase().indexOf('maps1-2')>-1||per.indexOf('1-2')>-1}
-function startedMatches(){var now=NOW(),today=cday(),M={},order=[];
- function mt(team,opp,start){var k=null;for(var i=0;i<order.length;i++)if(sameMatch(M[order[i]],team,opp,start)){k=order[i];break}
-  if(!k){k=pairKey(team,opp,start);M[k]={key:k,t1:team,t2:opp,start:start,props:{},game:null};order.push(k)}else if(start<M[k].start)M[k].start=start;return M[k]}
+var SM_C=null; // memo: rebuilt only when the feeds change or the minute ticks (it was rebuilt ~15x per render)
+function startedMatches(){var mn=Math.floor(NOW()/60000),ck=FEED_V+'|'+mn+'|'+(HIST?'h':PREG?'p':'-');if(SM_C&&SM_C.k===ck)return SM_C.v;var v=buildStarted();SM_C={k:ck,v:v};PL_C={};return v}
+function buildStarted(){var now=NOW(),today=cday(),M={},order=[],X={}; // X: exact pair key -> match key (fuzzy scan only on a miss)
+ function mt(team,opp,start){var pk=pairKey(team,opp,start),k=X[pk]||null;
+  if(!k)for(var i=0;i<order.length;i++)if(sameMatch(M[order[i]],team,opp,start)){k=order[i];break}
+  if(!k){k=pk;M[k]={key:k,t1:team,t2:opp,start:start,props:{},game:null};order.push(k)}else if(start<M[k].start)M[k].start=start;X[pk]=k;return M[k]}
  function started(s){var t=new Date(s).getTime();return !isNaN(t)&&t<=now&&cday(s)===today}
  (HIST||PREG||[]).forEach(function(e){var st=normStat(e.stat);if(!st||!e.start||!started(e.start))return;var m=mt(e.team,e.opponent,e.start),k=norm(e.book)+'|'+norm(e.player)+'|'+st,o=m.props[k];
   if(o&&o.lock&&!e.lock)return; // same rule as the Track Record: a locked entry wins
@@ -236,10 +244,13 @@ function oneLive(m,name,team,opp,st){var L=m.game&&LIVE[m.game.id],got={},nm=nor
  var p=find(name,team),day=cday(m.start);
  if(p)(p.logs||[]).forEach(function(l){if((l.n===1||l.n===2)&&got[l.n]==null&&sameTeam(l.opp,opp)&&Math.abs((new Date(l.date)-new Date(day))/864e5)<=1){var x=st==='hs'?l.hs:l.kills;if(x!=null)got[l.n]=x}});
  var ns=Object.keys(got).map(Number).sort();if(!ns.length)return null;var v=0;ns.forEach(function(n){v+=+got[n]});return{v:v,maps:ns}}
-function propLive(m,r){var names=isCombo(r.player)?r.player.split('+').map(function(s){return s.trim()}):[r.player],tot=0,maps=null;
+var PL_C={};
+function propLive(m,r){var ck=m.key+'|'+norm(r.book)+'|'+norm(r.player)+'|'+r.stat+'|'+(m.game&&LIVE[m.game.id]?LIVE[m.game.id].at:'');if(PL_C.hasOwnProperty(ck))return PL_C[ck];return PL_C[ck]=propLive0(m,r)}
+function propLive0(m,r){var names=isCombo(r.player)?r.player.split('+').map(function(s){return s.trim()}):[r.player],tot=0,maps=null;
  for(var i=0;i<names.length;i++){var x=oneLive(m,names[i],r.team,r.opp,r.stat);if(!x)return r.result&&r.result.act!=null?{v:r.result.act,done:true,src:'result'}:null;tot+=x.v;maps=maps?maps.filter(function(n){return x.maps.indexOf(n)>-1}):x.maps}
  var done=maps.length===2;if(!done&&r.result&&r.result.act!=null)return{v:r.result.act,done:true,src:'result'};return{v:tot,maps:maps,done:done}}
-function propPick(r){if(r.lock)return r.lock.pick;if(isCombo(r.player))return null;var p=find(r.player,r.team);if(!p)return null;var g=grade(p,r.stat,r.pre,r.opp,{team:r.team,book:r.book,odds:r.odds,before:cday(r.start)});return g?g.pick:null}
+var PP_C={};function propPick(r){if(r.lock)return r.lock.pick;var ck=norm(r.book)+'|'+norm(r.player)+'|'+r.stat+'|'+r.pre+'|'+r.start;if(PP_C.hasOwnProperty(ck))return PP_C[ck];return PP_C[ck]=propPick0(r)}
+function propPick0(r){if(isCombo(r.player))return null;var p=find(r.player,r.team);if(!p)return null;var g=grade(p,r.stat,r.pre,r.opp,{team:r.team,book:r.book,odds:r.odds,before:cday(r.start)});return g?g.pick:null}
 function trackStatus(pick,line,lv){if(!lv)return{c:'',t:'waiting for map stats'};var v=lv.v;
  if(pick==='UNDER'){if(v>line)return{c:'lost',t:'Under lost'};if(lv.done)return v===line?{c:'',t:'push'}:{c:'cash',t:'Under cashed'};return{c:'run',t:(line-v).toFixed(1)+' under so far'}}
  if(v>line)return{c:'cash',t:'Over cashed'};if(lv.done)return v===line?{c:'',t:'push'}:{c:'lost',t:pick==='OVER'?'Over missed':'stayed under'};return{c:'run',t:'needs '+(Math.floor(line)+1-v)+' more'}}
@@ -257,9 +268,11 @@ function trackerBlock(m,compact){var rows=Object.keys(m.props).map(function(k){r
 function startedCard(m){var g=m.game,live=g&&isLive(g),sc=g&&g.s1!=null&&g.s2!=null?' <span style="color:var(--green);margin-left:8px">'+g.s1+' – '+g.s2+'</span>':'';
  var L=g&&LIVE[g.id],maps=L&&L.maps?L.maps.map(function(x){return 'Map '+x.n+(x.map?' '+esc(String(x.map).replace(/^de_/,'')):'')+': '+esc(x.status||'?')+(x.score&&x.score[0]!=null?' '+x.score[0]+'-'+x.score[1]:'')}).join(' · '):'';
  return '<div class="card">'+'<div class="muted">'+(live?'<span class="pill">LIVE</span> ':'')+'started '+esc(ftime(m.start))+(g&&g.tournament?' · '+esc(g.tournament):'')+'</div><div class="big">'+esc(m.t1)+' <span class="vs">vs</span> '+esc(m.t2)+sc+'</div>'+(maps?'<div class="muted">'+maps+'</div>':'')+trackerBlock(m)+'</div>'}
-function pollLive(force){if(LIVE_OK===false)return;if(typeof location!=='undefined'&&/github\.io$|^$/.test(location.hostname||''))return;if(!force&&NOW()-LIVE_T<55000)return;LIVE_T=NOW();
- var ids=startedMatches().filter(function(m){return m.game&&isLive(m.game)}).map(function(m){return m.game.id});if(!ids.length)return;
- Promise.all(ids.map(function(id){return fetch('/live/'+encodeURIComponent(id)).then(function(r){if(r.status===404){LIVE_OK=false;return null}return r.ok?r.json():null}).then(function(d){if(d&&d.maps)LIVE[id]=d}).catch(function(){})})).then(function(){if(tab==='games'&&!document.getElementById('imgov'))render()})}
+function liveView(){var v=sel.gv||(liveGames().length?'live':'up');return tab==='games'&&(v==='live'||v==='started')&&!(typeof document!=='undefined'&&document.hidden)}
+function pollLive(force){if(LIVE_OK===false||!liveView())return;if(typeof location!=='undefined'&&/github\.io$|^$/.test(location.hostname||''))return;if(!force&&NOW()-LIVE_T<55000)return;LIVE_T=NOW();
+ var ids=startedMatches().filter(function(m){return m.game&&isLive(m.game)&&Object.keys(m.props).length}).map(function(m){return m.game.id});if(!ids.length)return;var changed=false;
+ Promise.all(ids.map(function(id){return fetch('/live/'+encodeURIComponent(id)).then(function(r){if(r.status===404){LIVE_OK=false;return null}return r.ok?r.json():null}).then(function(d){if(!d||!d.maps)return;var o=LIVE[id];
+  if(!o||JSON.stringify(o.maps)!==JSON.stringify(d.maps)||JSON.stringify(o.players)!==JSON.stringify(d.players)){LIVE[id]=d;changed=true}}).catch(function(){})})).then(function(){if(changed&&liveView()&&!document.getElementById('imgov'))render()})}
 function viewGames(){if(!GAMES.length)return '<div class="card"><h2>Games</h2><div class="warn">No schedule loaded yet. Run the "Update CS2 games" workflow once to create games.json.</div></div>';
  var lv=liveGames(),up=upGames(),v=sel.gv||(lv.length?'live':'up'),age=gamesAge();
  var sm=startedMatches();pollLive();var h='<div class="btns" style="margin-bottom:10px"><button class="'+(v==='live'?'b':'g')+'" data-act="gsub" data-v="live">Live · '+lv.length+'</button><button class="'+(v==='started'?'b':'g')+'" data-act="gsub" data-v="started">Started today · '+sm.length+'</button><button class="'+(v==='up'?'b':'g')+'" data-act="gsub" data-v="up">Upcoming · '+up.length+'</button></div>';
@@ -553,7 +566,7 @@ document.addEventListener('change',function(e){var i=e.target.id,m={pt:'tm',pn:'
 (function(){try{var m=/admin=([^&]*)/.exec(location.hash||'');if(m){var k=decodeURIComponent(m[1]);if(k==='off')localStorage.removeItem('gp_admin');else localStorage.setItem('gp_admin',k);history.replaceState(null,'',location.pathname+location.search)}}catch(e){}})();
 function adminKey(){try{return localStorage.getItem('gp_admin')||''}catch(e){return ''}}
 function getJSON(u){var o={};if(u==='lines_history.json'&&adminKey())o={headers:{'X-Admin-Key':adminKey()}};return fetch(u+'?'+Date.now(),o).then(function(r){if(!r.ok)throw 0;return r.json()})}
-function applyFeeds(g,l,h,p){
+var FEED_V=0;function applyFeeds(g,l,h,p){FEED_V++;
  if(g){GAMES=(g.games||[]).filter(function(x){return x.start}).sort(function(a,b){return a.start<b.start?-1:1});META.games_iso=g.updated||'';META.games_at=(g.updated&&g.updated.indexOf('T')>-1)?fmt(g.updated):(g.updated||'')}
  if(l){LINES=l.lines||[];META.lines_at=l.observed_at?fmt(l.observed_at):''}
  if(h&&h.entries)HIST=h.entries;if(p&&p.entries)PREG=p.entries}
