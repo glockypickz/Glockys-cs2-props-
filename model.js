@@ -149,37 +149,47 @@ function v1Shade(proj,line){if(line==null||isNaN(line)||+line===0)return null;va
 function underBeLetter(grade,pick,proj,line,st,book,odds,P){if(pick!=='UNDER'||(grade!=='D'&&grade!=='F'))return{grade:grade,pick:pick,epp:null,be:null,pu:null};
  var size=st==='kills'?P.size_kills:P.size_hs,mu=round1(proj),muF=blendMean(mu,+line,size,V1_UNDER_W_LINE),r=nbProbs(muF,size,+line),pu=r[2]/Math.max(1e-12,1-r[1]),be=breakEven(book,odds),epp=(pu-be)*100;
  return{grade:epp>=(P.grade_f!=null?P.grade_f:3)?'F':'D',pick:pick,epp:epp,be:be,pu:pu}}
-function v1Project(ctx,p,st,opp,before){before=before||'9999';var cs=series(ctx,p).filter(function(c){return c.date<before});
+function v1ProjectParts(ctx,p,st,opp,before){before=before||'9999';var cs=series(ctx,p).filter(function(c){return c.date<before});
  function nums(rows){return rows.map(function(c){return c[st]}).filter(function(x){return x!=null})}
  var v=nums(cs);if(!v.length)return null;var oppRank=opp?rankOf(ctx,opp):null,on=norm(opp);
- var comp=[[0.35,avg(nums(cs.slice(0,10)))],[0.20,avg(v)]];
- var h=opp?cs.filter(function(c){return norm(c.opp)===on}):[];comp.push([0.20,avg(nums(h))]);
- var same=[];if(oppRank!=null){var tr=tier(oppRank);cs.forEach(function(c){var r=rankOf(ctx,c.opp);if(r!=null&&tier(r)===tr)same.push(c)})}
- comp.push([0.15,avg(nums(same))]);comp.push([0.10,avg(nums(cs.slice(0,3)))]);
- var use=comp.filter(function(x){return x[1]!=null}),tw=use.reduce(function(s,x){return s+x[0]},0);if(!tw)return null;
- var proj=use.reduce(function(s,x){return s+x[1]*x[0]},0)/tw;
+ var l10r=cs.slice(0,10),h=opp?cs.filter(function(c){return norm(c.opp)===on}):[],same=[],l3r=cs.slice(0,3);
+ if(oppRank!=null){var tr=tier(oppRank);cs.forEach(function(c){var r=rankOf(ctx,c.opp);if(r!=null&&tier(r)===tr)same.push(c)})}
+ var parts=[{key:'l10',label:'Last 10 series',w:0.35,v:avg(nums(l10r)),n:nums(l10r).length},
+  {key:'szn',label:'Season (all series)',w:0.20,v:avg(v),n:v.length},
+  {key:'h2h',label:'Head-to-head'+(opp?' vs '+opp:''),w:0.20,v:avg(nums(h)),n:nums(h).length},
+  {key:'tier',label:'Same rank tier'+(opp?' as '+opp:''),w:0.15,v:avg(nums(same)),n:nums(same).length},
+  {key:'l3',label:'Last 3 series',w:0.10,v:avg(nums(l3r)),n:nums(l3r).length}];
+ var use=parts.filter(function(x){return x.v!=null}),tw=use.reduce(function(s,x){return s+x.w},0);if(!tw)return null;
+ var pre=use.reduce(function(s,x){return s+x.v*x.w},0)/tw,proj=pre;
  var adr5=avg(cs.slice(0,5).map(function(c){return c.adr}).filter(function(x){return x!=null}));
  var adrc=avg(cs.map(function(c){return c.adr}).filter(function(x){return x!=null}));
- if(adr5!=null&&adrc)proj*=Math.max(0.95,Math.min(1.05,1+0.5*(adr5/adrc-1)));
- return proj}
+ var adrN5=cs.slice(0,5).filter(function(c){return c.adr!=null}).length,adrN=cs.filter(function(c){return c.adr!=null}).length;
+ var adrUsed=adr5!=null&&!!adrc,adrMult=1;
+ if(adrUsed){adrMult=Math.max(0.95,Math.min(1.05,1+0.5*(adr5/adrc-1)));proj*=adrMult}
+ return{proj:proj,pre:pre,parts:parts,adr5:adr5,adrc:adrc,adrMult:adrMult,adrUsed:adrUsed,adrN5:adrN5,adrN:adrN,weightSum:tw}}
+function v1Project(ctx,p,st,opp,before){var d=v1ProjectParts(ctx,p,st,opp,before);return d?d.proj:null}
 function v1Result(ctx,mu,line,st,book,odds,reasons){var sh=v1Shade(mu,line);if(!sh)return null;var proj=round1(mu),ub=underBeLetter(sh.grade,sh.pick,proj,line,st,book,odds,ctx.P);
  var size=st==='kills'?ctx.P.size_kills:ctx.P.size_hs,muF=blendMean(proj,+line,size,ctx.P.w_line),r=nbProbs(muF,size,+line),np=Math.max(1e-12,1-r[1]),po=r[0]/np,pu=r[2]/np,be=breakEven(book,odds),pPick,epp;
  if(ub.epp!=null){epp=ub.epp;pPick=ub.pu;be=ub.be}else{pPick=Math.max(po,pu);epp=(pPick-be)*100}
  reasons=(reasons||[]).slice();
- return{proj:proj,muBlend:muF,edge:proj-+line,grade:ub.grade,pick:ub.pick,pOver:po,pPush:r[1],pPick:pPick,be:be,edgePP:epp,reasons:reasons,flag:reasons.join('; '),model:VERSION,hrBlend:null,hrUpgrade:null,modelGrade:ub.grade,modelPick:ub.pick}}
-function grade(ctx,p,st,line,opp,o){o=o||{};if(line==null||isNaN(line))return null;var mu=v1Project(ctx,p,st,opp,o.before);if(mu==null)return null;
+ return{proj:proj,muBlend:muF,edge:proj-+line,grade:ub.grade,pick:ub.pick,pOver:po,pPush:r[1],pPick:pPick,be:be,edgePP:epp,reasons:reasons,flag:reasons.join('; '),model:VERSION,hrBlend:null,hrUpgrade:null,modelGrade:ub.grade,modelPick:ub.pick,
+  underBe:{applied:ub.epp!=null,pu:ub.pu,be:ub.be,epp:ub.epp,preGrade:sh.grade}}}
+function grade(ctx,p,st,line,opp,o){o=o||{};if(line==null||isNaN(line))return null;var det=v1ProjectParts(ctx,p,st,opp,o.before);if(!det)return null;
  var nV1=series(ctx,p).filter(function(c){return c.date<(o.before||'9999')}).length;
- var r=v1Result(ctx,mu,+line,st,o.book,o.odds,filters(ctx,p,o.team,nV1,o.before));if(!r)return null;
+ var r=v1Result(ctx,det.proj,+line,st,o.book,o.odds,filters(ctx,p,o.team,nV1,o.before));if(!r)return null;
+ r.v1=det;
  var hits=hitrates(ctx,p,st,+line,opp,o.before);r.hits={l5:hits.l5,l10:hits.l10,l15:hits.l15,l20:hits.l20,szn:hits.szn,h2h:hits.h2h};r.pHr=hits.p;
- var pr=project(ctx,p,st,opp,o.team||p.team,o.before);
- if(pr){r.h2hN=pr.h2h;r.h2hRate=pr.h2hRate;r.n=pr.n;r.rounds=pr.rounds;r.roundsElo=pr.roundsElo;r.roundsMaps=pr.roundsMaps;r.pRank=pr.pRank;r.kd=pr.form.kd;r.kpm=pr.form.kpm;r.formN=pr.form.n;r.hsp={l5:pr.hsf.raw['5'],l10:pr.hsf.raw['10'],l15:pr.hsf.raw['15'],l20:pr.hsf.raw['20'],szn:pr.hsf.raw.szn};r.hspN={l5:pr.hsf.n['5'],l10:pr.hsf.n['10'],l15:pr.hsf.n['15'],l20:pr.hsf.n['20'],szn:pr.hsf.n.szn};r.pwin=pr.pwin;r.rate=pr.rate;r.prior=pr.prior;r.adj=pr.adj;r.cs=pr.cs;r.nRate=pr.nRate}
- else{r.h2hN=0;r.h2hRate=null;r.n=nV1;r.rounds=null;r.roundsElo=null;r.roundsMaps=null;r.pRank=null;r.kd=null;r.kpm={l5:null,l10:null,l15:null,l20:null,szn:null};r.formN={l5:0,l10:0,l15:0,l20:0,szn:0};r.hsp={l5:null,l10:null,l15:null,l20:null,szn:null};r.hspN={l5:0,l10:0,l15:0,l20:0,szn:0};r.pwin=null;r.rate=null;r.prior=null;r.adj=null;r.cs=null;r.nRate=null}
+ var csAll=series(ctx,p).filter(function(c){return c.date<(o.before||'9999')}),rows=csAll.filter(function(c){return c.rd&&c[st]!=null}).slice(0,ctx.P.n_max);
+ r.h2hN=0;r.h2hRate=null;r.n=nV1;r.rounds=null;r.roundsElo=null;r.roundsMaps=null;r.pRank=null;r.pwin=null;r.rate=null;r.prior=null;r.adj=null;r.cs=null;r.nRate=null;
+ if(rows.length){var form=formOf(ctx,csAll,rows,o.before),hsf=hsFormOf(ctx,csAll,o.team||p.team,o.before);
+  r.kd=form.kd;r.kpm=form.kpm;r.formN=form.n;r.hsp={l5:hsf.raw['5'],l10:hsf.raw['10'],l15:hsf.raw['15'],l20:hsf.raw['20'],szn:hsf.raw.szn};r.hspN={l5:hsf.n['5'],l10:hsf.n['10'],l15:hsf.n['15'],l20:hsf.n['20'],szn:hsf.n.szn}}
+ else{r.kd=null;r.kpm={l5:null,l10:null,l15:null,l20:null,szn:null};r.formN={l5:0,l10:0,l15:0,l20:0,szn:0};r.hsp={l5:null,l10:null,l15:null,l20:null,szn:null};r.hspN={l5:0,l10:0,l15:0,l20:0,szn:0}}
  r.bait=isBait(ctx,p,st,+line,o.before);return r}
 function gradeCombo(ctx,ps,names,st,line,opp,o){o=o||{};var mu=0,reasons=[],nmin=999,parts=[];
  for(var i=0;i<ps.length;i++){var p=ps[i],pj=v1Project(ctx,p,st,opp,o.before);if(pj==null)return null;mu+=pj;var nser=series(ctx,p).filter(function(c){return c.date<(o.before||'9999')}).length;nmin=Math.min(nmin,nser);parts.push({name:p.name,proj:pj,n:nser});
   filters(ctx,p,o.team,nser,o.before).forEach(function(x){reasons.push(names[i]+': '+x)})}
  var r=v1Result(ctx,mu,+line,st,o.book,o.odds,reasons);if(!r)return null;r.n=nmin;r.parts=parts;r.bait=false;return r}
 var api={PARAMS:PARAMS,VERSION:VERSION,TEAM_ALIASES:TEAM_ALIASES,tn:tn,teq:teq,norm:norm,breakEven:breakEven,americanBe:americanBe,nbProbs:nbProbs,lineMean:lineMean,
- build:build,decodePlayers:decodePlayers,hitrates:hitrates,isBait:isBait,prepStrength:prepStrength,pRank:pRank,pwin:pwin,mapRounds:mapRounds,series:series,elo:elo,project:project,v1Project:v1Project,filters:filters,finish:finish,grade:grade,gradeCombo:gradeCombo};
+ build:build,decodePlayers:decodePlayers,hitrates:hitrates,isBait:isBait,prepStrength:prepStrength,pRank:pRank,pwin:pwin,mapRounds:mapRounds,series:series,elo:elo,project:project,v1Project:v1Project,v1ProjectParts:v1ProjectParts,filters:filters,finish:finish,grade:grade,gradeCombo:gradeCombo};
 if(typeof module!=='undefined'&&module.exports)module.exports=api;else root.GPModel=api;
 })(typeof window!=='undefined'?window:this);

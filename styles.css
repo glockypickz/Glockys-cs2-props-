@@ -37,7 +37,7 @@ button.g{background:transparent;color:var(--silver);border:1px solid var(--line)
 table{width:100%;border-collapse:collapse;font-size:13px}td,th{padding:7px 6px;border-bottom:1px solid var(--line);text-align:left;white-space:nowrap}
 .scroll{overflow-x:auto}
 .bars{display:flex;align-items:flex-end;gap:4px;height:170px;border-bottom:1px solid var(--line);position:relative;margin:10px 0 2px}
-.bc{flex:1;height:100%;display:flex;flex-direction:column;justify-content:flex-end;align-items:center;min-width:0}.bn{font:800 13px system-ui;color:#fff;margin-bottom:3px;position:relative;z-index:3;text-shadow:0 0 3px #000,0 0 6px #000}.bar{width:100%;border-radius:4px 4px 0 0;min-width:6px}.ln{position:absolute;left:0;right:0;border-top:2px dashed var(--silver);z-index:2;pointer-events:none}.ln span{position:absolute;right:0;top:-18px;background:rgba(3,7,5,.85);color:var(--silver);font:700 11px system-ui;padding:0 4px;border-radius:4px}.bdates{display:flex;gap:4px;margin-bottom:6px}.bd{flex:1;text-align:center;font:600 10px system-ui;color:var(--muted)}
+.bc{flex:1;height:100%;display:flex;flex-direction:column;justify-content:flex-end;align-items:center;min-width:0}.bn{font:800 13px system-ui;color:#fff;margin-bottom:3px;position:relative;z-index:3;text-shadow:0 0 3px #000,0 0 6px #000}.bars .bar{width:100%;max-width:100%;border-radius:4px 4px 0 0;min-width:0}.ln{position:absolute;left:0;right:0;border-top:2px dashed var(--silver);z-index:2;pointer-events:none}.ln span{position:absolute;right:0;top:-18px;background:rgba(3,7,5,.85);color:var(--silver);font:700 11px system-ui;padding:0 4px;border-radius:4px}.bdates{display:flex;gap:4px;margin-bottom:6px}.bd{flex:1;text-align:center;font:600 10px system-ui;color:var(--muted)}
 .item{display:flex;justify-content:space-between;align-items:center;gap:8px;padding:10px 0;border-bottom:1px solid var(--line)}
 .item:last-child{border:0}
 .toast{position:fixed;left:12px;right:12px;bottom:calc(76px + var(--safe-bot));background:var(--green);color:#000;font-weight:800;padding:12px;border-radius:12px;text-align:center;z-index:50}
@@ -122,8 +122,10 @@ header img{filter:drop-shadow(0 0 10px rgba(0,255,102,.35));animation:gpglow 3.5
 .trk table td{vertical-align:top}.trk tr.cashed td{background:#00ff6614}.trk tr.lostrow td{background:#ff4d6d12}
 .tst{display:inline-block;padding:3px 8px;border-radius:99px;font-size:12px;font-weight:800;background:#262626;color:var(--silver)}
 .tst.cash{background:var(--green);color:#000}.tst.lost{background:var(--red);color:#fff}.tst.run{background:#ffc53d22;color:var(--amber)}
-.bar{height:5px;background:#262626;border-radius:99px;margin-top:5px;min-width:90px;overflow:hidden}.bar i{display:block;height:100%;background:var(--amber)}
-.bar i.cash{background:var(--green)}.bar i.lost{background:var(--red)}
+.pbar{height:5px;background:#262626;border-radius:99px;margin-top:5px;min-width:90px;overflow:hidden}.pbar i{display:block;height:100%;background:var(--amber)}
+.pbar i.cash{background:var(--green)}.pbar i.lost{background:var(--red)}
+/* Chart bars on a phone: keep them thin and readable when 15–20 sit in ~390px */
+@media(max-width:500px){.bars{gap:2px;height:180px}.bn{font-size:9px;margin-bottom:2px;line-height:1}.bdates{gap:2px}.bd{font-size:8px}}
 
 /* tracker tables scroll inside their card instead of widening the page (grid items default to min-width:auto) */
 .grid>*{min-width:0}.trk{max-width:100%;overflow-x:auto}
