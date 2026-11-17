@@ -39,22 +39,26 @@ function patch(){var els=document.querySelectorAll('.tc-logo[data-team]');for(va
 var PHOTOS=null,photowait=[];
 function pkey(s){return String(s||'').toLowerCase().replace(/[^a-z0-9]/g,'')}
 function photoSrc(player){if(!PHOTOS||!player)return null;var p=PHOTOS[pkey(player)];return (p&&typeof p.file==='string'&&p.file.indexOf('assets/players/')===0)?p.file:null}
-function loadPhotos(){try{fetch('player_photos.json',{cache:'no-cache'}).then(function(r){return r.ok?r.json():{}}).then(function(d){var m={},l=(d&&d.photos)||{};Object.keys(l).forEach(function(k){var f=l[k]&&l[k].file;if(typeof f==='string'&&f.indexOf('assets/players/')===0)m[k]=l[k]});PHOTOS=m;photowait.splice(0).forEach(function(f){f()})}).catch(function(){PHOTOS={};photowait.splice(0).forEach(function(f){f()})})}catch(e){PHOTOS={}}}
+function photosReady(list){PHOTOS=list;photowait.splice(0).forEach(function(f){f()});try{document.dispatchEvent(new Event('gp-photos'))}catch(e){}}
+function loadPhotos(){try{fetch('player_photos.json',{cache:'no-cache'}).then(function(r){return r.ok?r.json():{}}).then(function(d){var m={},l=(d&&d.photos)||{};Object.keys(l).forEach(function(k){var f=l[k]&&l[k].file;if(typeof f==='string'&&f.indexOf('assets/players/')===0)m[k]=l[k]});photosReady(m)}).catch(function(){photosReady({})})}catch(e){photosReady({})}}
 function whenPhotos(cb){if(PHOTOS)cb();else{photowait.push(cb);setTimeout(function(){var i=photowait.indexOf(cb);if(i>=0){photowait.splice(i,1);cb()}},2500)}}
-function picHtml(player){var u=photoSrc(player);return u?'<div class="tc-pic"><img src="'+esc(u)+'" alt=""></div>':'<div class="tc-pic tc-sil" aria-hidden="true"><i></i><span>'+esc(mono(player))+'</span></div>'}
+function hasPic(player){return !!photoSrc(player)}
+// If a cached file 404s, drop the portrait window and keep the compact no-photo layout (no silhouette).
+function dropPic(el){var t=el&&el.closest?el.closest('.tc'):null;if(!t||t.classList.contains('tc-plain'))return;t.classList.add('tc-plain');var port=t.querySelector('.tc-port');if(port)port.remove();var name=t.querySelector('.tc-name'),info=t.querySelector('.tc-info'),inn=t.querySelector('.tc-in');if(name&&info&&inn&&name.nextElementSibling===info)inn.insertBefore(info,name)}
 
 // ---- HTML card
 function spark(g){var v=vals(g);if(!v.length)return '';var mx=Math.max.apply(null,v.concat([g.line||0,1]))*1.15;
  return '<div class="tc-spark">'+(g.line!=null?'<i class="tc-sl" style="bottom:'+(g.line/mx*100)+'%"></i>':'')+v.map(function(x){return '<b class="'+(x>g.line?'o':x<g.line?'u':'p')+'" style="height:'+Math.max(4,x/mx*100)+'%"></b>'}).join('')+'</div>'}
-function html(g){if(!g)return '';var t=tier(g.grade),u=g.pick==='UNDER',fo=t.foil.join(','),bk=esc(g.book||'PrizePicks');
- return '<div class="tc-wrap"><div class="tc t-'+(g.grade==='A+'?'ap':String(g.grade||'d').toLowerCase())+'" style="--foil:linear-gradient(135deg,'+fo+');--acc:'+t.accent+';--ink:'+t.ink+'">'+
- '<div class="tc-in"><div class="tc-pat" aria-hidden="true"></div><div class="tc-wm" aria-hidden="true">'+('GLOCKY PICKS   '.repeat(28))+'</div>'+
- '<div class="tc-port">'+picHtml(g.player)+
- '<div class="tc-top"><div class="tc-rate"><b>'+esc(g.grade)+'</b><span>'+t.name+'</span></div>'+
- '<div class="tc-logo'+(logoUrl(g.team)?'':' mono')+'" data-team="'+esc(g.team)+'">'+badge(g.team)+'<span>'+esc(mono(g.team))+'</span></div></div></div>'+
- '<div class="tc-name"><b>'+esc(g.player)+'</b><span>'+esc(g.team||'')+(g.opp?' vs '+esc(g.opp):'')+' · '+bk+'</span></div>'+
- '<div class="tc-info"><div class="tc-stat">'+esc(sname(g.stat))+' · Maps 1-2</div><div class="tc-pick'+(u?' u':'')+'">'+esc(g.pick)+' '+esc(g.line)+'</div>'+
- '<div class="tc-proj"><span>PROJ</span><b>'+esc(g.proj)+'</b></div>'+'<div class="tc-meta">'+pct(g.pPick)+' chance · '+edge(g)+' edge · L10 '+l10(g)+'</div>'+spark(g)+'</div>'+
+function html(g){if(!g)return '';var t=tier(g.grade),u=g.pick==='UNDER',fo=t.foil.join(','),bk=esc(g.book||'PrizePicks'),pic=hasPic(g.player);
+ var top='<div class="tc-top"><div class="tc-rate"><b>'+esc(g.grade)+'</b><span>'+t.name+'</span></div>'+
+  '<div class="tc-logo'+(logoUrl(g.team)?'':' mono')+'" data-team="'+esc(g.team)+'">'+badge(g.team)+'<span>'+esc(mono(g.team))+'</span></div></div>';
+ var name='<div class="tc-name"><b>'+esc(g.player)+'</b><span>'+esc(g.team||'')+(g.opp?' vs '+esc(g.opp):'')+' · '+bk+'</span></div>';
+ var info='<div class="tc-info"><div class="tc-stat">'+esc(sname(g.stat))+' · Maps 1-2</div><div class="tc-pick'+(u?' u':'')+'">'+esc(g.pick)+' '+esc(g.line)+'</div>'+
+  '<div class="tc-proj"><span>PROJ</span><b>'+esc(g.proj)+'</b></div>'+'<div class="tc-meta">'+pct(g.pPick)+' chance · '+edge(g)+' edge · L10 '+l10(g)+'</div>'+spark(g)+'</div>';
+ var port=pic?'<div class="tc-port"><div class="tc-pic"><img src="'+esc(photoSrc(g.player))+'" alt="" onerror="GPCards.dropPic(this)"></div></div>':'';
+ var mid=pic?(port+top+name+info):(top+info+name);
+ return '<div class="tc-wrap"><div class="tc t-'+(g.grade==='A+'?'ap':String(g.grade||'d').toLowerCase())+(pic?'':' tc-plain')+'" style="--foil:linear-gradient(135deg,'+fo+');--acc:'+t.accent+';--ink:'+t.ink+'">'+
+ '<div class="tc-in"><div class="tc-pat" aria-hidden="true"></div><div class="tc-wm" aria-hidden="true">'+('GLOCKY PICKS   '.repeat(28))+'</div>'+mid+
  (function(){var q=pstats(g);return '<div class="tc-back"><div class="tc-bh">Season · Maps 1-2 · '+q.n+' series</div><div><b>'+q.hsp+'</b><i>HS%</i></div><div><b>'+q.kd+'</b><i>K/D</i></div><div><b>'+q.k1+'</b><i>Kills Map 1</i></div><div><b>'+q.hpm+'</b><i>HS / Map</i></div><div><b>'+q.kl10+'</b><i>Kills 1-2 L10</i></div><div><b>'+q.hsl10+'</b><i>HS 1-2 L10</i></div></div>'})()+
  '<div class="tc-foot"><span>GLOCKY PICKS</span><span>CS2 PROP GRADER</span></div></div></div></div>'}
 
@@ -64,17 +68,13 @@ function rr(x,X,Y,w,h,r){x.beginPath();x.moveTo(X+r,Y);x.arcTo(X+w,Y,X+w,Y+h,r);
 function grad(x,cols,x0,y0,x1,y1){var gr=x.createLinearGradient(x0,y0,x1,y1);cols.forEach(function(c,i){gr.addColorStop(i/(cols.length-1),c)});return gr}
 function fit(x,t,size,maxW,weight){var f=function(){x.font=(weight||'')+' '+size+'px '+FONT};f();while(size>14&&x.measureText(t).width>maxW){size-=2;f()}return size}
 function loadImg(src,cors,cb){if(!src)return cb(null);var im=new Image();if(cors)im.crossOrigin='anonymous';var done=false;function fin(v){if(!done){done=true;cb(v)}}im.onload=function(){fin(im)};im.onerror=function(){fin(null)};setTimeout(function(){fin(null)},4000);im.src=src}
-// Framed portrait in the upper ~40% of the card. Head-and-shoulders only; no pick text or bars in this window.
+function addRR(x,X,Y,w,h,r){x.moveTo(X+r,Y);x.arcTo(X+w,Y,X+w,Y+h,r);x.arcTo(X+w,Y+h,X,Y+h,r);x.arcTo(X,Y+h,X,Y,r);x.arcTo(X,Y,X+w,Y,r);x.closePath()}
+// Framed portrait in the upper ~40% of the card. Inner fill is skipped so the GP tile already drawn on the panel shows around the cutout, not over the face.
 function drawPort(x,pic,logo,g,t,P){var x0=P+14,y0=P+14,w=W-2*P-28,h=410,r=18;
- x.save();rr(x,x0-3,y0-3,w+6,h+6,r+3);x.fillStyle=grad(x,t.foil,x0,y0,x0+w,y0+h);x.fill();
- rr(x,x0,y0,w,h,r);x.fillStyle='#0a0a0a';x.fill();x.clip();
+ x.beginPath();addRR(x,x0-3,y0-3,w+6,h+6,r+3);addRR(x,x0,y0,w,h,r);x.fillStyle=grad(x,t.foil,x0,y0,x0+w,y0+h);x.fill('evenodd');
+ x.save();rr(x,x0,y0,w,h,r);x.clip();
  if(pic&&pic.width){var s=Math.max(w/pic.width,(h*1.02)/pic.height),dw=pic.width*s,dh=pic.height*s,dx=x0+(w-dw)/2,dy=y0+4;
-  x.shadowColor=t.accent;x.shadowBlur=28;x.drawImage(pic,dx,dy,dw,dh);x.shadowBlur=0;
-  var gd=x.createLinearGradient(0,y0+h*0.9,0,y0+h);gd.addColorStop(0,'rgba(10,10,10,0)');gd.addColorStop(1,'rgba(8,8,8,.85)');
-  x.fillStyle=gd;x.fillRect(x0,y0+h*0.9,w,h*0.1)}
- else{x.fillStyle=t.accent;x.globalAlpha=.22;x.beginPath();x.ellipse(W/2,y0+h*0.32,72,86,0,0,7);x.fill();
-  x.beginPath();x.moveTo(W/2-160,y0+h);x.quadraticCurveTo(W/2-150,y0+h*0.48,W/2,y0+h*0.5);x.quadraticCurveTo(W/2+150,y0+h*0.48,W/2+160,y0+h);x.closePath();x.fill();
-  x.globalAlpha=.8;var m=mono(g.player);fit(x,m,62,220);x.textAlign='center';x.textBaseline='middle';x.fillText(m,W/2,y0+h*0.78);x.textBaseline='alphabetic';x.globalAlpha=1}
+  x.shadowColor=t.accent;x.shadowBlur=28;x.drawImage(pic,dx,dy,dw,dh);x.shadowBlur=0}
  // soft corner scrims so the badges stay readable, kept well clear of the face
  var vg=x.createRadialGradient(x0,y0,8,x0,y0,130);vg.addColorStop(0,'rgba(0,0,0,.55)');vg.addColorStop(1,'rgba(0,0,0,0)');x.fillStyle=vg;x.fillRect(x0,y0,150,140);
  vg=x.createRadialGradient(x0+w,y0,8,x0+w,y0,130);vg.addColorStop(0,'rgba(0,0,0,.55)');vg.addColorStop(1,'rgba(0,0,0,0)');x.fillStyle=vg;x.fillRect(x0+w-150,y0,150,140);
@@ -106,37 +106,56 @@ function draw(g,logo,mark,tile,pic){var c=document.createElement('canvas');c.wid
  x.translate(W/2,H/2);x.rotate(-Math.PI/5);x.font='54px '+FONT;x.fillStyle='rgba(255,255,255,.10)';x.textAlign='center';
  for(var r=-6;r<=6;r++)x.fillText('GLOCKY PICKS   GLOCKY PICKS   GLOCKY PICKS',0,r*150);x.restore();
  x.strokeStyle=t.accent;x.globalAlpha=.6;x.lineWidth=3;rr(x,P+10,P+10,W-2*P-20,H-2*P-20,24);x.stroke();x.globalAlpha=1;
- // portrait window, then name, pick, bars, stats, footer — nothing over the photo
- var pb=drawPort(x,pic,logo,g,t,P);
- var ny=pb+10,nh=68;
- x.fillStyle=grad(x,t.foil,P,ny,W-P,ny+nh);rr(x,P+14,ny,W-2*P-28,nh,14);x.fill();x.fillStyle='rgba(0,0,0,.55)';rr(x,P+18,ny+3,W-2*P-36,nh-6,12);x.fill();
- x.textAlign='center';x.textBaseline='alphabetic';x.fillStyle='#fff';fit(x,String(g.player).toUpperCase(),40,W-2*P-80);x.fillText(String(g.player).toUpperCase(),W/2,ny+38);
- var bk=(g.book||'PrizePicks').toUpperCase();var sub=(g.team||'')+(g.opp?'  vs  '+g.opp:'')+'  ·  '+bk;x.fillStyle=t.accent;fit(x,sub,16,W-2*P-80);x.fillText(sub,W/2,ny+58);
- var iy=ny+nh+22;
- x.fillStyle='#c8cdd2';x.font='16px '+FONT;x.fillText((sname(g.stat)+' · Maps 1-2').toUpperCase(),W/2,iy);
- var pk=g.pick+' '+g.line;x.shadowColor=pc;x.shadowBlur=20;x.fillStyle=pc;fit(x,pk,48,640);x.fillText(pk,W/2,iy+44);x.shadowBlur=0;
- x.font='15px '+FONT;var pl='PROJ ',pw=x.measureText(pl).width;x.font='32px '+FONT;var pv=String(g.proj),vw=x.measureText(pv).width;var px0=W/2-(pw+vw)/2;
- x.textAlign='left';x.fillStyle='#8b9297';x.font='15px '+FONT;x.fillText(pl,px0,iy+76);x.fillStyle='#fff';x.font='32px '+FONT;x.fillText(pv,px0+pw,iy+76);x.textAlign='center';
- x.fillStyle='#c8cdd2';x.font='15px '+FONT;x.fillText(pct(g.pPick)+' CHANCE  ·  '+edge(g)+' EDGE  ·  L10 '+l10(g),W/2,iy+100);
- var v=vals(g),sx=80,sw=W-160,sy=iy+112,sh=64;if(v.length){var mx=Math.max.apply(null,v.concat([g.line||0,1]))*1.15,bw=sw/v.length;
+ var has=pic&&pic.width,ny,nh,iy,sx=80,sw=W-160,sy,sh,gy,gh;
+ x.textAlign='center';x.textBaseline='alphabetic';
+ if(has){
+  var pb=drawPort(x,pic,logo,g,t,P);
+  ny=pb+10;nh=68;iy=ny+nh+22;sy=iy+112;sh=64;gy=sy+sh+42;gh=44;
+  drawName(x,g,t,P,ny,nh,40,16);
+  drawPick(x,g,pc,iy,16,48,15,32,15);
+ }else{
+  // No cached photo: skip the portrait window and use the compact badge + pick + bars + name layout.
+  drawBadges(x,logo,g,t);
+  iy=250;sy=448;sh=126;ny=610;nh=80;gy=716;gh=54;
+  drawPick(x,g,pc,iy,20,72,18,44,20);
+  drawName(x,g,t,P,ny,nh,46,18);
+ }
+ var v=vals(g);if(v.length){var mx=Math.max.apply(null,v.concat([g.line||0,1]))*1.15,bw=sw/v.length;
   v.forEach(function(val,k){var bh=Math.max(5,val/mx*sh);x.fillStyle=val>g.line?'#00FF66':val<g.line?'#ff4d6d':'#777';rr(x,sx+k*bw+4,sy+sh-bh,bw-8,bh,4);x.fill()});
   var ly=sy+sh-g.line/mx*sh;x.setLineDash([8,6]);x.strokeStyle='#fff';x.lineWidth=2;x.beginPath();x.moveTo(sx-4,ly);x.lineTo(sx+sw+4,ly);x.stroke();x.setLineDash([]);
-  x.fillStyle='#8b9297';x.font='12px '+FONT;x.fillText('LAST '+v.length+' SERIES  ·  DASHED = LINE',W/2,sy+sh+18)}
- var q=pstats(g),gy=sy+sh+42;
- x.fillStyle='#8b9297';x.font='13px '+FONT;x.fillText('SEASON  ·  MAPS 1-2  ·  '+q.n+' SERIES',W/2,gy);
- var cells=[[q.hsp,'HS%'],[q.kd,'K/D'],[q.k1,'KILLS MAP 1'],[q.hpm,'HS / MAP'],[q.kl10,'KILLS 1-2 L10'],[q.hsl10,'HS 1-2 L10']],gx=P+14,gw=(W-2*P-28-8)/2,cy0=gy+10,gh=44,gap=6;
+  x.fillStyle='#8b9297';x.font=(has?12:14)+'px '+FONT;x.fillText('LAST '+v.length+' SERIES  ·  DASHED = LINE',W/2,sy+sh+18)}
+ var q=pstats(g);
+ x.fillStyle='#8b9297';x.font=(has?13:15)+'px '+FONT;x.fillText('SEASON  ·  MAPS 1-2  ·  '+q.n+' SERIES',W/2,gy);
+ var cells=[[q.hsp,'HS%'],[q.kd,'K/D'],[q.k1,'KILLS MAP 1'],[q.hpm,'HS / MAP'],[q.kl10,'KILLS 1-2 L10'],[q.hsl10,'HS 1-2 L10']],gx=P+14,gw=(W-2*P-28-8)/2,cy0=gy+10,gap=has?6:8,cf=has?13:15,vf=has?26:30;
  cells.forEach(function(cl,k){var cx=gx+(k%2)*(gw+8),cy=cy0+Math.floor(k/2)*(gh+gap);
   x.fillStyle='rgba(255,255,255,.06)';rr(x,cx,cy,gw,gh,10);x.fill();
   x.strokeStyle=t.accent;x.globalAlpha=.35;x.lineWidth=2;rr(x,cx,cy,gw,gh,10);x.stroke();x.globalAlpha=1;
-  x.textAlign='left';x.fillStyle='#8b9297';x.font='13px '+FONT;x.fillText(cl[1],cx+14,cy+28);x.textAlign='right';x.fillStyle='#fff';x.font='26px '+FONT;x.fillText(cl[0],cx+gw-14,cy+32);x.textAlign='center'});
+  x.textAlign='left';x.fillStyle='#8b9297';x.font=cf+'px '+FONT;x.fillText(cl[1],cx+14,cy+Math.round(gh*0.64));x.textAlign='right';x.fillStyle='#fff';x.font=vf+'px '+FONT;x.fillText(cl[0],cx+gw-14,cy+Math.round(gh*0.72));x.textAlign='center'});
  if(mark){x.save();x.globalAlpha=.9;var mh=32,mw=mh*mark.width/mark.height;x.drawImage(mark,P+34,H-P-mh-12,mw,mh);x.restore()}
  x.textAlign='left';x.fillStyle='#00FF66';x.shadowColor='#00FF66';x.shadowBlur=12;x.font='20px '+FONT;x.fillText('GLOCKY PICKS',P+(mark?34+32*mark.width/mark.height+10:36),H-P-20);x.shadowBlur=0;
  x.textAlign='right';x.fillStyle='#8b9297';x.font='16px '+FONT;x.fillText('@GLOCKYPICKZ',W-P-36,H-P-20);
  return c}
+function drawBadges(x,logo,g,t){var bx=58,by=56,bs=150;x.textBaseline='alphabetic';x.textAlign='center';
+ x.fillStyle=grad(x,t.foil,bx,by,bx+bs,by+bs);rr(x,bx,by,bs,bs,24);x.fill();
+ x.fillStyle=t.ink;fit(x,g.grade,g.grade.length>1?88:102,130);x.fillText(g.grade,bx+bs/2,by+98);x.font='16px '+FONT;x.fillText(t.name,bx+bs/2,by+126);
+ var lx=W-58-70,ly=by+70,lr=70;x.save();x.beginPath();x.arc(lx,ly,lr+7,0,7);x.fillStyle=grad(x,t.foil,lx-lr,ly-lr,lx+lr,ly+lr);x.fill();
+ x.beginPath();x.arc(lx,ly,lr,0,7);x.fillStyle='#0d0d0d';x.fill();x.clip();
+ if(logo){var ls=Math.min(lr*1.5/logo.width,lr*1.5/logo.height);x.drawImage(logo,lx-logo.width*ls/2,ly-logo.height*ls/2,logo.width*ls,logo.height*ls)}
+ else{x.fillStyle=t.accent;var tm=mono(g.team);fit(x,tm,tm.length>2?36:46,lr*1.6);x.textBaseline='middle';x.fillText(tm,lx,ly+2);x.textBaseline='alphabetic'}
+ x.restore()}
+function drawName(x,g,t,P,ny,nh,nf,sf){x.fillStyle=grad(x,t.foil,P,ny,W-P,ny+nh);rr(x,P+14,ny,W-2*P-28,nh,14);x.fill();x.fillStyle='rgba(0,0,0,.55)';rr(x,P+18,ny+3,W-2*P-36,nh-6,12);x.fill();
+ x.textAlign='center';x.fillStyle='#fff';fit(x,String(g.player).toUpperCase(),nf,W-2*P-80);x.fillText(String(g.player).toUpperCase(),W/2,ny+Math.round(nh*0.56));
+ var bk=(g.book||'PrizePicks').toUpperCase();var sub=(g.team||'')+(g.opp?'  vs  '+g.opp:'')+'  ·  '+bk;x.fillStyle=t.accent;fit(x,sub,sf,W-2*P-80);x.fillText(sub,W/2,ny+Math.round(nh*0.84))}
+function drawPick(x,g,pc,iy,statSize,pickSize,plSize,projSize,metaSize){
+ x.fillStyle='#c8cdd2';x.font=statSize+'px '+FONT;x.fillText((sname(g.stat)+' · Maps 1-2').toUpperCase(),W/2,iy);
+ var pk=g.pick+' '+g.line;x.shadowColor=pc;x.shadowBlur=20;x.fillStyle=pc;fit(x,pk,pickSize,640);x.fillText(pk,W/2,iy+44+(pickSize>60?16:0));x.shadowBlur=0;
+ x.font=plSize+'px '+FONT;var pl='PROJ ',pw=x.measureText(pl).width;x.font=projSize+'px '+FONT;var pv=String(g.proj),vw=x.measureText(pv).width;var px0=W/2-(pw+vw)/2,py=iy+(pickSize>60?116:76);
+ x.textAlign='left';x.fillStyle='#8b9297';x.font=plSize+'px '+FONT;x.fillText(pl,px0,py);x.fillStyle='#fff';x.font=projSize+'px '+FONT;x.fillText(pv,px0+pw,py);x.textAlign='center';
+ x.fillStyle='#c8cdd2';x.font=metaSize+'px '+FONT;x.fillText(pct(g.pPick)+' CHANCE  ·  '+edge(g)+' EDGE  ·  L10 '+l10(g),W/2,py+28)}
 function fontReady(cb){var d=false;function go(){if(!d){d=true;cb()}}setTimeout(go,1500);try{document.fonts.load('60px "Russo One"').then(go,go)}catch(e){go()}}
 // cb(canvas). Draws with the team logo when it can; if the logo would block the export (no CORS), redraws with the monogram.
 function img(g,cb){fontReady(function(){whenLogos(function(){whenPhotos(function(){loadImg(logoUrl(g.team),true,function(logo){loadImg('assets/logo.png',false,function(mark){loadImg('assets/logo-tile.png',false,function(tile){loadImg(photoSrc(g.player),false,function(pic){
  var c=draw(g,logo,mark,tile,pic);if(logo||pic){try{c.getContext('2d').getImageData(0,0,1,1)}catch(e){c=draw(g,null,mark,tile,null)}}cb(c)})})})})})})})}
 loadLogos();loadPhotos();
-window.GPCards={html:html,img:img,logoUrl:logoUrl};
+window.GPCards={html:html,img:img,logoUrl:logoUrl,hasPic:hasPic,dropPic:dropPic};
 })();

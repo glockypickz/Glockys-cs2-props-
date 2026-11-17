@@ -144,18 +144,20 @@ header img{filter:drop-shadow(0 0 10px rgba(0,255,102,.35));animation:gpglow 3.5
 .tc-pat{position:absolute;inset:-32%;z-index:0;pointer-events:none;opacity:.17;transform:rotate(-20deg);background-image:url(assets/logo-tile.png),url(assets/logo-tile.png);background-size:24cqw 24cqw,24cqw 24cqw;background-repeat:repeat,repeat;background-position:0 0,12cqw 12cqw}
 .tc-wm{position:absolute;inset:-40%;z-index:0;pointer-events:none;display:flex;flex-wrap:wrap;align-content:space-evenly;justify-content:center;gap:7cqw 8cqw;transform:rotate(-22deg);font-size:6.4cqw;letter-spacing:.1em;color:rgba(255,255,255,.1);line-height:1;word-break:break-all}
 .tc-in>:not(.tc-pat):not(.tc-wm){position:relative;z-index:1}
-.tc-port{flex:0 0 40%;position:relative;min-height:0;border-radius:3.2cqw;overflow:hidden;background:#0a0a0a;box-shadow:0 0 0 .7cqw color-mix(in srgb,var(--acc) 75%,transparent),0 0 0 1.1cqw #000,0 6px 14px #000a}
+.tc-port{flex:0 0 40%;position:relative;min-height:0;border-radius:3.2cqw;overflow:hidden;background:transparent;box-shadow:0 0 0 .7cqw color-mix(in srgb,var(--acc) 75%,transparent),0 0 0 1.1cqw #000,0 6px 14px #000a}
 .tc-pic{position:absolute;inset:0;z-index:0;pointer-events:none;display:flex;align-items:flex-start;justify-content:center}
-.tc-pic img{width:100%;height:100%;object-fit:cover;object-position:center 8%;filter:drop-shadow(0 0 14px color-mix(in srgb,var(--acc) 80%,transparent)) drop-shadow(0 8px 18px #000c);-webkit-mask-image:linear-gradient(to bottom,#000 0%,#000 90%,transparent 100%);mask-image:linear-gradient(to bottom,#000 0%,#000 90%,transparent 100%)}
-.tc-sil{flex-direction:column;align-items:center;justify-content:flex-end;background:radial-gradient(circle at 50% 32%,color-mix(in srgb,var(--acc) 28%,transparent),transparent 58%)}
-.tc-sil i{position:absolute;left:50%;top:12%;width:34%;aspect-ratio:3/4;border-radius:50% 50% 42% 42%;transform:translateX(-50%);background:radial-gradient(circle at 50% 30%,color-mix(in srgb,var(--acc) 55%,transparent),color-mix(in srgb,var(--acc) 12%,transparent) 70%);box-shadow:0 0 18px color-mix(in srgb,var(--acc) 45%,transparent)}
-.tc-sil i:after{content:"";position:absolute;left:50%;top:62%;width:160%;height:90%;transform:translateX(-50%);background:radial-gradient(ellipse at 50% 0,color-mix(in srgb,var(--acc) 40%,transparent),transparent 70%)}
-.tc-sil span{position:relative;z-index:1;font-size:8cqw;color:var(--acc);text-shadow:0 0 12px color-mix(in srgb,var(--acc) 70%,transparent);opacity:.85;margin-bottom:8cqw}
+.tc-pic img{width:100%;height:100%;object-fit:cover;object-position:center 8%;filter:drop-shadow(0 0 14px color-mix(in srgb,var(--acc) 80%,transparent)) drop-shadow(0 8px 18px #000c)}
 .tc-top{position:absolute;inset:2cqw 2cqw auto;display:flex;justify-content:space-between;align-items:flex-start;z-index:2;pointer-events:none}
 .tc-rate{background:var(--foil);color:var(--ink);border-radius:2.4cqw;width:16.5cqw;height:16.5cqw;display:flex;flex-direction:column;align-items:center;justify-content:center;box-shadow:0 3px 10px #0009}
 .tc-rate b{font-size:8.6cqw;line-height:.95;font-weight:400}.tc-rate span{font-size:2cqw;letter-spacing:.04em}
 .tc-logo{width:15.5cqw;height:15.5cqw;border-radius:50%;background:#0d0d0d;border:1cqw solid transparent;background-clip:padding-box;box-shadow:0 0 0 1cqw color-mix(in srgb,var(--acc) 80%,#000);display:flex;align-items:center;justify-content:center;overflow:hidden}
 .tc-logo img{width:72%;height:72%;object-fit:contain}.tc-logo span{display:none;color:var(--acc);font-size:6cqw}.tc-logo.mono span{display:block}
+.tc-plain .tc-top{position:relative;inset:auto;margin-bottom:1cqw;pointer-events:auto}
+.tc-plain .tc-rate{width:21cqw;height:21cqw;border-radius:3cqw}.tc-plain .tc-rate b{font-size:12cqw}.tc-plain .tc-rate span{font-size:2.5cqw}
+.tc-plain .tc-logo{width:19cqw;height:19cqw;margin:1cqw}
+.tc-plain .tc-info{flex:1;justify-content:center;gap:.8cqw;min-height:0}
+.tc-plain .tc-pick{font-size:9cqw}.tc-plain .tc-proj b{font-size:7cqw}.tc-plain .tc-stat{font-size:3.2cqw}.tc-plain .tc-meta{font-size:2.7cqw}
+.tc-plain .tc-spark{height:14cqw;width:82%;margin-top:1cqw}
 .tc-name{background:var(--foil);border-radius:8px;padding:.55cqw;margin:1.6cqw 0 1.2cqw;flex:0 0 auto}
 .tc-name b,.tc-name span{display:block;background:#000a;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .tc-name b{font-size:6.4cqw;line-height:1.15;font-weight:400;text-transform:uppercase;border-radius:6px 6px 0 0;padding:.7cqw 2cqw 0}

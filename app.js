@@ -648,4 +648,6 @@ function send(){if(chatBusy)return;var inp=$('aiq'),q=(inp.value||'').trim();if(
   .catch(function(){wait.textContent='Could not reach the AI. Check your connection and try again.'})
   .then(function(){chatBusy=false;var m=$('aimsgs');m.scrollTop=m.scrollHeight})}
 nav();boot();chatUI();
+document.addEventListener('gp-photos',function(){if(tab==='grader')render()});
 })();
+
