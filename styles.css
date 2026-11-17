@@ -35,6 +35,11 @@ button.g{background:transparent;color:var(--silver);border:1px solid var(--line)
 .stats{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin:10px 0}
 .st{border:1px solid var(--line);border-radius:10px;padding:8px;text-align:center}.st b{display:block;font-size:18px}.st span{font-size:11px;color:var(--muted)}
 table{width:100%;border-collapse:collapse;font-size:13px}td,th{padding:7px 6px;border-bottom:1px solid var(--line);text-align:left;white-space:nowrap}
+.comp-table{width:100%;table-layout:fixed}
+.comp-table th,.comp-table td{white-space:normal;vertical-align:top;word-break:break-word}
+.comp-table th:nth-child(2),.comp-table td:nth-child(2){width:42%}
+.comp-table th:last-child,.comp-table td:last-child{width:24%}.comp-table th:last-child{white-space:normal}.comp-table td:last-child{white-space:nowrap}
+.comp-val{white-space:normal}
 .scroll{overflow-x:auto}
 .bars{display:flex;align-items:flex-end;gap:4px;height:170px;border-bottom:1px solid var(--line);position:relative;margin:10px 0 2px}
 .bc{flex:1;height:100%;display:flex;flex-direction:column;justify-content:flex-end;align-items:center;min-width:0}.bn{font:800 13px system-ui;color:#fff;margin-bottom:3px;position:relative;z-index:3;text-shadow:0 0 3px #000,0 0 6px #000}.bars .bar{width:100%;max-width:100%;border-radius:4px 4px 0 0;min-width:0}.ln{position:absolute;left:0;right:0;border-top:2px dashed var(--silver);z-index:2;pointer-events:none}.ln span{position:absolute;right:0;top:-18px;background:rgba(3,7,5,.85);color:var(--silver);font:700 11px system-ui;padding:0 4px;border-radius:4px}.bdates{display:flex;gap:4px;margin-bottom:6px}.bd{flex:1;text-align:center;font:600 10px system-ui;color:var(--muted)}
