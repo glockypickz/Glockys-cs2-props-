@@ -46,13 +46,15 @@ function picHtml(player){var u=photoSrc(player);return u?'<div class="tc-pic"><i
 // ---- HTML card
 function spark(g){var v=vals(g);if(!v.length)return '';var mx=Math.max.apply(null,v.concat([g.line||0,1]))*1.15;
  return '<div class="tc-spark">'+(g.line!=null?'<i class="tc-sl" style="bottom:'+(g.line/mx*100)+'%"></i>':'')+v.map(function(x){return '<b class="'+(x>g.line?'o':x<g.line?'u':'p')+'" style="height:'+Math.max(4,x/mx*100)+'%"></b>'}).join('')+'</div>'}
-function html(g){if(!g)return '';var t=tier(g.grade),u=g.pick==='UNDER',fo=t.foil.join(',');
+function html(g){if(!g)return '';var t=tier(g.grade),u=g.pick==='UNDER',fo=t.foil.join(','),bk=esc(g.book||'PrizePicks');
  return '<div class="tc-wrap"><div class="tc t-'+(g.grade==='A+'?'ap':String(g.grade||'d').toLowerCase())+'" style="--foil:linear-gradient(135deg,'+fo+');--acc:'+t.accent+';--ink:'+t.ink+'">'+
- '<div class="tc-in"><div class="tc-pat" aria-hidden="true"></div><div class="tc-wm" aria-hidden="true">'+('GLOCKY PICKS   '.repeat(28))+'</div><div class="tc-top"><div class="tc-rate"><b>'+esc(g.grade)+'</b><span>'+t.name+'</span></div>'+
- '<div class="tc-logo'+(logoUrl(g.team)?'':' mono')+'" data-team="'+esc(g.team)+'">'+badge(g.team)+'<span>'+esc(mono(g.team))+'</span></div></div>'+
- '<div class="tc-art">'+picHtml(g.player)+'<div class="tc-stat">'+esc(sname(g.stat))+' · Maps 1-2</div><div class="tc-pick'+(u?' u':'')+'">'+esc(g.pick)+' '+esc(g.line)+'</div>'+
- '<div class="tc-proj"><span>PROJ</span><b>'+esc(g.proj)+'</b></div>'+'<div class="tc-meta">'+pct(g.pPick)+' chance · '+edge(g)+' edge · L10 '+l10(g)+'</div>'+spark(g)+'<div class="tc-book">'+esc(g.book||'PrizePicks')+'</div></div>'+
- '<div class="tc-name"><b>'+esc(g.player)+'</b><span>'+esc(g.team||'')+(g.opp?' vs '+esc(g.opp):'')+'</span></div>'+
+ '<div class="tc-in"><div class="tc-pat" aria-hidden="true"></div><div class="tc-wm" aria-hidden="true">'+('GLOCKY PICKS   '.repeat(28))+'</div>'+
+ '<div class="tc-port">'+picHtml(g.player)+
+ '<div class="tc-top"><div class="tc-rate"><b>'+esc(g.grade)+'</b><span>'+t.name+'</span></div>'+
+ '<div class="tc-logo'+(logoUrl(g.team)?'':' mono')+'" data-team="'+esc(g.team)+'">'+badge(g.team)+'<span>'+esc(mono(g.team))+'</span></div></div></div>'+
+ '<div class="tc-name"><b>'+esc(g.player)+'</b><span>'+esc(g.team||'')+(g.opp?' vs '+esc(g.opp):'')+' · '+bk+'</span></div>'+
+ '<div class="tc-info"><div class="tc-stat">'+esc(sname(g.stat))+' · Maps 1-2</div><div class="tc-pick'+(u?' u':'')+'">'+esc(g.pick)+' '+esc(g.line)+'</div>'+
+ '<div class="tc-proj"><span>PROJ</span><b>'+esc(g.proj)+'</b></div>'+'<div class="tc-meta">'+pct(g.pPick)+' chance · '+edge(g)+' edge · L10 '+l10(g)+'</div>'+spark(g)+'</div>'+
  (function(){var q=pstats(g);return '<div class="tc-back"><div class="tc-bh">Season · Maps 1-2 · '+q.n+' series</div><div><b>'+q.hsp+'</b><i>HS%</i></div><div><b>'+q.kd+'</b><i>K/D</i></div><div><b>'+q.k1+'</b><i>Kills Map 1</i></div><div><b>'+q.hpm+'</b><i>HS / Map</i></div><div><b>'+q.kl10+'</b><i>Kills 1-2 L10</i></div><div><b>'+q.hsl10+'</b><i>HS 1-2 L10</i></div></div>'})()+
  '<div class="tc-foot"><span>GLOCKY PICKS</span><span>CS2 PROP GRADER</span></div></div></div></div>'}
 
@@ -62,13 +64,32 @@ function rr(x,X,Y,w,h,r){x.beginPath();x.moveTo(X+r,Y);x.arcTo(X+w,Y,X+w,Y+h,r);
 function grad(x,cols,x0,y0,x1,y1){var gr=x.createLinearGradient(x0,y0,x1,y1);cols.forEach(function(c,i){gr.addColorStop(i/(cols.length-1),c)});return gr}
 function fit(x,t,size,maxW,weight){var f=function(){x.font=(weight||'')+' '+size+'px '+FONT};f();while(size>14&&x.measureText(t).width>maxW){size-=2;f()}return size}
 function loadImg(src,cors,cb){if(!src)return cb(null);var im=new Image();if(cors)im.crossOrigin='anonymous';var done=false;function fin(v){if(!done){done=true;cb(v)}}im.onload=function(){fin(im)};im.onerror=function(){fin(null)};setTimeout(function(){fin(null)},4000);im.src=src}
-function drawPic(x,pic,g,t,P){var x0=P+20,y0=236,w=W-2*P-40,h=390;x.save();rr(x,x0,y0,w,h,22);x.clip();
- if(pic&&pic.width){var s=(h*1.28)/pic.height,dw=pic.width*s,dh=pic.height*s,dx=x0+(w-dw)/2,dy=y0-10;
+// Framed portrait in the upper ~40% of the card. Head-and-shoulders only; no pick text or bars in this window.
+function drawPort(x,pic,logo,g,t,P){var x0=P+14,y0=P+14,w=W-2*P-28,h=410,r=18;
+ x.save();rr(x,x0-3,y0-3,w+6,h+6,r+3);x.fillStyle=grad(x,t.foil,x0,y0,x0+w,y0+h);x.fill();
+ rr(x,x0,y0,w,h,r);x.fillStyle='#0a0a0a';x.fill();x.clip();
+ if(pic&&pic.width){var s=Math.max(w/pic.width,(h*1.02)/pic.height),dw=pic.width*s,dh=pic.height*s,dx=x0+(w-dw)/2,dy=y0+4;
   x.shadowColor=t.accent;x.shadowBlur=28;x.drawImage(pic,dx,dy,dw,dh);x.shadowBlur=0;
-  var gd=x.createLinearGradient(0,y0,0,y0+h);gd.addColorStop(0,'rgba(10,10,10,0)');gd.addColorStop(.78,'rgba(10,10,10,0)');gd.addColorStop(1,'rgba(8,8,8,.96)');
-  x.fillStyle=gd;x.fillRect(x0,y0,w,h)}
- else{x.fillStyle=t.accent;x.globalAlpha=.16;x.beginPath();x.ellipse(W/2,y0+118,78,92,0,0,7);x.fill();x.beginPath();x.moveTo(W/2-130,y0+h);x.quadraticCurveTo(W/2-130,y0+200,W/2,y0+190);x.quadraticCurveTo(W/2+130,y0+200,W/2+130,y0+h);x.closePath();x.fill();x.globalAlpha=.4;var m=mono(g.player);fit(x,m,54,200);x.textAlign='center';x.textBaseline='middle';x.fillText(m,W/2,y0+300);x.textBaseline='alphabetic';x.globalAlpha=1}
- x.restore()}
+  var gd=x.createLinearGradient(0,y0+h*0.9,0,y0+h);gd.addColorStop(0,'rgba(10,10,10,0)');gd.addColorStop(1,'rgba(8,8,8,.85)');
+  x.fillStyle=gd;x.fillRect(x0,y0+h*0.9,w,h*0.1)}
+ else{x.fillStyle=t.accent;x.globalAlpha=.22;x.beginPath();x.ellipse(W/2,y0+h*0.32,72,86,0,0,7);x.fill();
+  x.beginPath();x.moveTo(W/2-160,y0+h);x.quadraticCurveTo(W/2-150,y0+h*0.48,W/2,y0+h*0.5);x.quadraticCurveTo(W/2+150,y0+h*0.48,W/2+160,y0+h);x.closePath();x.fill();
+  x.globalAlpha=.8;var m=mono(g.player);fit(x,m,62,220);x.textAlign='center';x.textBaseline='middle';x.fillText(m,W/2,y0+h*0.78);x.textBaseline='alphabetic';x.globalAlpha=1}
+ // soft corner scrims so the badges stay readable, kept well clear of the face
+ var vg=x.createRadialGradient(x0,y0,8,x0,y0,130);vg.addColorStop(0,'rgba(0,0,0,.55)');vg.addColorStop(1,'rgba(0,0,0,0)');x.fillStyle=vg;x.fillRect(x0,y0,150,140);
+ vg=x.createRadialGradient(x0+w,y0,8,x0+w,y0,130);vg.addColorStop(0,'rgba(0,0,0,.55)');vg.addColorStop(1,'rgba(0,0,0,0)');x.fillStyle=vg;x.fillRect(x0+w-150,y0,150,140);
+ x.restore();
+ // letter badge, top-left corner of the frame
+ var bx=x0+12,by=y0+12,bs=92;x.textBaseline='alphabetic';x.textAlign='center';
+ x.fillStyle=grad(x,t.foil,bx,by,bx+bs,by+bs);rr(x,bx,by,bs,bs,16);x.fill();
+ x.fillStyle=t.ink;fit(x,g.grade,g.grade.length>1?42:50,76);x.fillText(g.grade,bx+bs/2,by+58);x.font='10px '+FONT;x.fillText(t.name,bx+bs/2,by+76);
+ // team logo, top-right corner of the frame
+ var lx=x0+w-12-42,ly=y0+12+42,lr=42;x.save();x.beginPath();x.arc(lx,ly,lr+6,0,7);x.fillStyle=grad(x,t.foil,lx-lr,ly-lr,lx+lr,ly+lr);x.fill();
+ x.beginPath();x.arc(lx,ly,lr,0,7);x.fillStyle='#0d0d0d';x.fill();x.clip();
+ if(logo){var ls=Math.min(lr*1.5/logo.width,lr*1.5/logo.height);x.drawImage(logo,lx-logo.width*ls/2,ly-logo.height*ls/2,logo.width*ls,logo.height*ls)}
+ else{x.fillStyle=t.accent;var tm=mono(g.team);fit(x,tm,tm.length>2?26:32,lr*1.6);x.textBaseline='middle';x.fillText(tm,lx,ly+2);x.textBaseline='alphabetic'}
+ x.restore();
+ return y0+h}
 function tilePat(x,tile,P){if(!tile)return;x.save();rr(x,P,P,W-2*P,H-2*P,30);x.clip();x.translate(W/2,H/2);x.rotate(-Math.PI/9);x.globalAlpha=.17;
  var tw=168,th=tw*tile.height/tile.width,gx=tw*1.15,gy=th*1.15;for(var row=0,yy=-H-gy;yy<H+gy;yy+=gy,row++){var ox=row%2?gx/2:0;for(var xx=-W-gx;xx<W+gx;xx+=gx)x.drawImage(tile,xx+ox-tw/2,yy-th/2,tw,th)}x.restore()}
 function draw(g,logo,mark,tile,pic){var c=document.createElement('canvas');c.width=W;c.height=H;var x=c.getContext('2d'),t=tier(g.grade),u=g.pick==='UNDER',pc=u?'#ff4d6d':'#00FF66';
@@ -78,46 +99,39 @@ function draw(g,logo,mark,tile,pic){var c=document.createElement('canvas');c.wid
  if(g.grade==='A+'||g.grade==='F'){x.save();rr(x,0,0,W,H,44);x.clip();x.globalAlpha=.35;for(var i=-H;i<W+H;i+=70){x.fillStyle=i%140?'rgba(255,255,255,.55)':'rgba(120,255,240,.4)';x.beginPath();x.moveTo(i,0);x.lineTo(i+30,0);x.lineTo(i+30-H,H);x.lineTo(i-H,H);x.closePath();x.fill()}x.restore()}
  // inner panel
  var P=26;rr(x,P,P,W-2*P,H-2*P,30);var ig=x.createLinearGradient(0,P,0,H-P);ig.addColorStop(0,'#141414');ig.addColorStop(.55,'#0b0b0b');ig.addColorStop(1,'#060606');x.fillStyle=ig;x.fill();
- x.save();rr(x,P,P,W-2*P,H-2*P,30);x.clip();var rg=x.createRadialGradient(W/2,380,20,W/2,380,420);rg.addColorStop(0,t.accent+'40');rg.addColorStop(1,'rgba(0,0,0,0)');x.fillStyle=rg;x.fillRect(0,0,W,H);
+ x.save();rr(x,P,P,W-2*P,H-2*P,30);x.clip();var rg=x.createRadialGradient(W/2,240,20,W/2,240,420);rg.addColorStop(0,t.accent+'40');rg.addColorStop(1,'rgba(0,0,0,0)');x.fillStyle=rg;x.fillRect(0,0,W,H);
  x.strokeStyle='rgba(255,255,255,.035)';x.lineWidth=2;for(var j=-H;j<W;j+=26){x.beginPath();x.moveTo(j,P);x.lineTo(j+H,H);x.stroke()}
- tilePat(x,tile,P);x.restore();
- x.strokeStyle=t.accent;x.globalAlpha=.6;x.lineWidth=3;rr(x,P+10,P+10,W-2*P-20,H-2*P-20,24);x.stroke();x.globalAlpha=1;
- // rating gem (top-left)
- x.textBaseline='alphabetic';x.textAlign='center';x.fillStyle=grad(x,t.foil,60,60,230,230);rr(x,62,62,170,170,26);x.fill();
- x.fillStyle=t.ink;fit(x,g.grade,g.grade.length>1?108:128,150);x.fillText(g.grade,147,190);x.font='20px '+FONT;x.fillText(t.name,147,220);
- // logo badge (top-right)
- var bx=W-150,by=147,br=82;x.save();x.beginPath();x.arc(bx,by,br+8,0,7);x.fillStyle=grad(x,t.foil,bx-br,by-br,bx+br,by+br);x.fill();x.beginPath();x.arc(bx,by,br,0,7);x.fillStyle='#0d0d0d';x.fill();x.clip();
- if(logo){var s=Math.min(br*1.5/logo.width,br*1.5/logo.height);x.drawImage(logo,bx-logo.width*s/2,by-logo.height*s/2,logo.width*s,logo.height*s)}
- else{x.fillStyle=t.accent;var m=mono(g.team);fit(x,m,m.length>2?54:66,br*1.6);x.textBaseline='middle';x.fillText(m,bx,by+3);x.textBaseline='alphabetic'}x.restore();
- // art window: player photo (or silhouette), then stat, pick, projection, sparkline
- drawPic(x,pic,g,t,P);
- x.fillStyle='#c8cdd2';x.font='26px '+FONT;x.fillText((sname(g.stat)+' · Maps 1-2').toUpperCase(),W/2,290);
- var pk=g.pick+' '+g.line;x.shadowColor=pc;x.shadowBlur=26;x.fillStyle=pc;fit(x,pk,86,600);x.fillText(pk,W/2,372);x.shadowBlur=0;
- x.font='22px '+FONT;var pl='PROJ ',pw=x.measureText(pl).width;x.font='50px '+FONT;var pv=String(g.proj),vw=x.measureText(pv).width;var px0=W/2-(pw+vw)/2;
- x.textAlign='left';x.fillStyle='#8b9297';x.font='22px '+FONT;x.fillText(pl,px0,428);x.fillStyle='#fff';x.font='50px '+FONT;x.fillText(pv,px0+pw,428);x.textAlign='center';
- x.fillStyle='#c8cdd2';x.font='21px '+FONT;x.fillText(pct(g.pPick)+' CHANCE  ·  '+edge(g)+' EDGE  ·  L10 '+l10(g),W/2,466);
- var v=vals(g),sx=120,sw=W-240,sy=488,sh=100;if(v.length){var mx=Math.max.apply(null,v.concat([g.line||0,1]))*1.15,bw=sw/v.length;
-  v.forEach(function(val,k){var h=Math.max(6,val/mx*sh);x.fillStyle=val>g.line?'#00FF66':val<g.line?'#ff4d6d':'#777';rr(x,sx+k*bw+5,sy+sh-h,bw-10,h,5);x.fill()});
-  var ly=sy+sh-g.line/mx*sh;x.setLineDash([10,8]);x.strokeStyle='#fff';x.lineWidth=3;x.beginPath();x.moveTo(sx-6,ly);x.lineTo(sx+sw+6,ly);x.stroke();x.setLineDash([]);
-  x.fillStyle='#8b9297';x.font='17px '+FONT;x.fillText('LAST '+v.length+' SERIES  ·  DASHED = LINE',W/2,sy+sh+26)}
- var bk=(g.book||'PrizePicks').toUpperCase();
- // name plate
- var ny=632;x.fillStyle=grad(x,t.foil,P,ny,W-P,ny+88);rr(x,P+30,ny,W-2*P-60,88,16);x.fill();x.fillStyle='rgba(0,0,0,.55)';rr(x,P+34,ny+4,W-2*P-68,80,13);x.fill();
- x.fillStyle='#fff';fit(x,String(g.player).toUpperCase(),52,W-2*P-110);x.fillText(String(g.player).toUpperCase(),W/2,ny+50);
- var sub=(g.team||'')+(g.opp?'  vs  '+g.opp:'')+'  ·  '+bk;x.fillStyle=t.accent;fit(x,sub,21,W-2*P-110);x.fillText(sub,W/2,ny+76);
- // card back: season player stats, 2 x 3
- var q=pstats(g);x.fillStyle='#8b9297';x.font='16px '+FONT;x.fillText('SEASON  ·  MAPS 1-2  ·  '+q.n+' SERIES',W/2,ny+118);
- var cells=[[q.hsp,'HS%'],[q.kd,'K/D'],[q.k1,'KILLS MAP 1'],[q.hpm,'HS / MAP'],[q.kl10,'KILLS 1-2 L10'],[q.hsl10,'HS 1-2 L10']],gx=P+30,gw=(W-2*P-60-12)/2,gy=ny+130,gh=58,gap=8;
- cells.forEach(function(cl,k){var cx=gx+(k%2)*(gw+12),cy=gy+Math.floor(k/2)*(gh+gap);
-  x.fillStyle='rgba(255,255,255,.06)';rr(x,cx,cy,gw,gh,12);x.fill();
-  x.strokeStyle=t.accent;x.globalAlpha=.35;x.lineWidth=2;rr(x,cx,cy,gw,gh,12);x.stroke();x.globalAlpha=1;
-  x.textAlign='left';x.fillStyle='#8b9297';x.font='17px '+FONT;x.fillText(cl[1],cx+18,cy+36);x.textAlign='right';x.fillStyle='#fff';x.font='34px '+FONT;x.fillText(cl[0],cx+gw-18,cy+42);x.textAlign='center'});
- // watermark: diagonal GLOCKY PICKS text (kept, slightly stronger) over the GP logo tile already in the panel
- x.save();rr(x,P,P,W-2*P,H-2*P,30);x.clip();x.translate(W/2,H/2);x.rotate(-Math.PI/5);x.font='54px '+FONT;x.fillStyle='rgba(255,255,255,.10)';
+ tilePat(x,tile,P);
+ // diagonal GLOCKY PICKS text sits on the panel only; the portrait is drawn on top so it does not cover the face
+ x.translate(W/2,H/2);x.rotate(-Math.PI/5);x.font='54px '+FONT;x.fillStyle='rgba(255,255,255,.10)';x.textAlign='center';
  for(var r=-6;r<=6;r++)x.fillText('GLOCKY PICKS   GLOCKY PICKS   GLOCKY PICKS',0,r*150);x.restore();
- if(mark){x.save();x.globalAlpha=.9;var mh=40,mw=mh*mark.width/mark.height;x.drawImage(mark,P+34,H-P-mh-14,mw,mh);x.restore()}
- x.textAlign='left';x.fillStyle='#00FF66';x.shadowColor='#00FF66';x.shadowBlur=12;x.font='24px '+FONT;x.fillText('GLOCKY PICKS',P+(mark?34+40*mark.width/mark.height+12:36),H-P-24);x.shadowBlur=0;
- x.textAlign='right';x.fillStyle='#8b9297';x.font='18px '+FONT;x.fillText('@GLOCKYPICKZ',W-P-36,H-P-24);
+ x.strokeStyle=t.accent;x.globalAlpha=.6;x.lineWidth=3;rr(x,P+10,P+10,W-2*P-20,H-2*P-20,24);x.stroke();x.globalAlpha=1;
+ // portrait window, then name, pick, bars, stats, footer — nothing over the photo
+ var pb=drawPort(x,pic,logo,g,t,P);
+ var ny=pb+10,nh=68;
+ x.fillStyle=grad(x,t.foil,P,ny,W-P,ny+nh);rr(x,P+14,ny,W-2*P-28,nh,14);x.fill();x.fillStyle='rgba(0,0,0,.55)';rr(x,P+18,ny+3,W-2*P-36,nh-6,12);x.fill();
+ x.textAlign='center';x.textBaseline='alphabetic';x.fillStyle='#fff';fit(x,String(g.player).toUpperCase(),40,W-2*P-80);x.fillText(String(g.player).toUpperCase(),W/2,ny+38);
+ var bk=(g.book||'PrizePicks').toUpperCase();var sub=(g.team||'')+(g.opp?'  vs  '+g.opp:'')+'  ·  '+bk;x.fillStyle=t.accent;fit(x,sub,16,W-2*P-80);x.fillText(sub,W/2,ny+58);
+ var iy=ny+nh+22;
+ x.fillStyle='#c8cdd2';x.font='16px '+FONT;x.fillText((sname(g.stat)+' · Maps 1-2').toUpperCase(),W/2,iy);
+ var pk=g.pick+' '+g.line;x.shadowColor=pc;x.shadowBlur=20;x.fillStyle=pc;fit(x,pk,48,640);x.fillText(pk,W/2,iy+44);x.shadowBlur=0;
+ x.font='15px '+FONT;var pl='PROJ ',pw=x.measureText(pl).width;x.font='32px '+FONT;var pv=String(g.proj),vw=x.measureText(pv).width;var px0=W/2-(pw+vw)/2;
+ x.textAlign='left';x.fillStyle='#8b9297';x.font='15px '+FONT;x.fillText(pl,px0,iy+76);x.fillStyle='#fff';x.font='32px '+FONT;x.fillText(pv,px0+pw,iy+76);x.textAlign='center';
+ x.fillStyle='#c8cdd2';x.font='15px '+FONT;x.fillText(pct(g.pPick)+' CHANCE  ·  '+edge(g)+' EDGE  ·  L10 '+l10(g),W/2,iy+100);
+ var v=vals(g),sx=80,sw=W-160,sy=iy+112,sh=64;if(v.length){var mx=Math.max.apply(null,v.concat([g.line||0,1]))*1.15,bw=sw/v.length;
+  v.forEach(function(val,k){var bh=Math.max(5,val/mx*sh);x.fillStyle=val>g.line?'#00FF66':val<g.line?'#ff4d6d':'#777';rr(x,sx+k*bw+4,sy+sh-bh,bw-8,bh,4);x.fill()});
+  var ly=sy+sh-g.line/mx*sh;x.setLineDash([8,6]);x.strokeStyle='#fff';x.lineWidth=2;x.beginPath();x.moveTo(sx-4,ly);x.lineTo(sx+sw+4,ly);x.stroke();x.setLineDash([]);
+  x.fillStyle='#8b9297';x.font='12px '+FONT;x.fillText('LAST '+v.length+' SERIES  ·  DASHED = LINE',W/2,sy+sh+18)}
+ var q=pstats(g),gy=sy+sh+42;
+ x.fillStyle='#8b9297';x.font='13px '+FONT;x.fillText('SEASON  ·  MAPS 1-2  ·  '+q.n+' SERIES',W/2,gy);
+ var cells=[[q.hsp,'HS%'],[q.kd,'K/D'],[q.k1,'KILLS MAP 1'],[q.hpm,'HS / MAP'],[q.kl10,'KILLS 1-2 L10'],[q.hsl10,'HS 1-2 L10']],gx=P+14,gw=(W-2*P-28-8)/2,cy0=gy+10,gh=44,gap=6;
+ cells.forEach(function(cl,k){var cx=gx+(k%2)*(gw+8),cy=cy0+Math.floor(k/2)*(gh+gap);
+  x.fillStyle='rgba(255,255,255,.06)';rr(x,cx,cy,gw,gh,10);x.fill();
+  x.strokeStyle=t.accent;x.globalAlpha=.35;x.lineWidth=2;rr(x,cx,cy,gw,gh,10);x.stroke();x.globalAlpha=1;
+  x.textAlign='left';x.fillStyle='#8b9297';x.font='13px '+FONT;x.fillText(cl[1],cx+14,cy+28);x.textAlign='right';x.fillStyle='#fff';x.font='26px '+FONT;x.fillText(cl[0],cx+gw-14,cy+32);x.textAlign='center'});
+ if(mark){x.save();x.globalAlpha=.9;var mh=32,mw=mh*mark.width/mark.height;x.drawImage(mark,P+34,H-P-mh-12,mw,mh);x.restore()}
+ x.textAlign='left';x.fillStyle='#00FF66';x.shadowColor='#00FF66';x.shadowBlur=12;x.font='20px '+FONT;x.fillText('GLOCKY PICKS',P+(mark?34+32*mark.width/mark.height+10:36),H-P-20);x.shadowBlur=0;
+ x.textAlign='right';x.fillStyle='#8b9297';x.font='16px '+FONT;x.fillText('@GLOCKYPICKZ',W-P-36,H-P-20);
  return c}
 function fontReady(cb){var d=false;function go(){if(!d){d=true;cb()}}setTimeout(go,1500);try{document.fonts.load('60px "Russo One"').then(go,go)}catch(e){go()}}
 // cb(canvas). Draws with the team logo when it can; if the logo would block the export (no CORS), redraws with the monogram.
