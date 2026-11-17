@@ -27,6 +27,7 @@ jobs:
           git config user.email "actions@github.com"
           if [ -f lines.json ]; then git add lines.json; fi
           if [ -f lines_history.json ]; then git add lines_history.json; fi
+          if [ -f pregame.json ]; then git add pregame.json; fi
           git diff --staged --quiet || git commit -m "Update lines"
           git pull --rebase
           git push

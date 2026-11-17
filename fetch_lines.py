@@ -188,6 +188,35 @@ def update_history(lines, now_iso):
     json.dump({"updated": now_iso, "entries": keep}, open(HISTORY_FILE, "w", encoding="utf-8"),
               separators=(",", ":"), ensure_ascii=False)
     print("lines_history.json:", len(keep), "entries")
+    try:
+        write_pregame(keep, now)
+    except Exception as ex:
+        print("pregame.json not written:", ex)
+
+
+PREGAME_FILE = "pregame.json"
+PREGAME_DAYS = 2
+
+
+def write_pregame(entries, now):
+    """Public, small: for props whose match has started (last PREGAME_DAYS days), the pre-game line (the last line seen
+    before the start), the opening line, and the locked letter + pick. lines_history.json itself stays admin-only."""
+    if now is None:
+        return
+    lo = now - datetime.timedelta(days=PREGAME_DAYS)
+    out = []
+    for e in entries:
+        t0 = parse_time(e.get("start"))
+        if t0 is None or not (lo <= t0 <= now):
+            continue
+        lk = e.get("lock") or {}
+        out.append({"book": e["book"], "player": e["player"], "team": e.get("team", ""), "opponent": e.get("opponent", ""),
+                    "stat": e["stat"], "start": e["start"], "line": e["line"], "first_line": e.get("first_line"),
+                    "odds": e.get("odds"),
+                    "lock": ({"grade": lk["grade"], "pick": lk.get("pick"), "model": lk.get("model")} if lk.get("grade") else None)})
+    json.dump({"updated": now.isoformat(timespec="seconds"), "entries": out}, open(PREGAME_FILE, "w", encoding="utf-8"),
+              separators=(",", ":"), ensure_ascii=False)
+    print(PREGAME_FILE + ":", len(out), "started props")
 
 
 def main():

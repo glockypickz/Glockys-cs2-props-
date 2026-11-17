@@ -211,25 +211,30 @@ function liveCard(g){var sc=(g.s1!=null&&g.s2!=null)?' <span style="color:var(--
 // Live numbers: Maps 1-2 kills / headshots per player. bo3.gg posts a map's player stats only after that map ends, so
 // the tracker moves map by map (Worker route /live/<match id>, polled about every minute while the Games tab is open),
 // then from players.json once the results run has saved the match. There is no round-by-round feed.
-var LIVE={},LIVE_T=0,LIVE_OK=null;
+var LIVE={},LIVE_T=0,LIVE_OK=null,PREG=null; // PREG: pregame.json (public: started props' pre-game lines only)
 function pairKey(a,b,start){return [tn(a),tn(b)].sort().join('|')+'|'+cday(start)}
+// display-only team match: same key, or one key is the start of the other (books write "ex-INOX" and "ex-INOX Division")
+function sameTeam(a,b){a=tn(a);b=tn(b);if(!a||!b)return false;if(a===b)return true;var s=a.length<b.length?a:b,l=a.length<b.length?b:a;return s.length>=4&&l.indexOf(s)===0}
+function sameMatch(m,a,b,start){return cday(m.start)===cday(start)&&((sameTeam(m.t1,a)&&sameTeam(m.t2,b))||(sameTeam(m.t1,b)&&sameTeam(m.t2,a)))}
 function per12(l){var per=String(l.period||'Maps 1-2');return per.replace(/\s/g,'').toLowerCase().indexOf('maps1-2')>-1||per.indexOf('1-2')>-1}
 function startedMatches(){var now=NOW(),today=cday(),M={},order=[];
- function mt(team,opp,start){var k=pairKey(team,opp,start);if(!M[k]){M[k]={key:k,t1:team,t2:opp,start:start,props:{},game:null};order.push(k)}else if(start<M[k].start)M[k].start=start;return M[k]}
+ function mt(team,opp,start){var k=null;for(var i=0;i<order.length;i++)if(sameMatch(M[order[i]],team,opp,start)){k=order[i];break}
+  if(!k){k=pairKey(team,opp,start);M[k]={key:k,t1:team,t2:opp,start:start,props:{},game:null};order.push(k)}else if(start<M[k].start)M[k].start=start;return M[k]}
  function started(s){var t=new Date(s).getTime();return !isNaN(t)&&t<=now&&cday(s)===today}
- (HIST||[]).forEach(function(e){var st=normStat(e.stat);if(!st||!e.start||!started(e.start))return;var m=mt(e.team,e.opponent,e.start),k=norm(e.book)+'|'+norm(e.player)+'|'+st,o=m.props[k];
+ (HIST||PREG||[]).forEach(function(e){var st=normStat(e.stat);if(!st||!e.start||!started(e.start))return;var m=mt(e.team,e.opponent,e.start),k=norm(e.book)+'|'+norm(e.player)+'|'+st,o=m.props[k];
   if(o&&o.lock&&!e.lock)return; // same rule as the Track Record: a locked entry wins
   m.props[k]={book:e.book,player:e.player,team:e.team,opp:e.opponent,stat:st,open:e.first_line,pre:+e.line,now:null,lock:e.lock&&e.lock.grade?e.lock:null,result:e.result||null,odds:e.odds,start:e.start,hist:true}});
  LINES.forEach(function(l){var st=normStat(l.stat);if(!st||!l.starts_at||!started(l.starts_at)||!per12(l))return;var m=mt(l.team,l.opponent,l.starts_at),k=norm(l.book)+'|'+norm(l.player)+'|'+st,o=m.props[k];
   if(o){if(+l.line!==o.pre)o.now=+l.line}else m.props[k]={book:l.book,player:l.player,team:l.team,opp:l.opponent,stat:st,open:null,pre:+l.line,now:null,lock:null,result:null,odds:l.odds,start:l.starts_at,hist:false}});
- GAMES.forEach(function(g){if(!g.start||new Date(g.start).getTime()>now)return;var k=pairKey(g.team1,g.team2,g.start);if(M[k]){M[k].game=g;M[k].t1=g.team1;M[k].t2=g.team2}else if(isLive(g)){M[k]={key:k,t1:g.team1,t2:g.team2,start:g.start,props:{},game:g};order.push(k)}});
+ GAMES.forEach(function(g){if(!g.start||new Date(g.start).getTime()>now)return;var k=null;order.forEach(function(x){if(!k&&sameMatch(M[x],g.team1,g.team2,g.start))k=x});
+  if(k){M[k].game=g;M[k].t1=g.team1;M[k].t2=g.team2;M[k].key=pairKey(g.team1,g.team2,g.start)}else if(isLive(g)){k=pairKey(g.team1,g.team2,g.start);M[k]={key:k,t1:g.team1,t2:g.team2,start:g.start,props:{},game:g};order.push(k)}});
  return order.map(function(k){return M[k]}).sort(function(a,b){return a.start<b.start?1:-1})}
-function matchFor(g){var k=pairKey(g.team1,g.team2,g.start);return startedMatches().filter(function(m){return m.key===k})[0]||null}
+function matchFor(g){return startedMatches().filter(function(m){return m.game===g||sameMatch(m,g.team1,g.team2,g.start)})[0]||null}
 // Maps 1-2 total for one player: bo3.gg live (finished maps), else players.json logs. {v, maps:[n..], done}
 function oneLive(m,name,team,opp,st){var L=m.game&&LIVE[m.game.id],got={},nm=norm(name),cn=canon(name);
- if(L&&L.players)L.players.forEach(function(p){if((p.n===1||p.n===2)&&(norm(p.name)===nm||canon(p.name)===cn)&&(!team||teq(p.team,team)||!L.players.some(function(q){return q!==p&&q.n===p.n&&norm(q.name)===nm})))got[p.n]=st==='hs'?p.hs:p.kills});
+ if(L&&L.players)L.players.forEach(function(p){if((p.n===1||p.n===2)&&(norm(p.name)===nm||canon(p.name)===cn)&&(!team||sameTeam(p.team,team)||!L.players.some(function(q){return q!==p&&q.n===p.n&&norm(q.name)===nm})))got[p.n]=st==='hs'?p.hs:p.kills});
  var p=find(name,team),day=cday(m.start);
- if(p)(p.logs||[]).forEach(function(l){if((l.n===1||l.n===2)&&got[l.n]==null&&teq(l.opp,opp)&&Math.abs((new Date(l.date)-new Date(day))/864e5)<=1){var x=st==='hs'?l.hs:l.kills;if(x!=null)got[l.n]=x}});
+ if(p)(p.logs||[]).forEach(function(l){if((l.n===1||l.n===2)&&got[l.n]==null&&sameTeam(l.opp,opp)&&Math.abs((new Date(l.date)-new Date(day))/864e5)<=1){var x=st==='hs'?l.hs:l.kills;if(x!=null)got[l.n]=x}});
  var ns=Object.keys(got).map(Number).sort();if(!ns.length)return null;var v=0;ns.forEach(function(n){v+=+got[n]});return{v:v,maps:ns}}
 function propLive(m,r){var names=isCombo(r.player)?r.player.split('+').map(function(s){return s.trim()}):[r.player],tot=0,maps=null;
  for(var i=0;i<names.length;i++){var x=oneLive(m,names[i],r.team,r.opp,r.stat);if(!x)return r.result&&r.result.act!=null?{v:r.result.act,done:true,src:'result'}:null;tot+=x.v;maps=maps?maps.filter(function(n){return x.maps.indexOf(n)>-1}):x.maps}
@@ -548,16 +553,16 @@ document.addEventListener('change',function(e){var i=e.target.id,m={pt:'tm',pn:'
 (function(){try{var m=/admin=([^&]*)/.exec(location.hash||'');if(m){var k=decodeURIComponent(m[1]);if(k==='off')localStorage.removeItem('gp_admin');else localStorage.setItem('gp_admin',k);history.replaceState(null,'',location.pathname+location.search)}}catch(e){}})();
 function adminKey(){try{return localStorage.getItem('gp_admin')||''}catch(e){return ''}}
 function getJSON(u){var o={};if(u==='lines_history.json'&&adminKey())o={headers:{'X-Admin-Key':adminKey()}};return fetch(u+'?'+Date.now(),o).then(function(r){if(!r.ok)throw 0;return r.json()})}
-function applyFeeds(g,l,h){
+function applyFeeds(g,l,h,p){
  if(g){GAMES=(g.games||[]).filter(function(x){return x.start}).sort(function(a,b){return a.start<b.start?-1:1});META.games_iso=g.updated||'';META.games_at=(g.updated&&g.updated.indexOf('T')>-1)?fmt(g.updated):(g.updated||'')}
  if(l){LINES=l.lines||[];META.lines_at=l.observed_at?fmt(l.observed_at):''}
- if(h&&h.entries)HIST=h.entries}
-function feeds(){return Promise.all([getJSON('games.json').catch(function(){return null}),getJSON('lines.json').catch(function(){return null}),getJSON('lines_history.json').catch(function(){return null})])}
+ if(h&&h.entries)HIST=h.entries;if(p&&p.entries)PREG=p.entries}
+function feeds(){return Promise.all([getJSON('games.json').catch(function(){return null}),getJSON('lines.json').catch(function(){return null}),getJSON('lines_history.json').catch(function(){return null}),HIST?Promise.resolve(null):getJSON('pregame.json').catch(function(){return null})])}
 function boot(){Promise.all([getJSON('players.json'),feeds(),getJSON('team_strength.json').catch(function(){return null})]).then(function(r){
- STRENGTH=r[2]||null;MCTX=null;r[0]=GPModel.decodePlayers(r[0])||{};DB=r[0].players||[];RANK=r[0].ranks||{};META.updated=r[0].updated||'';applyFeeds(r[1][0],r[1][1],r[1][2]);render();
+ STRENGTH=r[2]||null;MCTX=null;r[0]=GPModel.decodePlayers(r[0])||{};DB=r[0].players||[];RANK=r[0].ranks||{};META.updated=r[0].updated||'';applyFeeds(r[1][0],r[1][1],r[1][2],r[1][3]);render();
  }).catch(function(){$('main').innerHTML='<div class="card"><div class="warn">Could not load players.json. Open this from the hosted site.</div></div>';nav()})}
 setInterval(function(){if(document.hidden||!DB.length)return;var ae=document.activeElement;if(ae&&/INPUT|SELECT|TEXTAREA/.test(ae.tagName))return;if(['games','lines','dash'].indexOf(tab)<0)return;
- feeds().then(function(r){applyFeeds(r[0],r[1],r[2]);if(!document.getElementById('imgov'))render();if(tab==='games')pollLive(true)})},60000);
+ feeds().then(function(r){applyFeeds(r[0],r[1],r[2],r[3]);if(!document.getElementById('imgov'))render();if(tab==='games')pollLive(true)})},60000);
 // ---- AI chat: answers only from the app's own numbers. The page builds a small facts sheet; the Cloudflare Worker adds the key.
 var chatLog=[],chatBusy=false;
 function f1(x,d){return x==null||isNaN(x)?'n/a':x.toFixed(d==null?1:d)}
