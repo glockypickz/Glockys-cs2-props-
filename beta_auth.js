@@ -21,7 +21,9 @@
 import { removeUserSubs } from "./push.js";
 
 export const COOKIE = "gp_sess";
-const SESSION_DAYS = 30;
+const SESSION_DAYS = 30;                // hard limit; on top of it a session ends after IDLE minutes with no activity
+const IDLE_MIN = 30;                    // idle sign-out (override with env SESSION_IDLE_MIN, 5-240)
+const TOUCH_MS = 60000;                 // re-issue the cookie at most once a minute
 const ADMIN_SESSION_DAYS = 30;
 const DEFAULT_ITER = 100000;          // Workers' WebCrypto PBKDF2 maximum; override with env PBKDF2_ITERATIONS
 const RL_WINDOW = 900;                // seconds
@@ -167,17 +169,42 @@ async function adminHeaderOk(request, keyHash) {
   return sent.length > 0 && safeEqual(await sha256hex(sent), keyHash);
 }
 
+export function idleMs(env) {
+  const n = parseInt(env && env.SESSION_IDLE_MIN, 10);
+  return (n >= 5 && n <= 240 ? n : IDLE_MIN) * 60000;
+}
+// Sliding session: "la" = last activity (ms). Sessions without it (issued before idle sign-out existed) count as expired.
+function idleOk(p, env, now) { return typeof p.la === "number" && (now || Date.now()) - p.la <= idleMs(env); }
+
 // Who is this request? -> {admin:true} | {user:"name"} | null
 export async function identify(request, env, keyHash) {
   if (await adminHeaderOk(request, keyHash)) return { admin: true, via: "header" };
   if (configProblems(env).length) return null;
   const p = await verifySession(readCookie(request, COOKIE), env.SESSION_SECRET);
-  if (!p) return null;
+  if (!p || !idleOk(p, env)) return null;
   if (p.r === "admin") return p.k === keyHash.slice(0, 16) ? { admin: true, via: "cookie" } : null;   // dies when the admin key changes
   if (!p.u) return null;
   const rec = await env.BETA.get("user:" + p.u, "json");
   if (!rec || rec.disabled || (rec.ver || 0) !== (p.v || 0)) return null;
   return rec.role === "admin" ? { user: p.u, admin: true, via: "account" } : { user: p.u };
+}
+
+// Activity: re-issue the session cookie with la = now (at most once a minute). Returns a Set-Cookie value or null.
+// Called only for real activity: page loads (worker.js) and /auth/ping (the app pings while you tap / type / scroll).
+// Background polling (support badge, data refresh) never calls this, so an idle open tab still signs out.
+export async function touch(request, env, url, force) {
+  if (configProblems(env).length) return null;
+  const p = await verifySession(readCookie(request, COOKIE), env.SESSION_SECRET);
+  if (!p || !idleOk(p, env)) return null;
+  if (!force && Date.now() - p.la < TOUCH_MS) return null;
+  const tok = await signSession(Object.assign({}, p, { la: Date.now() }), env.SESSION_SECRET);
+  return cookieHeader(url, tok, Math.max(60, Math.floor((p.exp - Date.now()) / 1000)));
+}
+export function isActivityRequest(request) {
+  if (request.method !== "GET") return false;
+  const mode = request.headers.get("Sec-Fetch-Mode");
+  if (mode) return mode === "navigate";
+  return (request.headers.get("Accept") || "").includes("text/html");
 }
 
 // Admin = admin key header, or an admin login cookie (admin account / key-swapped session).
@@ -195,7 +222,7 @@ export async function isAdmin(request, env, keyHash) {
 
 // ---------- the gate ----------
 // Paths anyone may load while the gate is on (the login page and what it needs).
-const OPEN = new Set(["/login", "/beta-login", "/beta-login.html", "/beta-admin", "/beta-admin.html", "/beta.css", "/beta-login.js", "/beta-admin.js",
+const OPEN = new Set(["/login", "/beta-login", "/beta-login.html", "/beta-admin", "/beta-admin.html", "/beta.css", "/beta-login.js", "/beta-admin.js", "/idle.js",
   "/assets/logo-swing.png", "/assets/logo-tile.png", "/assets/logo.png", "/apple-touch-icon.png", "/favicon.ico", "/lockcheck.html",
   "/sw.js", "/manifest.webmanifest", "/assets/icon-192.png", "/assets/icon-512.png"]);   // service worker + manifest: iOS fetches them without cookies
 export function isOpenPath(path) { return OPEN.has(path) || path.startsWith("/auth/"); }
@@ -209,11 +236,12 @@ export async function gate(request, env, url, keyHash) {
   if (isOpenPath(path)) return null;
   if ((await gateState(env)) !== "on") return null;
   if (await identify(request, env, keyHash)) return null;
+  const clear = readCookie(request, COOKIE) ? { "Set-Cookie": cookieHeader(url, "", 0) } : {};   // expired / idle session: drop it
   if (wantsHtml(request, path) && request.method === "GET" && !/\.json$/i.test(path) && !/^\/(live|push|support)\//.test(path)) {
     const next = path + url.search;
-    return new Response(null, { status: 302, headers: { Location: "/login?next=" + encodeURIComponent(next), "Cache-Control": "no-store" } });
+    return new Response(null, { status: 302, headers: Object.assign({ Location: "/login?next=" + encodeURIComponent(next), "Cache-Control": "no-store" }, clear) });
   }
-  return json({ error: "login required", login: "/login" }, 401);
+  return json({ error: "login required", login: "/login" }, 401, clear);
 }
 
 // ---------- /auth/* API ----------
@@ -226,7 +254,7 @@ export async function handleAuth(request, env, url, keyHash) {
   if (path === "/auth/me") {
     const who = await identify(request, env, keyHash);
     return json({ configured: !problems.length, problems, gate: problems.length ? "off" : await gateFlag(env),
-      user: who && who.user ? who.user : null, admin: !!(who && who.admin) });
+      user: who && who.user ? who.user : null, admin: !!(who && who.admin), idleMin: idleMs(env) / 60000 });
   }
 
   // ---- owner (admin key) API ----
@@ -236,7 +264,7 @@ export async function handleAuth(request, env, url, keyHash) {
       // Swap the admin key (sent as a header by the page that has it in localStorage) for an HttpOnly cookie so plain page
       // loads get through the gate on this device.
       if (problems.length) return json({ ok: true, note: "login is not set up, the site is open" });
-      const tok = await signSession({ r: "admin", k: keyHash.slice(0, 16), exp: Date.now() + ADMIN_SESSION_DAYS * 864e5 }, env.SESSION_SECRET);
+      const tok = await signSession({ r: "admin", k: keyHash.slice(0, 16), la: Date.now(), exp: Date.now() + ADMIN_SESSION_DAYS * 864e5 }, env.SESSION_SECRET);
       return json({ ok: true }, 200, { "Set-Cookie": cookieHeader(url, tok, ADMIN_SESSION_DAYS * 86400) });
     }
     if (!(await isAdmin(request, env, keyHash))) return json({ error: "admin key or admin account required" }, 403);
@@ -311,6 +339,14 @@ export async function handleAuth(request, env, url, keyHash) {
   }
 
   // ---- customer API ----
+  if (path === "/auth/ping") {
+    // The app calls this (throttled) when you tap, type or scroll: keeps an active session alive.
+    if (method !== "POST") return json({ error: "use POST" }, 405);
+    const who = problems.length ? null : await identify(request, env, keyHash);
+    if (!who || who.via === "header") return json({ ok: false, error: "signed out" }, 401, readCookie(request, COOKIE) ? { "Set-Cookie": cookieHeader(url, "", 0) } : {});
+    const sc = await touch(request, env, url, true);
+    return json({ ok: true, idleMin: idleMs(env) / 60000 }, 200, sc ? { "Set-Cookie": sc } : {});
+  }
   if (path === "/auth/logout") {
     return json({ ok: true }, 200, { "Set-Cookie": cookieHeader(url, "", 0) });
   }
@@ -340,7 +376,7 @@ export async function handleAuth(request, env, url, keyHash) {
       inv.users = (inv.users || []).concat(u).slice(-50);
       await KV.put("invite:" + code, JSON.stringify(inv));
     }
-    const tok = await signSession({ u, v: 0, exp: Date.now() + SESSION_DAYS * 864e5 }, env.SESSION_SECRET);
+    const tok = await signSession({ u, v: 0, la: Date.now(), exp: Date.now() + SESSION_DAYS * 864e5 }, env.SESSION_SECRET);
     return json({ ok: true, user: u, role: rec.role, next: safeNext(b.next) }, 200, { "Set-Cookie": cookieHeader(url, tok, SESSION_DAYS * 86400) });
   }
 
@@ -358,7 +394,7 @@ export async function handleAuth(request, env, url, keyHash) {
     }
     rec.last = new Date().toISOString();
     await KV.put("user:" + u, JSON.stringify(rec));
-    const tok = await signSession({ u, v: rec.ver || 0, exp: Date.now() + SESSION_DAYS * 864e5 }, env.SESSION_SECRET);
+    const tok = await signSession({ u, v: rec.ver || 0, la: Date.now(), exp: Date.now() + SESSION_DAYS * 864e5 }, env.SESSION_SECRET);
     return json({ ok: true, user: u, role: rec.role === "admin" ? "admin" : "user", next: safeNext(b.next) }, 200, { "Set-Cookie": cookieHeader(url, tok, SESSION_DAYS * 86400) });
   }
   return json({ error: "not found" }, 404);
