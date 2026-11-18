@@ -1,6 +1,6 @@
 // Glockys Prop Grader: serves the site files, but only hands out lines_history.json (locked picks and results) to the admin.
 // The file stores only a fingerprint (SHA-256 hash) of the admin key, so the key itself is never in the public repo.
-import { gate, handleAuth, isAdmin } from "./beta_auth.js";
+import { gate, handleAuth, isAdmin, touch, isActivityRequest } from "./beta_auth.js";
 import { handlePush, handlePushAdmin, isPushAdminPath } from "./push.js";
 import { handleSupport, handleSupportAdmin, isSupportAdminPath } from "./support_api.js";
 
@@ -55,7 +55,19 @@ async function live(url, ctx) {
 }
 
 export default {
+  // Idle sign-out (beta_auth.js): a page load counts as activity and slides the session forward.
   async fetch(request, env, ctx) {
+    const res = await route(request, env, ctx);
+    if (!isActivityRequest(request) || new URL(request.url).pathname.startsWith("/auth/")) return res;
+    const sc = await touch(request, env, new URL(request.url));
+    if (!sc || res.headers.has("Set-Cookie")) return res;
+    const out = new Response(res.body, res);
+    out.headers.append("Set-Cookie", sc);
+    return out;
+  },
+};
+
+async function route(request, env, ctx) {
     const url = new URL(request.url);
     // Beta login (beta_auth.js). Off / fail-open unless the BETA KV binding + SESSION_SECRET exist and the owner turned the gate on.
     // Push notifications (push.js) and support chat (support_api.js): owner side first, then the shared /auth/* API.
@@ -80,5 +92,4 @@ export default {
       return out;
     }
     return env.ASSETS.fetch(request);
-  },
-};
+}

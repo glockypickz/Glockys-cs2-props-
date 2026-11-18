@@ -7,6 +7,7 @@ function go(){location.replace(next)}
 (function(){try{var m=/admin=([^&]*)/.exec(location.hash||'');if(m){var k=decodeURIComponent(m[1]);if(k==='off')localStorage.removeItem('gp_admin');else localStorage.setItem('gp_admin',k);history.replaceState(null,'',location.pathname+location.search)}}catch(e){}})();
 var key='';try{key=localStorage.getItem('gp_admin')||''}catch(e){}
 if(key){fetch('/auth/admin/session',{method:'POST',headers:{'X-Admin-Key':key}}).then(function(r){if(r.ok)go()}).catch(function(){})}
+if(new URLSearchParams(location.search).get('idle')==='1')msg('You were signed out after 30 minutes without activity. Log in again.',true);
 fetch('/auth/me',{cache:'no-store'}).then(function(r){return r.json()}).then(function(d){
  if(d.user||d.admin||d.gate!=='on')go();
  if(!d.configured)msg('Beta login is not switched on yet, the site is open.',true);

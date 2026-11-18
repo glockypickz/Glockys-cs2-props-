@@ -55,3 +55,10 @@ Code: `push.js` (Web Push: VAPID RFC 8292 + aes128gcm RFC 8291, WebCrypto only),
 After merging: press *Set up notifications* at `/beta-admin` (or `POST /auth/admin/push/setup` with the admin key), and add the repo secret `GP_ADMIN_KEY` = the admin key (Settings → Secrets and variables → Actions).
 
 Tests: `node --test tests/test_push.mjs` (includes the RFC 8291 test vector).
+
+## Idle sign-out
+
+Logged-in sessions (customers and admin accounts) end after **30 minutes without activity** (env `SESSION_IDLE_MIN`, 5-240, changes it).
+- Server (`beta_auth.js`): the session cookie carries the last-activity time. Requests from a session idle longer than 30 min get 401 / the login page and the cookie is cleared. Page loads and `POST /auth/ping` slide it forward; background polling (support badge, data refresh) does not.
+- App (`idle.js`, on the Grader and `/beta-admin`): taps, typing, scrolling and mouse movement count as activity (shared across tabs) and ping the server at most every 2 minutes. A warning shows at 28 minutes; at 30 it signs out and opens `/login?idle=1`.
+- The admin key (`X-Admin-Key` / `#admin=`) is not affected: the login page signs key holders straight back in. Push notifications keep arriving after sign-out; tapping one opens the login page first if needed.
