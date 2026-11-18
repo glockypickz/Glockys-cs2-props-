@@ -1,0 +1,36 @@
+/* Beta login + owner pages (Glockys Prop Grader). Same dark / green GP look as styles.css. */
+:root{--bg:#0a0a0a;--card:#131313;--line:#262626;--green:#00FF66;--silver:#c8cdd2;--muted:#8b9297;--red:#ff4d6d;--amber:#ffc53d}
+*{box-sizing:border-box}html{-webkit-text-size-adjust:100%}
+body{margin:0;min-height:100vh;background:var(--bg);color:#fff;font:15px/1.45 system-ui,-apple-system,"Segoe UI",sans-serif;padding:env(safe-area-inset-top,0) 0 env(safe-area-inset-bottom,0)}
+body:before{content:"";position:fixed;inset:0;background:url(assets/logo-tile.png) 0 0/120px repeat;opacity:.05;pointer-events:none;z-index:0}
+a{color:var(--green);text-decoration:none}
+.bw{position:relative;z-index:1;max-width:440px;margin:0 auto;padding:18px 14px 40px}
+.bw.wide{max-width:760px}
+.logo{text-align:center;margin:6px 0 4px}.logo img{width:100%;max-width:260px}
+.tag{text-align:center;color:var(--muted);font-size:13px;margin:0 0 14px}
+.beta{display:inline-block;border:1px solid var(--green);color:var(--green);border-radius:99px;padding:2px 10px;font:800 11px ui-monospace,Menlo,monospace;letter-spacing:.12em;margin-left:6px;vertical-align:middle}
+.card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:16px;margin:0 0 12px;box-shadow:0 0 0 1px #00ff6610,0 10px 30px #0008}
+h1{font-size:18px;margin:0 0 4px;letter-spacing:.04em;text-transform:uppercase}
+h2{font-size:14px;margin:0 0 10px;letter-spacing:.06em;text-transform:uppercase;color:var(--silver)}
+.tabs{display:flex;gap:6px;margin:0 0 12px;background:#0d0d0d;border:1px solid var(--line);border-radius:12px;padding:4px}
+.tabs button{flex:1;background:none;border:0;color:var(--muted);font:700 14px system-ui;padding:10px;border-radius:9px}
+.tabs button.on{background:#00ff6618;color:var(--green)}
+label{display:block;font-size:12px;color:var(--muted);margin:10px 0 4px;letter-spacing:.04em;text-transform:uppercase}
+input,select{width:100%;padding:12px;border:1px solid var(--line);border-radius:10px;background:#0d0d0d;color:#fff;font:inherit;font-size:16px}
+input:focus{outline:none;border-color:var(--green);box-shadow:0 0 0 3px #00ff6622}
+button.b{width:100%;background:var(--green);color:#000;border:0;border-radius:10px;padding:13px 14px;font:800 15px system-ui;margin-top:16px;letter-spacing:.03em}
+button.b:disabled{opacity:.5}
+button.g,button.r{background:transparent;color:var(--silver);border:1px solid var(--line);border-radius:9px;padding:7px 10px;font:600 13px system-ui}
+button.r{color:var(--red);border-color:#ff4d6d55}
+.msg{min-height:20px;margin-top:10px;font-size:14px}.msg.err{color:var(--red)}.msg.ok{color:var(--green)}
+.muted{color:var(--muted);font-size:13px}.hide{display:none!important}
+.foot{text-align:center;color:var(--muted);font-size:12px;margin-top:16px}
+.row{display:flex;gap:8px;align-items:flex-end}.row>*{flex:1;min-width:0}.row>.n{flex:0 0 90px}
+.list{display:flex;flex-direction:column;gap:8px}
+.item{border:1px solid var(--line);border-radius:10px;padding:10px;background:#0f0f0f;display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.item .t{flex:1;min-width:160px}.item b{font-family:ui-monospace,Menlo,monospace;letter-spacing:.06em}
+.pill{font:700 11px ui-monospace,Menlo,monospace;border-radius:99px;padding:2px 8px;border:1px solid var(--line);color:var(--silver)}
+.pill.on{border-color:var(--green);color:var(--green)}.pill.off{border-color:#ff4d6d88;color:var(--red)}
+.switch{display:flex;align-items:center;justify-content:space-between;gap:10px}
+.switch .big{font:900 22px system-ui}.switch .big.on{color:var(--green)}.switch .big.off{color:var(--muted)}
+.code{font:800 20px ui-monospace,Menlo,monospace;letter-spacing:.14em;color:var(--green);background:#00ff6610;border:1px dashed var(--green);border-radius:10px;padding:10px;text-align:center;margin-top:10px;word-break:break-all}

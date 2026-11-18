@@ -19,3 +19,24 @@ Each graded prop shows L5 / L10 / L15 / L20 / H2H / SZN (display only): how many
 `update_data.py` keeps every 2026 (calendar-year) Maps 1-2 series for every tracked team and player, not just the last 15 matches. It is incremental: `season_state.json` (committed, not served) remembers the matches already stored per team, so a daily run only fetches newer matches (usually one bo3.gg page per team). Older season matches are backfilled oldest-first in the time left (`TIME_LIMIT_H`, default 4.5 h) and the backfill resumes on the next run until every team reaches `SEASON_START` (default Jan 1 of the current year; the state resets when the year changes). `players.json` is written in a compact format (`fmt: 2`, column arrays plus a string table, read with `load_players` / `GPModel.decodePlayers`) and is trimmed oldest-first if it would pass 22 MiB (Workers asset limit 25 MiB). The grader uses the full season (`n_max` 200, half-life 8 series).
 
 Kills grades also show season K/D and kills per map over the last 5 / 10 / 15 series and the season. They are wired into the model as `w_kd`, `w_l5`, `w_l10`, `w_l15` and `w_szn` (`python backtest.py --tune-form`), and the backtest tuned them to 0. By owner decision small weights ship anyway: `w_l5` 0.1, `w_l10` 0.1, `w_kd` 0.1 (full season stays the base). HS% (hs / kills) over the last 5 / 10 / 15 series and the season is an input to the headshots projection (`w_hs5` 0.3, `w_hs10` 0.2, `w_hsszn` 0.1, tuned; `python backtest.py --tune-hs`) and, by owner decision, to the kills projection (`w_khs5` 0.1). Season K/D also enters the headshots projection (`w_hkd` -0.1).
+
+## Beta login (Cloudflare Worker only)
+
+Built-in accounts for beta customers. Code: `beta_auth.js` (Worker), `beta-login.html/js`, `beta-admin.html/js`, `beta.css`, `beta.js` (account bar + Log out in the app).
+
+- **Customers** sign up at `/login` with an invite code, username, email and password, then log in. They get the whole Grader but **not** the Track Record (`lines_history.json`).
+- **Admin accounts** get everything: the Grader, the full Track Record and the owner tools at `/beta-admin`. Make the first one by typing the existing admin key into the *Invite code* box on the Sign up tab (the key is only hashed and compared with `KEY_HASH`, never stored). Promote / demote others at `/beta-admin`.
+- The admin key still works as before (`#admin=` link / `X-Admin-Key` header) and always gets through the gate.
+- `/beta-admin`: turn the gate on/off, create / revoke invite codes, list users, turn a user off, reset a password (gives a one-time temporary password), make admin / make customer.
+- Sessions: HttpOnly, Secure, SameSite=Lax cookie `gp_sess`, HMAC-SHA256 signed with `SESSION_SECRET`, 30 days. Turning a user off or resetting their password logs them out everywhere.
+- Passwords: PBKDF2-SHA256, random salt per user, 100,000 iterations (the Workers maximum; set var `PBKDF2_ITERATIONS` lower only if logins hit CPU-limit errors).
+- Brute force: failed logins / bad invite codes counted per IP (20 per 15 min) and per username (8 per 15 min) in KV.
+- **Fail safe:** without the `BETA` KV binding or a `SESSION_SECRET` (32+ chars) login is off and the site is open exactly as before. The gate also starts **OFF** until turned on at `/beta-admin` (var `BETA_GATE=on|off` overrides the switch).
+- The GitHub Pages copy has no Worker, so it is never gated.
+
+Setup in Cloudflare (Workers & Pages → glockys-cs2-props):
+1. Settings → Variables and Secrets → Add → Type **Secret**, name `SESSION_SECRET`, value: a random string of 32+ characters (e.g. `openssl rand -hex 32`). Save / deploy.
+2. KV: `wrangler.jsonc` declares `"kv_namespaces": [{ "binding": "BETA" }]` without an id, so the next deploy creates and links it automatically. If a build fails on that step: Storage & Databases → KV → Create namespace `glockys-beta`, copy its ID, and add `"id": "<ID>"` to that line in `wrangler.jsonc`.
+3. After the deploy: sign up at `/login` with your admin key as the invite code → you now have an admin account. Create invites at `/beta-admin`, then turn the gate **ON** there.
+
+Tests: `node --test tests/test_beta_auth.mjs`.

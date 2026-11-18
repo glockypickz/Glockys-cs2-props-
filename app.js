@@ -599,7 +599,7 @@ document.addEventListener('change',function(e){var i=e.target.id,m={pt:'tm',pn:'
 // admin key: open the site once as  /#admin=YOURKEY  to unlock the Track record on this device ( #admin=off removes it )
 (function(){try{var m=/admin=([^&]*)/.exec(location.hash||'');if(m){var k=decodeURIComponent(m[1]);if(k==='off')localStorage.removeItem('gp_admin');else localStorage.setItem('gp_admin',k);history.replaceState(null,'',location.pathname+location.search)}}catch(e){}})();
 function adminKey(){try{return localStorage.getItem('gp_admin')||''}catch(e){return ''}}
-function getJSON(u){var o={};if(u==='lines_history.json'&&adminKey())o={headers:{'X-Admin-Key':adminKey()}};return fetch(u+'?'+Date.now(),o).then(function(r){if(!r.ok)throw 0;return r.json()})}
+function getJSON(u){var o={};if(u==='lines_history.json'&&adminKey())o={headers:{'X-Admin-Key':adminKey()}};return fetch(u+'?'+Date.now(),o).then(function(r){if(r.status===401&&u!=='lines_history.json'){location.href='/login?next='+encodeURIComponent(location.pathname);throw 0}if(!r.ok)throw 0;return r.json()})}
 var FEED_V=0;function applyFeeds(g,l,h,p){FEED_V++;
  if(g){GAMES=(g.games||[]).filter(function(x){return x.start}).sort(function(a,b){return a.start<b.start?-1:1});META.games_iso=g.updated||'';META.games_at=(g.updated&&g.updated.indexOf('T')>-1)?fmt(g.updated):(g.updated||'')}
  if(l){LINES=l.lines||[];META.lines_at=l.observed_at?fmt(l.observed_at):''}
