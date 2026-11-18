@@ -1,5 +1,7 @@
 // Glockys Prop Grader: serves the site files, but only hands out lines_history.json (locked picks and results) to the admin.
 // The file stores only a fingerprint (SHA-256 hash) of the admin key, so the key itself is never in the public repo.
+import { gate, handleAuth, isAdmin } from "./beta_auth.js";
+
 const KEY_HASH = "07ba3c41d62c5e42aee4040361070343a7454bafdc5ed8490c3b5c1ae2271a4d";
 
 async function sha256(text) {
@@ -53,10 +55,17 @@ async function live(url, ctx) {
 export default {
   async fetch(request, env, ctx) {
     const url = new URL(request.url);
+    // Beta login (beta_auth.js). Off / fail-open unless the BETA KV binding + SESSION_SECRET exist and the owner turned the gate on.
+    if (url.pathname.startsWith("/auth/")) return handleAuth(request, env, url, KEY_HASH);
+    if (url.pathname === "/login") return env.ASSETS.fetch(new Request(url.origin + "/beta-login", request));
+    if (url.pathname === "/beta-admin.html") return Response.redirect(url.origin + "/beta-admin", 302);
+    const blocked = await gate(request, env, url, KEY_HASH);
+    if (blocked) return blocked;
     if (url.pathname.startsWith("/live/")) return live(url, ctx);
     if (url.pathname === "/lines_history.json") {
+      // Admin only: the admin key header (as before) or a logged-in admin account / admin session cookie.
       const sent = String(request.headers.get("X-Admin-Key") || "").trim();
-      const ok = sent.length > 0 && (await sha256(sent)) === KEY_HASH;
+      const ok = (sent.length > 0 && (await sha256(sent)) === KEY_HASH) || !!(await isAdmin(request, env, KEY_HASH));
       if (!ok) return new Response("Not found", { status: 404, headers: { "Cache-Control": "no-store" } });
       const res = await env.ASSETS.fetch(new Request(url.origin + "/lines_history.json"));
       const out = new Response(res.body, res);

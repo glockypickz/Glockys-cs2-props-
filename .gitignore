@@ -8,3 +8,5 @@ cito_cache/*.tmp
 __pycache__/
 node_modules/
 *.json.tmp
+.dev.vars*
+.wrangler/

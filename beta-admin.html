@@ -1,0 +1,30 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#0a0a0a"><meta name="robots" content="noindex">
+<link rel="icon" type="image/png" href="/apple-touch-icon.png?v=2">
+<title>Beta admin · Glockys Prop Grader</title>
+<link rel="stylesheet" href="/beta.css"></head>
+<body><div class="bw wide">
+<div class="logo"><img src="/assets/logo-swing.png" alt="Glockys Prop Grader" style="max-width:200px"></div>
+<div class="tag">Owner tools <span class="beta">BETA</span> · <a href="/">Open the Grader</a></div>
+<div id="keyCard" class="card hide">
+ <h2>Admin key</h2>
+ <div class="muted">Log in with an admin account (<a href="/login?next=/beta-admin">log in</a>), or enter your admin key. The key is saved on this device only, the same as opening the site with #admin=.</div>
+ <form id="fKey"><label for="k">Admin key</label><input id="k" type="password" autocomplete="off"><button class="b" type="submit">Unlock</button></form>
+</div>
+<div id="app" class="hide">
+ <div class="card"><div class="switch"><div><h2>Login gate</h2><div id="gateTxt" class="big off">OFF</div><div id="gateNote" class="muted"></div></div><button id="gateBtn" class="g" type="button">Turn on</button></div></div>
+ <div class="card"><h2>New invite code</h2>
+  <form id="fInv"><div class="row"><div><label for="note">Who it's for (optional)</label><input id="note" maxlength="80" placeholder="e.g. Discord VIPs"></div><div class="n"><label for="max">Uses</label><input id="max" type="number" min="1" max="1000" value="1"></div></div>
+  <button class="b" type="submit">Create invite</button></form>
+  <div id="newCode" class="hide"><div class="code" id="codeTxt"></div><div class="muted" style="margin-top:6px">Signup link: <a id="codeLink" href="#"></a></div></div>
+ </div>
+ <div class="card"><h2>Invite codes</h2><div id="invites" class="list"></div></div>
+ <div class="card"><h2>Beta users</h2><div class="muted" style="margin:-4px 0 10px">Admins get everything, including the full Track Record and this page. Customers get the Grader without the Track Record.</div><div id="users" class="list"></div></div>
+ <div id="msg" class="msg"></div>
+ <div class="foot"><button id="forget" class="g" type="button">Log out / forget admin key on this device</button></div>
+</div>
+<div id="off" class="card hide"><h2>Login is not set up yet</h2><div id="offTxt" class="muted"></div></div>
+</div>
+<script src="/beta-admin.js"></script></body></html>

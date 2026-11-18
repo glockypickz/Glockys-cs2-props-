@@ -17,3 +17,7 @@ cito_ids.json
 tests
 __pycache__
 season_state.json
+beta_auth.js
+worker.js
+.dev.vars*
+.wrangler

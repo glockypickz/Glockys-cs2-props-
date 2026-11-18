@@ -174,3 +174,6 @@ header img{filter:drop-shadow(0 0 10px rgba(0,255,102,.35));animation:gpglow 3.5
 .tc-back div:not(.tc-bh){display:flex;justify-content:space-between;align-items:center;background:#ffffff0d;border:1px solid color-mix(in srgb,var(--acc) 30%,transparent);border-radius:6px;padding:.7cqw 1.8cqw}.tc-back b{font-size:4cqw;font-weight:400;white-space:nowrap;order:2}.tc-back i{font-style:normal;font-size:2.2cqw;color:var(--muted);text-transform:uppercase}
 .tc-foot{display:flex;justify-content:space-between;font-size:2.4cqw;margin-top:auto;padding-top:1.6cqw;color:var(--muted);flex:0 0 auto}.tc-foot span:first-child{color:var(--green)}
 @media (prefers-reduced-motion:reduce){.tc::after{animation:none}}
+/* beta login account bar (beta.js) */
+.gp-acct{display:flex;justify-content:center;align-items:center;gap:8px;font-size:12px;color:var(--muted);margin:2px 0 6px}
+.gp-acct button{background:transparent;color:var(--silver);border:1px solid var(--line);border-radius:99px;padding:4px 10px;font:600 12px system-ui}
