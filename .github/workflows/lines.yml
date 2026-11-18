@@ -17,6 +17,11 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
+      # Copies from before this run, so notify_push.py can tell what is new
+      - name: Snapshot previous lines
+        run: |
+          cp lines.json /tmp/prev_lines.json 2>/dev/null || echo '{}' > /tmp/prev_lines.json
+          cp lines_history.json /tmp/prev_history.json 2>/dev/null || echo '{}' > /tmp/prev_history.json
       - name: Fetch lines
         env:
           KASHROCK_API_KEY: ${{ secrets.KASHROCK_API_KEY }}
@@ -35,3 +40,9 @@ jobs:
           git diff --staged --quiet || git commit -m "Update lines"
           git pull --rebase
           git push
+      # Phone notifications to beta users (new lines / new grades). Skips if nothing is new or GP_ADMIN_KEY isn't set. Never fails the job.
+      - name: Push notifications
+        continue-on-error: true
+        env:
+          GP_ADMIN_KEY: ${{ secrets.GP_ADMIN_KEY }}
+        run: python notify_push.py /tmp/prev_lines.json /tmp/prev_history.json
