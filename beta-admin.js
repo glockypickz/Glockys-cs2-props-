@@ -36,5 +36,26 @@ document.addEventListener('click',function(e){var t=e.target;
  if(t.dataset.reset){if(!confirm('Reset the password for '+t.dataset.reset+'? They are logged out and get a temporary password from you.'))return;api('user/reset',{u:t.dataset.reset}).then(function(d){if(!d.ok)return msg(d.error);msg('Temporary password for '+d.u+': '+d.tempPassword+'  (shown once, send it to them privately)',true)})}
 });
 $('forget').onclick=function(){try{localStorage.removeItem('gp_admin')}catch(e){};fetch('/auth/logout',{method:'POST'}).then(function(){location.href='/login'})};
+// ---- support inbox ----
+var SUPU=null;
+function supLoad(){api('support/threads').then(function(d){if(!d.threads)return;var n=d.unread||0;$('supUnread').textContent=n+' unread';$('supUnread').classList.toggle('hide',!n);
+ var L=$('supList');L.innerHTML='';if(!d.threads.length){L.appendChild(Object.assign(document.createElement('div'),{className:'muted',textContent:'No messages yet.'}));return}
+ d.threads.forEach(function(t){var it=document.createElement('div');it.className='item click';var tx=document.createElement('div');tx.className='t';var b=document.createElement('b');b.textContent=t.u;tx.appendChild(b);
+  if(t.unread){var un=document.createElement('span');un.className='un';un.textContent=t.unread;tx.appendChild(document.createTextNode(' '));tx.appendChild(un)}
+  var m=document.createElement('div');m.className='muted';m.textContent=(t.last.f==='o'?'You: ':'')+t.last.t+' · '+day(t.updated);tx.appendChild(m);it.appendChild(tx);it.onclick=function(){supOpen(t.u)};L.appendChild(it)})})}
+function supDraw(msgs){var M=$('supMsgs');M.innerHTML='';msgs.forEach(function(m){var d=document.createElement('div');d.className='m '+(m.f==='o'?'o':'u');d.textContent=m.t;var a=document.createElement('div');a.className='at';a.textContent=(m.f==='o'?'You':SUPU)+' · '+day(m.at);d.appendChild(a);M.appendChild(d)});M.scrollTop=M.scrollHeight}
+function supOpen(u){SUPU=u;$('supList').classList.add('hide');$('supThread').classList.remove('hide');$('supWho').textContent=u;api('support/thread?u='+encodeURIComponent(u)).then(function(d){if(d.msgs)supDraw(d.msgs);supLoad()})}
+$('supBack').onclick=function(){SUPU=null;$('supThread').classList.add('hide');$('supList').classList.remove('hide');supLoad()};
+$('fReply').onsubmit=function(e){e.preventDefault();var t=$('replyTxt').value.trim();if(!t)return;api('support/reply',{u:SUPU,text:t}).then(function(d){if(!d.ok)return msg(d.error);$('replyTxt').value='';supDraw(d.msgs)})};
+// ---- notifications ----
+function pushLoad(){api('push/status').then(function(d){if(d._s!==200)return;$('pushOff').classList.toggle('hide',d.ready);$('pushOn').classList.toggle('hide',!d.ready);
+ if(d.ready)$('pushStat').textContent=d.subscriptions+' device'+(d.subscriptions===1?'':'s')+' signed up · last lines alert: '+day(d.last.lines)+' · last grades alert: '+day(d.last.grades)})}
+function sendAll(data){var tot={sent:0,removed:0,failed:0,skipped:0};function step(extra){return api('notify',Object.assign({},data,extra)).then(function(d){if(!d.ok){msg(d.error);return null}if(d.skipped&&!d.job){msg('Skipped: '+d.skipped);return null}
+ ['sent','removed','failed','skipped'].forEach(function(k){tot[k]+=d[k]||0});return d.cursor?step({job:d.job,cursor:d.cursor}):tot})}return step({})}
+$('pushSetup').onclick=function(){api('push/setup',{}).then(function(d){if(!d.ok)return msg(d.error);msg('Notifications are set up.',true);pushLoad()})};
+$('pushTest').onclick=function(){sendAll({type:'test',title:'Test notification',body:'Notifications are working 🔔',url:'/'}).then(function(t){if(t)msg('Test sent to '+t.sent+' admin device'+(t.sent===1?'':'s')+(t.sent?'':' (turn on 🔔 Alerts in the app first)')+'.',true)})};
+$('fNotify').onsubmit=function(e){e.preventDefault();if(!confirm('Send this to everyone with notifications on?'))return;
+ sendAll({type:'manual',title:$('nTitle').value,body:$('nBody').value,url:$('nUrl').value}).then(function(t){if(t){msg('Sent to '+t.sent+' device'+(t.sent===1?'':'s')+(t.removed?', removed '+t.removed+' dead':'')+'.',true);$('nBody').value='';pushLoad()}})};
+var _draw=draw;draw=function(){_draw();if(!draw._once){draw._once=1;supLoad();pushLoad();var m=/support=([^&]+)/.exec(location.hash||'');if(m)supOpen(decodeURIComponent(m[1]));setInterval(function(){if(!SUPU)supLoad()},60000)}};
 load();
 })();

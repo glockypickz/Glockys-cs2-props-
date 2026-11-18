@@ -40,3 +40,18 @@ Setup in Cloudflare (Workers & Pages → glockys-cs2-props):
 3. After the deploy: sign up at `/login` with your admin key as the invite code → you now have an admin account. Create invites at `/beta-admin`, then turn the gate **ON** there.
 
 Tests: `node --test tests/test_beta_auth.mjs`.
+
+## Push notifications + support chat (Cloudflare Worker only)
+
+Code: `push.js` (Web Push: VAPID RFC 8292 + aes128gcm RFC 8291, WebCrypto only), `support_api.js` (support chat API), `sw.js` (service worker: shows notifications only, no caching), `manifest.webmanifest`, `push-ui.js` (banner + 🔔 Alerts settings), `support-ui.js` (💬 Support bubble, bottom-left), `notify_push.py` (lines job → notify).
+
+- Logged-in users tap **Turn on notifications** (or 🔔 Alerts) and pick *New lines* / *New grades*. iPhone: Safari → Share → **Add to Home Screen**, open GP Grader from the Home Screen (iOS 16.4+), then turn notifications on there.
+- Subscriptions are saved in KV under the user; removed when the push service answers 404/410 and when the user is turned off.
+- The hourly **Update CS2 lines** job snapshots `lines.json` / `lines_history.json`, and after committing runs `notify_push.py`, which counts new upcoming props and new locked grades and calls `POST /auth/admin/notify` with the `GP_ADMIN_KEY` secret. Nothing new → nothing sent. The Worker allows one `lines` and one `grades` notification per 30 minutes.
+- `/beta-admin` → **Notifications**: *Set up notifications* (makes the VAPID key pair inside the Worker and keeps it in KV; the private key never leaves Cloudflare), *Send test notification* (to your own admin devices), and a manual send form. → **Support inbox**: threads with unread counts, open a thread and reply.
+- Support chat: plain text, max 1000 characters, 12 messages per 10 minutes per user. New customer messages push to admin accounts that have notifications on; owner replies push to the customer.
+- Fail safe: with no VAPID keys the notification UI is hidden and nothing changes. Env secrets `VAPID_PUBLIC_KEY` / `VAPID_PRIVATE_KEY` override the KV keys if set.
+
+After merging: press *Set up notifications* at `/beta-admin` (or `POST /auth/admin/push/setup` with the admin key), and add the repo secret `GP_ADMIN_KEY` = the admin key (Settings → Secrets and variables → Actions).
+
+Tests: `node --test tests/test_push.mjs` (includes the RFC 8291 test vector).

@@ -18,6 +18,8 @@
 //   cfg:gate          "on" | "off"
 //   rl:ip:<ip> / rl:u:<username>   failed-attempt counters (expire after 15 minutes)
 
+import { removeUserSubs } from "./push.js";
+
 export const COOKIE = "gp_sess";
 const SESSION_DAYS = 30;
 const ADMIN_SESSION_DAYS = 30;
@@ -194,7 +196,8 @@ export async function isAdmin(request, env, keyHash) {
 // ---------- the gate ----------
 // Paths anyone may load while the gate is on (the login page and what it needs).
 const OPEN = new Set(["/login", "/beta-login", "/beta-login.html", "/beta-admin", "/beta-admin.html", "/beta.css", "/beta-login.js", "/beta-admin.js",
-  "/assets/logo-swing.png", "/assets/logo-tile.png", "/assets/logo.png", "/apple-touch-icon.png", "/favicon.ico", "/lockcheck.html"]);
+  "/assets/logo-swing.png", "/assets/logo-tile.png", "/assets/logo.png", "/apple-touch-icon.png", "/favicon.ico", "/lockcheck.html",
+  "/sw.js", "/manifest.webmanifest", "/assets/icon-192.png", "/assets/icon-512.png"]);   // service worker + manifest: iOS fetches them without cookies
 export function isOpenPath(path) { return OPEN.has(path) || path.startsWith("/auth/"); }
 function wantsHtml(request, path) {
   if (path === "/" || path.endsWith(".html") || !/\.[a-z0-9]{1,5}$/i.test(path)) return true;
@@ -206,7 +209,7 @@ export async function gate(request, env, url, keyHash) {
   if (isOpenPath(path)) return null;
   if ((await gateState(env)) !== "on") return null;
   if (await identify(request, env, keyHash)) return null;
-  if (wantsHtml(request, path) && request.method === "GET" && !/\.json$/i.test(path) && !path.startsWith("/live/")) {
+  if (wantsHtml(request, path) && request.method === "GET" && !/\.json$/i.test(path) && !/^\/(live|push|support)\//.test(path)) {
     const next = path + url.search;
     return new Response(null, { status: 302, headers: { Location: "/login?next=" + encodeURIComponent(next), "Cache-Control": "no-store" } });
   }
@@ -285,6 +288,7 @@ export async function handleAuth(request, env, url, keyHash) {
       rec.disabled = !!b.disabled;
       rec.ver = (rec.ver || 0) + 1;          // signs the user out everywhere
       await KV.put("user:" + u, JSON.stringify(rec));
+      if (rec.disabled) await removeUserSubs(env, u);   // and stops their push notifications
       return json({ ok: true, u, disabled: rec.disabled });
     }
     if (path === "/auth/admin/user/role" && method === "POST") {

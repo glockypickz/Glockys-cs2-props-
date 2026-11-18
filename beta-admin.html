@@ -15,6 +15,21 @@
 </div>
 <div id="app" class="hide">
  <div class="card"><div class="switch"><div><h2>Login gate</h2><div id="gateTxt" class="big off">OFF</div><div id="gateNote" class="muted"></div></div><button id="gateBtn" class="g" type="button">Turn on</button></div></div>
+ <div class="card" id="supCard"><h2>Support inbox <span id="supUnread" class="pill on hide"></span></h2>
+  <div id="supList" class="list"></div>
+  <div id="supThread" class="hide"><div class="row" style="align-items:center;margin-bottom:8px"><b id="supWho"></b><button id="supBack" class="g" type="button" style="flex:0 0 auto">← All threads</button></div>
+   <div id="supMsgs" class="chat"></div>
+   <form id="fReply"><textarea id="replyTxt" rows="3" maxlength="1000" placeholder="Reply..."></textarea><button class="b" type="submit">Send reply</button></form></div>
+ </div>
+ <div class="card" id="pushCard"><h2>Notifications</h2>
+  <div id="pushOff" class="hide"><div class="muted">Push notifications are not set up yet.</div><button id="pushSetup" class="b" type="button">Set up notifications</button></div>
+  <div id="pushOn" class="hide"><div id="pushStat" class="muted"></div>
+   <button id="pushTest" class="g" type="button" style="margin-top:10px">Send test notification</button>
+   <form id="fNotify" style="margin-top:6px"><label for="nTitle">Title</label><input id="nTitle" maxlength="60" placeholder="Glockys Prop Grader">
+    <label for="nBody">Message</label><input id="nBody" maxlength="160" placeholder="e.g. Big slate tonight, 40 props graded" required>
+    <label for="nUrl">Opens (optional)</label><input id="nUrl" maxlength="200" placeholder="/">
+    <button class="b" type="submit">Send to everyone with notifications on</button></form></div>
+ </div>
  <div class="card"><h2>New invite code</h2>
   <form id="fInv"><div class="row"><div><label for="note">Who it's for (optional)</label><input id="note" maxlength="80" placeholder="e.g. Discord VIPs"></div><div class="n"><label for="max">Uses</label><input id="max" type="number" min="1" max="1000" value="1"></div></div>
   <button class="b" type="submit">Create invite</button></form>
