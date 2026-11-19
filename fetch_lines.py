@@ -89,6 +89,12 @@ def _tk(s):
 
 
 def _same(a, b):
+    try:   # team-name aliases from the grader (e.g. "BET-M 33" and "33" are the same team)
+        from grader import tn
+        if tn(a) and tn(a) == tn(b):
+            return True
+    except Exception:
+        pass
     a, b = _tk(a), _tk(b)
     return bool(a and b and (a == b or (len(a) >= 4 and len(b) >= 4 and (a in b or b in a))))
 
@@ -103,6 +109,10 @@ def match_odds_for(e):
             _MO = json.load(open("team_strength.json", encoding="utf-8")).get("odds") or []
         except Exception:
             _MO = []
+        try:   # backup source for matches the Cito feed lacks (oddspapi_fill.py, free tier, a few calls a day)
+            _MO = list(_MO) + (json.load(open("oddspapi_odds.json", encoding="utf-8")).get("rows") or [])
+        except Exception:
+            pass
     for r in _MO:
         if not (r.get("p") and r.get("dec") is not None):
             continue
@@ -123,7 +133,12 @@ def try_lock(gr, e, now, t0):
     """Save the app's grade, projection, pick and probability for this line, once, before the match starts."""
     if t0 and now and now >= t0:
         return
-    if e.get("lock"):   # already locked: add the match odds if they were missing at lock time (still before the match, grade untouched)
+    if e.get("lock"):
+        if gr is not None and e["lock"].get("rg") != REGRADE_TAG and not e.get("result"):
+            _lock(gr, e, now, regrade=True)   # one-time regrade of props that have not started yet (the new grade replaces the old one)
+            if e["lock"].get("rg") == REGRADE_TAG:
+                return
+        # already locked: add the match odds if they were missing at lock time (still before the match, grade untouched)
         if "mo" not in e["lock"]:
             mo = match_odds_for(e)
             if mo:
@@ -131,6 +146,13 @@ def try_lock(gr, e, now, t0):
         return
     if gr is None:
         return
+    _lock(gr, e, now)
+
+
+REGRADE_TAG = "h2h-1"   # bump to regrade every not-yet-started prop once more (the grader changed); started props are never touched
+
+
+def _lock(gr, e, now, regrade=False):
     try:
         st = "hs" if "head" in e["stat"].lower() else "kills" if "kill" in e["stat"].lower() else None
         if not st:
@@ -143,12 +165,15 @@ def try_lock(gr, e, now, t0):
                 return
             g = gr.grade(p, st, float(e["line"]), e.get("opponent") or "", e.get("team"), e.get("book"), e.get("odds"))
         if g:
+            o = e["lock"] if regrade else None
             e["lock"] = {"line": float(e["line"]), "proj": g["proj"], "grade": g["grade"], "pick": g["pick"],
                          "p_over": g["p_over"], "p_pick": g["p_pick"], "be": g["be"], "edge_pp": g["edge_pp"],
                          "reasons": g["reasons"], "flag": g.get("flag", ""), "model": g["model"], "odds": e.get("odds"),
                          "hits": g.get("hits"),   # [over, series] vs this line: l5 / l10 / l20 / szn / h2h (single props only)
                          "at": now.isoformat(timespec="seconds"), "stats_updated": STATS_STAMP}
-            mo = match_odds_for(e)
+            if regrade:
+                e["lock"]["rg"] = REGRADE_TAG   # marks "regraded once"; the old grade is not kept
+            mo = match_odds_for(e) or (o.get("mo") if regrade else None)
             if mo:
                 e["lock"]["mo"] = mo
     except Exception as ex:
@@ -195,6 +220,13 @@ def update_history(lines, now_iso):
         old = []
     now = parse_time(now_iso)
     gr = load_grader()
+    try:   # backup odds for matches Cito doesn't cover, before the locks so they get saved with them
+        import oddspapi_fill
+        global _MO
+        oddspapi_fill.fill(lines, lambda a, b: bool(match_odds_for({"team": a, "opponent": b})), _same, now)
+        _MO = None
+    except Exception as ex:
+        print("oddspapi skipped:", ex)
     by = {(e["book"], e["player"], e["stat"], e["start"]): e for e in old}
     for l in lines:
         start = l.get("starts_at") or ""

@@ -86,6 +86,7 @@ PARAMS = {"m": 100, "half_life": 8, "n_max": 200, "m_team": 1500, "elo_k": 16, "
 BOOK_BE = {"prizepicks": 0.577, "underdog": 0.53}   # break-even per pick when no odds are stored
 DEFAULT_BE = 0.577                                  # unknown book / manual line: assume PrizePicks
 MODEL_VERSION = "v1be"
+H2H_EXTRA_LIVE = True   # live v1 blend also sees the older meetings in h2h.json (owner, Nov 19). Set False to go back to players.json logs only.
 
 ALIASES = {"4Z": "EP.-4Z", "Ag1l": "agl"}
 # Book / bo3.gg team-name variants (keys and values are tn() keys). Same table in model.js.
@@ -860,9 +861,7 @@ class Grader:
         opp_rank = self.rank_of(opp) if opp else None
         on = norm(opp)
         l10r, l3r = cs[:10], cs[:3]
-        # the live v1 blend gives head-to-head a flat 20% weight even from one series, so it stays on the player's own logs
-        # until a test shows the extra meetings help; the shadow grader (which shrinks by sample size) and the hit boxes use them
-        h = self.h2h_series(p, opp, before, exact=True, extra=False) if opp else []
+        h = self.h2h_series(p, opp, before, exact=True, extra=H2H_EXTRA_LIVE) if opp else []
         same = []
         if opp_rank is not None:
             for c in cs:
