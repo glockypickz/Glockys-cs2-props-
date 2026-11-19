@@ -78,9 +78,58 @@ def load_grader():
         return None
 
 
+_MO = None
+
+
+def _tk(s):
+    k = "".join(ch for ch in str(s or "").lower() if ch.isalnum())
+    for w in ("team", "esports", "gaming", "club"):
+        k = k.replace(w, "")
+    return k
+
+
+def _same(a, b):
+    a, b = _tk(a), _tk(b)
+    return bool(a and b and (a == b or (len(a) >= 4 and len(b) >= 4 and (a in b or b in a))))
+
+
+def match_odds_for(e):
+    """Match-winner odds for this line's match from team_strength.json (written by cito_update.py; a file read, no API call),
+    oriented to the pick's own team: p = [this team wins, opponent wins]. None if the match has no odds saved.
+    Recorded with the lock so we can later test whether lopsided matches run short. Display only: the grader never reads it."""
+    global _MO
+    if _MO is None:
+        try:
+            _MO = json.load(open("team_strength.json", encoding="utf-8")).get("odds") or []
+        except Exception:
+            _MO = []
+    for r in _MO:
+        if not (r.get("p") and r.get("dec") is not None):
+            continue
+        for flip, (a, b) in ((False, (r.get("n1"), r.get("n2"))), (True, (r.get("n2"), r.get("n1")))):
+            if _same(a, e.get("team")) and _same(b, e.get("opponent")):
+                p, dec = list(r["p"]), list(r["dec"])
+                if flip:
+                    p, dec = p[::-1], dec[::-1]
+                mo = {"p": p, "dec": dec, "src": r.get("src"), "at": r.get("at")}
+                for k in ("map1", "map2"):
+                    if r.get(k):
+                        mo[k] = list(r[k])[::-1] if flip else list(r[k])
+                return mo
+    return None
+
+
 def try_lock(gr, e, now, t0):
     """Save the app's grade, projection, pick and probability for this line, once, before the match starts."""
-    if gr is None or e.get("lock") or (t0 and now and now >= t0):
+    if t0 and now and now >= t0:
+        return
+    if e.get("lock"):   # already locked: add the match odds if they were missing at lock time (still before the match, grade untouched)
+        if "mo" not in e["lock"]:
+            mo = match_odds_for(e)
+            if mo:
+                e["lock"]["mo"] = mo
+        return
+    if gr is None:
         return
     try:
         st = "hs" if "head" in e["stat"].lower() else "kills" if "kill" in e["stat"].lower() else None
@@ -99,6 +148,9 @@ def try_lock(gr, e, now, t0):
                          "reasons": g["reasons"], "flag": g.get("flag", ""), "model": g["model"], "odds": e.get("odds"),
                          "hits": g.get("hits"),   # [over, series] vs this line: l5 / l10 / l20 / szn / h2h (single props only)
                          "at": now.isoformat(timespec="seconds"), "stats_updated": STATS_STAMP}
+            mo = match_odds_for(e)
+            if mo:
+                e["lock"]["mo"] = mo
     except Exception as ex:
         print("lock failed for", e.get("player"), ex)
 

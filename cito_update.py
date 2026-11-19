@@ -287,6 +287,11 @@ def main():
     if has:
         _dump(STRENGTH_FILE, st)
         print("wrote %s: rankings %s, teams with map stats %d" % (STRENGTH_FILE, {k: len(v) for k, v in st["rankings"].items()}, len(st["maps"])))
+        try:   # permanent record of match odds (no extra Cito calls)
+            import odds_log
+            print("odds_history.json: %d new, %d refreshed" % odds_log.update(st))
+        except Exception as e:
+            print("odds log skipped:", type(e).__name__, e)
     if ids:
         _dump(IDS_FILE, ids)
     idx = results_index(c)
