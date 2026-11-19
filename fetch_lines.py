@@ -220,6 +220,11 @@ def update_history(lines, now_iso):
             e.setdefault("first_odds", None)
             e["last_seen"] = now_iso
         try_lock(gr, by[k], now, t0)
+        try:
+            import shadow
+            shadow.apply(gr, by[k], now, t0)   # admin-only second grade, upcoming props only
+        except Exception as ex:
+            print("shadow skipped:", ex)
     print("locked picks:", sum(1 for e in by.values() if e.get("lock")), "of", len(by))
     try:
         from settle import settle_all
