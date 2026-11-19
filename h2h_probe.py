@@ -35,6 +35,9 @@ def base(extra):
 
 
 async def main():
+    # the live update_data.get waits on a shared limiter that the data job creates at its own startup; make one here
+    if hasattr(U, "SEM") and U.SEM is None:
+        U.SEM = asyncio.Semaphore(2)
     async with aiohttp.ClientSession(headers=U.H) as s:
         d = await U.get(s, "/matches", {
             "scope": "widget-matches", "page[offset]": 0, "page[limit]": 40, "sort": "start_date",
