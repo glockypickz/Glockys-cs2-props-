@@ -10,6 +10,10 @@ Rule (Maps 1-2, same stat as the prop: kills for kills props, headshots for head
   letter    = the same cut-offs as the live v1 letters on (proj - line) / line: A+ >= +15%, B >= +5%, C >= -2%, D >= -10%, else F.
 Every input is also saved as a count (over, series) next to its average, so the admin tab can show "last 10: 7/10".
 
+Saved once, before the match starts, and the pick, letter, line and inputs are never changed after.
+"book" (log only, never changes the pick) is refreshed each run until the match starts, so it ends as the closing picture:
+  line opened -> now, the over odds, which side the book leans (line move first, else odds off the book's usual price)
+  and the match-winner chance for this team from the saved match odds (lock["mo"]) when we have it.
 Saved once, before the match starts, and never changed after. Needs at least 5 earlier series, else the entry gets
 {"skipped": "..."} so the tab can say "not enough history". Combo props use the sum of each player's last-10 average only.
 """
@@ -88,9 +92,56 @@ def shadow_combo(gr, name, team, st, line, before="9999"):
             "grade": g, "pick": pick, "pieces": {}, "weights": {"l10": 1.0}, "combo": True}
 
 
+BOOK_BE = {"prizepicks": 0.577, "underdog": 0.53}
+
+
+def _be(odds):
+    try:
+        o = float(odds)
+    except (TypeError, ValueError):
+        return None
+    return -o / (-o + 100.0) if o <= -100 else 100.0 / (o + 100.0) if o >= 100 else None
+
+
+def book_info(e):
+    """How the book leans on this prop (log only): line movement since first seen, and the over odds against the book's usual price."""
+    line, first = e.get("line"), e.get("first_line")
+    out = {"first_line": first, "line": line, "odds": e.get("odds")}
+    mv = None
+    try:
+        mv = round(float(line) - float(first), 2)
+    except (TypeError, ValueError):
+        pass
+    out["move"] = mv
+    be = _be(e.get("odds"))
+    usual = BOOK_BE.get(str(e.get("book", "")).lower().replace(" ", ""))
+    out["over_implied"] = None if be is None else round(be, 4)
+    odds_lean = None if be is None or usual is None else round(be - usual, 4)   # + = over priced shorter than usual
+    out["odds_lean"] = odds_lean
+    if mv:
+        out["lean"], out["basis"] = ("OVER" if mv > 0 else "UNDER"), "line moved %+g" % mv
+    elif odds_lean is not None and abs(odds_lean) >= 0.01:
+        out["lean"], out["basis"] = ("OVER" if odds_lean > 0 else "UNDER"), "odds off the usual price"
+    else:
+        out["lean"], out["basis"] = None, None
+    mo = (e.get("lock") or {}).get("mo")
+    if mo and mo.get("p"):
+        out["match_win"] = mo["p"][0]
+        out["match_opp"] = mo["p"][1]
+        out["match_src"] = mo.get("src")
+    return out
+
+
 def apply(gr, e, now, t0):
     """Add e["shadow"] to one history entry: only before the match starts, once, never overwritten. Safe to call every run."""
-    if gr is None or e.get("shadow") or (t0 and now and now >= t0):
+    if t0 and now and now >= t0:
+        return
+    sh = e.get("shadow")
+    if sh:   # already graded: pick / letter / inputs stay as they are, only the book picture is refreshed until the match starts
+        if not sh.get("skipped"):
+            sh["book"] = book_info(e)
+        return
+    if gr is None:
         return
     try:
         stl = str(e.get("stat", "")).lower()
@@ -108,6 +159,8 @@ def apply(gr, e, now, t0):
             else:
                 s = shadow_single(gr, p, st, line, e.get("opponent") or "", year)
         s["at"] = now.isoformat(timespec="seconds") if now else None
+        if "skipped" not in s:
+            s["book"] = book_info(e)
         e["shadow"] = s
     except Exception as ex:
         print("shadow failed for", e.get("player"), ex)
