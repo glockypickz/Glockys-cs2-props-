@@ -433,6 +433,8 @@ class Grader:
             self.canon.setdefault(canon(p["name"]), []).append(p)
         self._memo = {}
         self._series = {}
+        self._xh_rows = {}
+        self._load_h2h()
         self._build()
 
     # ---- name matching. With a team, only players on that team (aliases applied) can match.
@@ -500,6 +502,40 @@ class Grader:
                             "adr": (sum(g["adr"]) / len(g["adr"])) if g["adr"] else None})
         out.sort(key=lambda c: (c["date"], c["mid"]), reverse=True)
         return out
+
+    # ---- extra head-to-head maps (h2h.json, written by h2h_fetch.py): old meetings between two teams that fall outside
+    # the last-15-matches window in players.json. Used ONLY for head-to-head (never for last 5/10, season or tier), and a
+    # meeting already in the player's own logs is never counted twice.
+    def _load_h2h(self, path="h2h.json"):
+        self._xh = {}
+        try:
+            import json as _j
+            d = _j.load(open(path, encoding="utf-8"))
+        except Exception:
+            return
+        for r in d.get("logs") or []:
+            if r.get("name") and r.get("log"):
+                self._xh.setdefault(canon(r["name"]), []).append((r.get("team"), r["log"]))
+
+    def xh_rows(self, p, before="9999"):
+        """Series rows (same shape as combos) from h2h.json for this player, minus meetings already in his own logs."""
+        k = id(p)
+        if k not in self._xh_rows:
+            own = {str(l.get("mid")) for l in (p.get("logs") or [])}
+            logs = [l for t, l in self._xh.get(canon(p["name"]), []) if (not t or teq(t, p.get("team"))) and str(l.get("mid")) not in own]
+            self._xh_rows[k] = self.combos(p, logs) if logs else []
+        return [c for c in self._xh_rows[k] if c["date"] < before]
+
+    def h2h_series(self, p, opp, before="9999", exact=False, extra=True):
+        """Head-to-head series vs `opp`, newest first: the player's own logs plus h2h.json meetings."""
+        if not opp:
+            return []
+        same = (lambda c: norm(c["opp"]) == norm(opp)) if exact else (lambda c: teq(c["opp"], opp))
+        rows = [c for c in self.series(p) if c["date"] < before and same(c)]
+        if extra:
+            rows += [c for c in self.xh_rows(p, before) if same(c)]
+        rows.sort(key=lambda c: (c["date"], c["mid"]), reverse=True)
+        return rows
 
     def series(self, p):
         k = id(p)
@@ -647,6 +683,7 @@ class Grader:
             sp += w * self.pwin(team, c["opp"], c["date"])
         rate = (sk + P["m"] * prior) / (sr + P["m"])
         h2h = [c for c in rows if opp and teq(c["opp"], opp)]
+        h2h += [c for c in self.xh_rows(p, before) if opp and teq(c["opp"], opp) and c.get("rd") and c.get(st) is not None]
         h2h_rd = sum(c["rd"] for c in h2h)
         h2h_rate = sum(c[st] for c in h2h) / h2h_rd if h2h_rd > 0 else None   # raw per-round rate vs this opponent (display)
         if len(h2h) >= P["h2h_min"] and P["h2h_w"] > 0:
@@ -739,7 +776,7 @@ class Grader:
         hx = lambda rows: [sum(1 for c in rows if c[st] > line), len(rows)]
         out = {"l5": hx(cs[:5]), "l10": hx(cs[:10]), "l15": hx(cs[:15]), "l20": hx(cs[:20]),
                "szn": hx([c for c in cs if c["date"][:4] == yr]),
-               "h2h": hx([c for c in cs if opp and teq(c["opp"], opp)])}
+               "h2h": hx([c for c in self.h2h_series(p, opp, before) if c.get(st) is not None])}
         sw = sh = 0.0
         for i, c in enumerate(cs[:P["n_max"]]):
             if c[st] == line:
@@ -823,7 +860,9 @@ class Grader:
         opp_rank = self.rank_of(opp) if opp else None
         on = norm(opp)
         l10r, l3r = cs[:10], cs[:3]
-        h = [c for c in cs if norm(c["opp"]) == on] if opp else []
+        # the live v1 blend gives head-to-head a flat 20% weight even from one series, so it stays on the player's own logs
+        # until a test shows the extra meetings help; the shadow grader (which shrinks by sample size) and the hit boxes use them
+        h = self.h2h_series(p, opp, before, exact=True, extra=False) if opp else []
         same = []
         if opp_rank is not None:
             for c in cs:

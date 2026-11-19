@@ -53,7 +53,7 @@ def shadow_single(gr, p, st, line, opp, year, before="9999"):
     if len(l10) < MIN_L10:
         return {"skipped": "only %d earlier series (need %d)" % (len(l10), MIN_L10)}
     pieces = {"l10": _piece(l10, st, line)}
-    pieces["h2h"] = _piece([c for c in cs if opp and teq(c["opp"], opp)], st, line)
+    pieces["h2h"] = _piece([c for c in (gr.h2h_series(p, opp, before) if hasattr(gr, "h2h_series") else [c for c in cs if opp and teq(c["opp"], opp)]) if c.get(st) is not None], st, line)
     pieces["szn"] = _piece([c for c in cs if c["date"][:4] == year], st, line)
     tier = None
     orank = gr.rank_of(opp) if opp else None
