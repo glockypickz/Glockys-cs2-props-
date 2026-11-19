@@ -36,7 +36,7 @@ jobs:
           git config user.name "actions-user"
           git config user.email "actions@github.com"
           git add players.json
-          for f in team_strength.json cito_ids.json cito_cache season_state.json; do [ -e "$f" ] && git add "$f"; done
+          for f in team_strength.json cito_ids.json cito_cache season_state.json odds_history.json; do [ -e "$f" ] && git add "$f"; done
           git diff --staged --quiet || git commit -m "Daily data update"
           git checkout -- games.json 2>/dev/null || true
           git pull --rebase
