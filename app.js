@@ -142,7 +142,10 @@ function allLines(){var out=[];LINES.concat(manual).forEach(function(l,i){var st
 // ---- views
 function chips(){var c=[];c.push('<span class="chip g">'+DB.length+' players</span>');c.push('<span class="chip">Stats updated '+esc(META.updated||'—')+'</span>');
  c.push('<span class="chip'+(liveGames().length?' g':'')+'">Games: '+(GAMES.length?liveGames().length+' live · '+upGames().length+' upcoming':'none loaded')+'</span>');c.push('<span class="chip">Lines: '+(LINES.length?LINES.length+' feed':'manual')+'</span>');c.push('<span class="chip">Opened '+ftime()+'</span>');$('chips').innerHTML=c.join('')}
-function tabs(){return TABS.concat(adminKey()&&HIST?[['shadow','◐','Shadow']]:[])} // Shadow tab: only with the admin key on this device
+// Shadow tab: admin only. The Worker hands out lines_history.json only to the admin (key header, or your logged-in admin account), so HIST loaded there means admin.
+// On the public github.io copy that file is open to anyone, so there the tab needs the admin key on the device.
+function shadowOK(){return !!HIST&&(!!adminKey()||!/github\.io$/i.test(location.hostname))}
+function tabs(){return TABS.concat(shadowOK()?[['shadow','◐','Shadow']]:[])}
 function nav(){var h=tabs().map(function(t){return '<button data-t="'+t[0]+'" class="'+(tab===t[0]?'on':'')+'"><i>'+t[1]+'</i>'+t[2]+'</button>'}).join('');$('navBot').innerHTML=h;$('navTop').innerHTML=tabs().map(function(t){return '<button data-t="'+t[0]+'" class="'+(tab===t[0]?'on':'')+'">'+t[2]+'</button>'}).join('')}
 function roster(team){return DB.filter(function(p){return teq(p.team,team)}).map(function(p){return p.name})}
 
@@ -509,7 +512,7 @@ function viewShadow(){var rows=[],up=[],skip=0,voids=0,wait=0;
  h+='<div class="card" style="margin-top:12px"><h2>Upcoming shadow picks · '+up.length+'</h2>'+(up.length?up.slice(0,150).map(function(it){return card(it,false)}).join('')+(up.length>150?'<div class="muted">Showing the first 150.</div>':''):'<div class="muted">None yet. Shadow picks are saved at the next hourly lines run after shadow.py and fetch_lines.py are uploaded, for props that have not started.</div>')+'</div>';
  h+='<div class="card" style="margin-top:12px"><h2>Settled shadow picks · '+rows.length+'</h2>'+(rows.length?rows.slice(0,80).map(function(it){return card(it,true)}).join('')+(rows.length>80?'<div class="muted">Showing the latest 80.</div>':''):'<div class="muted">Nothing settled yet. Results fill in by themselves after the matches finish.</div>')+'</div>';
  return h}
-function render(){if(tab==='shadow'&&!(adminKey()&&HIST))tab='dash';nav();chips();var v={dash:viewDash,games:viewGames,lines:viewLines,grader:viewGrader,slip:viewSlip,players:viewPlayers,shadow:viewShadow}[tab]();$('main').innerHTML=v+(tab==='lines'?opts():'')}
+function render(){if(tab==='shadow'&&!shadowOK())tab='dash';nav();chips();var v={dash:viewDash,games:viewGames,lines:viewLines,grader:viewGrader,slip:viewSlip,players:viewPlayers,shadow:viewShadow}[tab]();$('main').innerHTML=v+(tab==='lines'?opts():'')}
 function go(t){gpClose();tab=t;render();window.scrollTo(0,0)}
 // ---- images (grade + translucent logo only). Font: Russo One (bold, sporty), loaded from Google Fonts; falls back to Impact.
 var IMGFONT='"Russo One",Impact,"Arial Black",sans-serif';
