@@ -1,0 +1,29 @@
+name: Update H2H meetings
+on:
+  schedule:
+    - cron: "40 14 * * *"
+  workflow_dispatch:
+permissions:
+  contents: write
+concurrency:
+  group: h2h-write
+  cancel-in-progress: false
+jobs:
+  h2h:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install aiohttp
+      - run: python h2h_fetch.py
+      - name: Commit h2h data
+        run: |
+          git config user.name "actions-user"
+          git config user.email "actions@github.com"
+          git add h2h.json
+          git diff --staged --quiet || git commit -m "H2H meetings update"
+          git pull --rebase
+          git push
