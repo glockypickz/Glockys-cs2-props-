@@ -1,0 +1,18 @@
+name: BDL H2H probe
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Probe Ball Dont Lie head to head
+        env:
+          BALLDONTLIE_KEY: ${{ secrets.BALLDONTLIE_KEY }}
+        run: python bdl_h2h_probe.py
