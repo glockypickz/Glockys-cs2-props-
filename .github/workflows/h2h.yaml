@@ -18,7 +18,10 @@ jobs:
         with:
           python-version: "3.12"
       - run: pip install aiohttp
-      - run: python h2h_fetch.py
+      - name: Fetch head-to-head meetings (Cito first, bo3.gg second)
+        env:
+          CITO_API_KEY: ${{ secrets.CITO_API_KEY }}
+        run: python h2h_fetch.py
       - name: Commit h2h data
         run: |
           git config user.name "actions-user"
