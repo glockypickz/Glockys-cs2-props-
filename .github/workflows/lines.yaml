@@ -22,6 +22,12 @@ jobs:
         run: |
           cp lines.json /tmp/prev_lines.json 2>/dev/null || echo '{}' > /tmp/prev_lines.json
           cp lines_history.json /tmp/prev_history.json 2>/dev/null || echo '{}' > /tmp/prev_history.json
+      # Players bo3.gg has no stats for, filled in from Cito (players_cito.json). Never fails the job.
+      - name: Cito fallback players
+        continue-on-error: true
+        env:
+          CITO_API_KEY: ${{ secrets.CITO_API_KEY }}
+        run: python cito_players.py
       - name: Fetch lines
         env:
           KASHROCK_API_KEY: ${{ secrets.KASHROCK_API_KEY }}
@@ -38,6 +44,7 @@ jobs:
           if [ -f pregame.json ]; then git add pregame.json; fi
           if [ -f player_photos.json ]; then git add player_photos.json; fi
           if [ -f cito_odds.json ]; then git add cito_odds.json; fi
+          if [ -f players_cito.json ]; then git add players_cito.json; fi
           if [ -d assets/players ]; then git add assets/players; fi
           git diff --staged --quiet || git commit -m "Update lines"
           git pull --rebase
