@@ -21,6 +21,10 @@ import datetime
 
 MODEL = "shadow-l10-v1"
 ADJ = {"h2h": (0.25, 3.0), "tier": (0.25, 5.0), "szn": (0.25, 10.0)}   # (max weight, n at half of it)
+# Shadow B (e["shadow_b"]): the same recipe with the adjusters allowed to pull much harder. Chosen by a replay on 4,300 past
+# series (average miss, kills 6.34 vs 6.39 and headshots 4.00 vs 4.03 for A; the l10-only miss was 6.45 / 4.06). Saved next to A, never replaces it.
+MODEL_B = "shadow-b-v1"
+ADJ_B = {"h2h": (2.0, 3.0), "tier": (3.0, 5.0), "szn": (4.0, 10.0)}
 MIN_L10 = 5
 
 
@@ -46,14 +50,14 @@ def _letter(proj, line):
     return g, ("OVER" if proj >= line else "UNDER"), pct
 
 
-def shadow_single(gr, p, st, line, opp, year, before="9999"):
+def shadow_single(gr, p, st, line, opp, year, before="9999", adj=None, model=None):
     from grader import teq
     cs = [c for c in gr.series(p) if c["date"] < before and c.get(st) is not None]
     l10 = cs[:10]
     if len(l10) < MIN_L10:
         return {"skipped": "only %d earlier series (need %d)" % (len(l10), MIN_L10)}
     pieces = {"l10": _piece(l10, st, line)}
-    pieces["h2h"] = _piece([c for c in (gr.h2h_series(p, opp, before) if hasattr(gr, "h2h_series") else [c for c in cs if opp and teq(c["opp"], opp)]) if c.get(st) is not None], st, line)
+    pieces["h2h"] = _piece([c for c in cs if opp and teq(c["opp"], opp)], st, line)
     pieces["szn"] = _piece([c for c in cs if c["date"][:4] == year], st, line)
     tier = None
     orank = gr.rank_of(opp) if opp else None
@@ -65,7 +69,7 @@ def shadow_single(gr, p, st, line, opp, year, before="9999"):
     else:
         pieces["tier"] = {"n": 0, "mean": None, "over": 0, "tier": None}
     num, den, ws = pieces["l10"]["mean"], 1.0, {"l10": 1.0}
-    for k, (cap, kk) in ADJ.items():
+    for k, (cap, kk) in (adj or ADJ).items():
         n, m = pieces[k]["n"], pieces[k]["mean"]
         w = 0.0 if not n or m is None else cap * n / (n + kk)
         ws[k] = round(w, 3)
@@ -73,7 +77,7 @@ def shadow_single(gr, p, st, line, opp, year, before="9999"):
         den += w
     proj = num / den
     g, pick, pct = _letter(proj, line)
-    return {"model": MODEL, "line": line, "proj": round(proj, 1), "edge": round(proj - line, 1), "edge_pct": round(pct, 4),
+    return {"model": model or MODEL, "line": line, "proj": round(proj, 1), "edge": round(proj - line, 1), "edge_pct": round(pct, 4),
             "grade": g, "pick": pick, "pieces": pieces, "weights": ws}
 
 
@@ -133,9 +137,34 @@ def book_info(e):
 
 
 def apply(gr, e, now, t0):
-    """Add e["shadow"] to one history entry: only before the match starts, once, never overwritten. Safe to call every run."""
+    """Add e["shadow"] (and e["shadow_b"]) to one history entry: only before the match starts, once, never overwritten."""
     if t0 and now and now >= t0:
         return
+    _apply_a(gr, e, now, t0)
+    _apply_b(gr, e, now)
+
+
+def _apply_b(gr, e, now):
+    """Shadow B: single-player props only (a combo is just the sum of last-10 averages, the same as A). Written once, before the start."""
+    if e.get("shadow_b") or gr is None or "+" in str(e.get("player", "")):
+        return
+    try:
+        stl = str(e.get("stat", "")).lower()
+        st = "hs" if "head" in stl else "kills" if "kill" in stl else None
+        if not st:
+            return
+        line = float((e.get("lock") or {}).get("line", e["line"]))
+        year = (now.isoformat()[:4] if now else str(e.get("start", ""))[:4])
+        p = gr.find(e["player"], e.get("team"))
+        s = {"skipped": "player not found in data"} if not p else shadow_single(
+            gr, p, st, line, e.get("opponent") or "", year, adj=ADJ_B, model=MODEL_B)
+        s["at"] = now.isoformat(timespec="seconds") if now else None
+        e["shadow_b"] = s
+    except Exception as ex:
+        print("shadow B failed for", e.get("player"), ex)
+
+
+def _apply_a(gr, e, now, t0):
     sh = e.get("shadow")
     if sh:   # already graded: pick / letter / inputs stay as they are, only the book picture is refreshed until the match starts
         if not sh.get("skipped"):
