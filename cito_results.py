@@ -44,6 +44,32 @@ def is_held(H, date, a, b):
     return False
 
 
+def _twin(l, others):
+    """True if `others` (a player's logs) has the same map from another source: map number, kills, headshots, date within a day."""
+    for o in others:
+        if o is l or o.get("n") != l.get("n") or o.get("kills") != l.get("kills") or o.get("hs") != l.get("hs"):
+            continue
+        try:
+            if abs((datetime.date.fromisoformat(str(o["date"])[:10]) - datetime.date.fromisoformat(str(l["date"])[:10])).days) <= 1:
+                return True
+        except Exception:
+            pass
+    return False
+
+
+def drop_cito_twins(players):
+    """Removes Cito logs (negative mid) when the same player has the same map under a real bo3.gg id. Returns how many."""
+    n = 0
+    for e in players:
+        real = [l for l in e.get("logs") or [] if isinstance(l.get("mid"), int) and l["mid"] > 0]
+        if not real:
+            continue
+        keep = [l for l in e["logs"] if not (isinstance(l.get("mid"), int) and l["mid"] < 0 and _twin(l, real))]
+        n += len(e["logs"]) - len(keep)
+        e["logs"] = keep
+    return n
+
+
 def unsettled_teams(now):
     """Teams of started props with no result yet (from lines_history.json), most props first."""
     c = {}
@@ -71,6 +97,9 @@ def run(now=None):
     by_team = {}
     for e in players:
         by_team.setdefault(CP._key(e.get("team")), []).append(e)
+    cleaned = drop_cito_twins(players)   # a Cito map that bo3.gg has since given us (same player, map number, kills, headshots)
+    if cleaned:
+        print("cito results: removed %d Cito logs that bo3.gg also has" % cleaned)
     H = held_keys(players)
     t0 = time.time()
 
@@ -143,14 +172,14 @@ def run(now=None):
             if not ent:
                 continue
             lg = dict(r["log"], mid=-int(re.sub(r"\D", "", str(r["log"]["mid"])) or 0))
-            if any(l.get("mid") == lg["mid"] and l.get("n") == lg["n"] for l in ent["logs"]):
+            if any(l.get("mid") == lg["mid"] and l.get("n") == lg["n"] for l in ent["logs"]) or _twin(lg, ent["logs"]):
                 continue
             ent["logs"].insert(0, lg)
             got += 1
         added += got
         print("  %s vs %s (%s): %d logs added, %d players not in players.json" % (a, b, dt, got, sum(1 for r in rows if not any(CP._same_player(e["name"], r["name"]) for e in by_team.get(CP._key(r["team"])) or []))))
     print("cito results: %d matches read, %d player logs added, %s credits left" % (new_matches, added, cito_api.STATS.get("left")))
-    if added:
+    if added or cleaned:
         for e in players:
             e["logs"] = sorted(e["logs"], key=lambda l: l.get("date") or "", reverse=True)
         data["results_updated"] = now.strftime("%Y-%m-%dT%H:%M:%SZ")
