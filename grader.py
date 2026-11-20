@@ -519,11 +519,30 @@ class Grader:
                 self._xh.setdefault(canon(r["name"]), []).append((r.get("team"), r["log"]))
 
     def xh_rows(self, p, before="9999"):
-        """Series rows (same shape as combos) from h2h.json for this player, minus meetings already in his own logs."""
+        """Series rows (same shape as combos) from h2h.json for this player. A map already in his own logs, or saved twice
+        (Cito and bo3.gg give the same meeting different ids), is counted once: same opponent, map number and date +/- 1 day."""
         k = id(p)
         if k not in self._xh_rows:
-            own = {str(l.get("mid")) for l in (p.get("logs") or [])}
-            logs = [l for t, l in self._xh.get(canon(p["name"]), []) if (not t or teq(t, p.get("team"))) and str(l.get("mid")) not in own]
+            import datetime as _dt
+
+            def day(d):
+                try:
+                    return _dt.date.fromisoformat(str(d)[:10]).toordinal()
+                except Exception:
+                    return None
+            own_mid = {str(l.get("mid")) for l in (p.get("logs") or [])}
+            seen = [(day(l.get("date")), l.get("n"), l.get("opp")) for l in (p.get("logs") or []) if l.get("date")]
+
+            def dup(l):
+                d = day(l.get("date"))
+                return d is not None and any(d2 is not None and abs(d - d2) <= 1 and n2 == l.get("n") and teq(o2, l.get("opp"))
+                                             for d2, n2, o2 in seen)
+            logs = []
+            for t, l in self._xh.get(canon(p["name"]), []):
+                if (t and not teq(t, p.get("team"))) or str(l.get("mid")) in own_mid or dup(l):
+                    continue
+                logs.append(l)
+                seen.append((day(l.get("date")), l.get("n"), l.get("opp")))
             self._xh_rows[k] = self.combos(p, logs) if logs else []
         return [c for c in self._xh_rows[k] if c["date"] < before]
 
@@ -535,7 +554,7 @@ class Grader:
         rows = [c for c in self.series(p) if c["date"] < before and same(c)]
         if extra:
             rows += [c for c in self.xh_rows(p, before) if same(c)]
-        rows.sort(key=lambda c: (c["date"], c["mid"]), reverse=True)
+        rows.sort(key=lambda c: (c["date"], str(c["mid"])), reverse=True)
         return rows
 
     def series(self, p):

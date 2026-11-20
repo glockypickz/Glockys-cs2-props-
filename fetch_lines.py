@@ -109,8 +109,8 @@ def match_odds_for(e):
             _MO = json.load(open("team_strength.json", encoding="utf-8")).get("odds") or []
         except Exception:
             _MO = []
-        try:   # backup source for matches the Cito feed lacks (oddspapi_fill.py, free tier, a few calls a day)
-            _MO = list(_MO) + (json.load(open("oddspapi_odds.json", encoding="utf-8")).get("rows") or [])
+        try:   # Cito odds refreshed by cito_odds.py every run: read first so locks get the newest price
+            _MO = (json.load(open("cito_odds.json", encoding="utf-8")).get("rows") or []) + list(_MO)
         except Exception:
             pass
     for r in _MO:
@@ -220,13 +220,13 @@ def update_history(lines, now_iso):
         old = []
     now = parse_time(now_iso)
     gr = load_grader()
-    try:   # backup odds for matches Cito doesn't cover, before the locks so they get saved with them
-        import oddspapi_fill
+    try:   # fresh Cito match-winner odds (Pro), before the locks so they get saved with them
+        import cito_odds
         global _MO
-        oddspapi_fill.fill(lines, lambda a, b: bool(match_odds_for({"team": a, "opponent": b})), _same, now)
+        cito_odds.refresh(now)
         _MO = None
     except Exception as ex:
-        print("oddspapi skipped:", ex)
+        print("cito odds skipped:", ex)
     by = {(e["book"], e["player"], e["stat"], e["start"]): e for e in old}
     for l in lines:
         start = l.get("starts_at") or ""
