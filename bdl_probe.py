@@ -5,6 +5,7 @@ import os, sys, json, time, datetime, urllib.request, urllib.error, urllib.parse
 
 KEY = os.environ.get("BALLDONTLIE_KEY", "")
 BASE = "https://api.balldontlie.io/cs/v1"
+SUM = []             # one-line results, printed again at the very end
 PACE = [1.0]          # seconds between calls, set from the plan's rate limit
 
 
@@ -43,10 +44,16 @@ def show(label, path, params=None, n=1):
     st, d = call(path, params)
     data = (d or {}).get("data") if isinstance(d, dict) else None
     print("\n[%s] GET %s %s -> HTTP %s" % (label, path, json.dumps(params) if params else "", st))
+    SUM.append("%s: HTTP %s" % (label, st))
     if st != 200:
         print("   ", short(d, 300))
         return st, None
     print("   rows:", len(data) if isinstance(data, list) else "n/a", "| meta:", short((d or {}).get("meta"), 150))
+    if isinstance(data, dict):      # a single object (e.g. match_map_stats): show its keys and a short sample
+        print("   object keys:", list(data.keys())[:25])
+        if n:
+            print("   sample:", short(data, 900))
+        return st, data
     for row in (data or [])[:n]:
         print("   sample:", short(row, 900))
     return st, data
@@ -73,6 +80,7 @@ def main():
             k = (m.get("status"), m.get("status_state"))
             sv[k] = sv.get(k, 0) + 1
         print("\nstatus / status_state values seen in today+tomorrow:", {"%s/%s" % k: v for k, v in sv.items()})
+        SUM.append("match status values today+tomorrow: %s" % {"%s/%s" % k: v for k, v in sv.items()})
         pairs = [m for m in seen.values() if (m.get("team1") or {}).get("id") and (m.get("team2") or {}).get("id")]
         for m in pairs[:3]:
             a, b = m["team1"], m["team2"]
@@ -82,7 +90,9 @@ def main():
             if rows is not None:
                 meet = [r for r in rows if {(r.get("team1") or {}).get("id"), (r.get("team2") or {}).get("id")} == both and r["id"] != m["id"]]
                 print("   of those, A vs B (not today's): %d, dates %s" % (len(meet), sorted(str(r.get("start_time"))[:10] for r in meet)[-8:]))
-                print("   other teams mixed in (filter is 'either team'):", len(rows) - len(meet) - sum(1 for r in rows if r["id"] == m["id"]))
+                mixed = len(rows) - len(meet) - sum(1 for r in rows if r["id"] == m["id"])
+                print("   other teams mixed in (filter is 'either team'):", mixed)
+                SUM.append("H2H %s vs %s: %d past meetings, %d unrelated matches mixed in, returned %d rows" % (a.get("name"), b.get("name"), len(meet), mixed, len(rows)))
         fin = next((m for m in seen.values() if str(m.get("status_state") or m.get("status")).lower() in ("final", "finished", "completed")), None)
     else:
         fin = None
@@ -98,11 +108,23 @@ def main():
             st, rows = show("player_match_map_stats (map %s)" % mp.get("map_number"), "/player_match_map_stats", {"match_map_id": mp["id"]}, n=2)
             for r in (rows or [])[:10]:
                 print("   ", (r.get("player") or {}).get("nickname"), "kills", r.get("kills"), "hs%", r.get("headshot_percentage"), "adr", r.get("adr"))
-            show("match_map_stats (raw headshots live here?)", "/match_map_stats", {"match_map_id": mp["id"]}, n=0)
+            st, mms = show("match_map_stats (raw headshots live here?)", "/match_map_stats", {"match_map_id": mp["id"]}, n=1)
+            if isinstance(mms, dict):
+                rd = (mms.get("rounds") or [])
+                print("   rounds listed:", len(rd), "| first round keys:", list((rd[0] or {}).keys()) if rd else None)
     else:
         print("\nno finished match found to test stats on")
-    print("\ndone")
+    print("\n===== SUMMARY =====")
+    for x in SUM:
+        print(" ", x)
+    print("done")
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except Exception as e:      # a probe problem must not hide what was already printed
+        print("\nprobe stopped early:", type(e).__name__, e)
+        print("===== SUMMARY =====")
+        for x in SUM:
+            print(" ", x)
