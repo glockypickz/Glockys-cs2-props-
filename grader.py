@@ -359,6 +359,27 @@ def load_players(path="players.json"):
         return decode_players(json.load(f))
 
 
+def merge_cito(players, path="players_cito.json"):
+    """players + the Cito fallback players (players_cito.json) that players.json has no entry for (same name and team).
+    Only for the grader's own copy: players.json itself is never changed. Returns (players, count_added)."""
+    import json
+    try:
+        with open(path, encoding="utf-8") as f:
+            extra = json.load(f).get("players") or []
+    except Exception:
+        return players, 0
+    have = {}
+    for p in players:
+        have.setdefault(canon(p["name"]), []).append(p.get("team"))
+    out, n = list(players), 0
+    for e in extra:
+        if not e.get("logs") or any(teq(t, e.get("team")) for t in have.get(canon(e["name"]), [])):
+            continue
+        out.append({"name": e["name"], "team": e.get("team"), "logs": e["logs"], "src": "cito"})
+        n += 1
+    return out, n
+
+
 def save_players(data, path="players.json"):
     import json
     tmp = path + ".tmp"

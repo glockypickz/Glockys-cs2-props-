@@ -68,11 +68,14 @@ def parse_time(t):
 def load_grader():
     """Grader built from players.json, so each pick can be locked in. Returns None if it can't be built."""
     try:
-        from grader import Grader, load_strength, load_players
+        from grader import Grader, load_strength, load_players, merge_cito
         global STATS_STAMP
         d = load_players("players.json")
         STATS_STAMP = str(d.get("updated") or "")
-        return Grader(d.get("players", []), d.get("ranks") or {}, strength=load_strength())  # team_strength.json: file read, no Cito call
+        pl, nc = merge_cito(d.get("players", []))   # players bo3.gg lacks, filled in from Cito (players_cito.json)
+        if nc:
+            print("cito fallback players in the grader:", nc)
+        return Grader(pl, d.get("ranks") or {}, strength=load_strength())  # team_strength.json: file read, no Cito call
     except Exception as e:
         print("grader not available, picks are not locked this run:", e)
         return None
