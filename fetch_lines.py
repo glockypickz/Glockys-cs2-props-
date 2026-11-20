@@ -149,7 +149,7 @@ def try_lock(gr, e, now, t0):
     _lock(gr, e, now)
 
 
-REGRADE_TAG = "h2h-1"   # bump to regrade every not-yet-started prop once more (the grader changed); started props are never touched
+REGRADE_TAG = "h2h-2"   # bump to regrade every not-yet-started prop once more (the grader changed); started props are never touched
 
 
 def _lock(gr, e, now, regrade=False):
