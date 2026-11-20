@@ -292,12 +292,31 @@ async def match_rows(s, m, tid, tname, only=None):
     return rows
 
 
+def _drop_cito_twins(by):
+    """Logs saved by cito_results.py / cito_players.py have a negative mid. When bo3.gg has the same map (same map number, kills and
+    headshots, date within a day), the bo3.gg log wins and the Cito one goes, so a map never counts twice."""
+    real = {}
+    for (mid, n), l in by.items():
+        if isinstance(mid, int) and mid > 0:
+            real.setdefault((n, l.get("kills"), l.get("hs")), []).append(l.get("date") or "")
+    for k in [k for k in by if isinstance(k[0], int) and k[0] < 0]:
+        l = by[k]
+        for d in real.get((k[1], l.get("kills"), l.get("hs")), []):
+            try:
+                if abs((datetime.date.fromisoformat(d[:10]) - datetime.date.fromisoformat((l.get("date") or "")[:10])).days) <= 1:
+                    del by[k]
+                    break
+            except Exception:
+                pass
+
+
 def _merge_logs(old, new):
     """Union by (match, map), newest first, season only."""
     by = {}
     for l in list(old) + list(new):
         if (l.get("date") or "") >= SEASON_START:
             by[(l.get("mid"), l.get("n"))] = l
+    _drop_cito_twins(by)
     return sorted(by.values(), key=lambda l: (l.get("date") or "", l.get("mid") or 0, -(l.get("n") or 0)), reverse=True)
 
 
