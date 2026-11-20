@@ -1,0 +1,50 @@
+name: Update CS2 lines
+on:
+  schedule:
+    - cron: "7 * * * *"
+  workflow_dispatch:
+permissions:
+  contents: write
+concurrency:
+  group: data-commit
+  cancel-in-progress: false
+jobs:
+  lines:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      # Copies from before this run, so notify_push.py can tell what is new
+      - name: Snapshot previous lines
+        run: |
+          cp lines.json /tmp/prev_lines.json 2>/dev/null || echo '{}' > /tmp/prev_lines.json
+          cp lines_history.json /tmp/prev_history.json 2>/dev/null || echo '{}' > /tmp/prev_history.json
+      - name: Fetch lines
+        env:
+          KASHROCK_API_KEY: ${{ secrets.KASHROCK_API_KEY }}
+          CITO_API_KEY: ${{ secrets.CITO_API_KEY }}
+        run: python fetch_lines.py
+      - name: Cache player photos
+        run: python player_photos.py
+      - name: Commit lines
+        run: |
+          git config user.name "actions-user"
+          git config user.email "actions@github.com"
+          if [ -f lines.json ]; then git add lines.json; fi
+          if [ -f lines_history.json ]; then git add lines_history.json; fi
+          if [ -f pregame.json ]; then git add pregame.json; fi
+          if [ -f player_photos.json ]; then git add player_photos.json; fi
+          if [ -f cito_odds.json ]; then git add cito_odds.json; fi
+          if [ -d assets/players ]; then git add assets/players; fi
+          git diff --staged --quiet || git commit -m "Update lines"
+          git pull --rebase
+          git push
+      # Phone notifications to beta users (new lines / new grades). Skips if nothing is new or GP_ADMIN_KEY isn't set. Never fails the job.
+      - name: Push notifications
+        continue-on-error: true
+        env:
+          GP_ADMIN_KEY: ${{ secrets.GP_ADMIN_KEY }}
+        run: python notify_push.py /tmp/prev_lines.json /tmp/prev_history.json
