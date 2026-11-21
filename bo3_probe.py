@@ -1,10 +1,9 @@
-"""bo3.gg probe 2 (changes nothing): find the exact source of the ANALYTICS INSIGHTS panel.
-Probe 1 showed: the match record has no insights field, the page HTML has no panel text (it is drawn in the browser),
-the site has an /analytics/:slug page and its code mentions ai_predictions.
-1  read the script chunks the site loads (following its dynamic imports) and print where 'ai_predictions', 'strengths' / 'weaknesses'
-   and 'insights' appear, plus the API paths written in the same chunks
-2  try likely API paths built from the match id, and print every one that answers
-About 300 small requests. Set MATCH_SLUG to probe a different match."""
+"""bo3.gg probe 3 (changes nothing): get the ANALYTICS INSIGHTS data itself.
+Probe 2 showed: the site lists 'insights' and 'ai_predictions' among the extra pieces ('with' options) a match can be asked for, and it has a
+WidgetMatchInsights component. This probe
+1  asks the match API for those pieces (alone and combined) and prints what comes back, especially anything named insights
+2  reads the source of the WidgetMatchInsights component, so we see which fields it shows
+About 25 requests. Set MATCH_SLUG to probe a different match."""
 import os, sys, re, json, time, urllib.request, urllib.error, urllib.parse
 
 API = os.environ.get("BO3_API", "https://api.bo3.gg/api/v1").rstrip("/")
@@ -13,9 +12,6 @@ SLUG = (os.environ.get("MATCH_SLUG") or "ex-rustec-vs-hype-tech-21-11-2026").str
 UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/122.0.0.0 Safari/537.36"
 HJ = {"accept": "application/json", "origin": SITE, "referer": SITE + "/", "user-agent": UA}
 HH = {"accept": "*/*", "user-agent": UA, "referer": SITE + "/"}
-NOISE = re.compile(r"google|gtag|cloudflare|yandex|metrika|hotjar|sentry|amplitude|plausible", re.I)
-KEYWORDS = re.compile(r"predict|insight|analytic|(^|[/_])ai[_/]|strength|weak|summar|preview", re.I)
-MAX_CHUNKS = int(os.environ.get("MAX_CHUNKS", "400"))
 
 
 def short(o, n=420):
@@ -24,7 +20,7 @@ def short(o, n=420):
     return t if len(t) <= n else t[:n] + " ...[cut]"
 
 
-def get(url, headers, limit=3_000_000, delay=0.15):
+def get(url, headers, limit=3_000_000, delay=0.3):
     time.sleep(delay)
     req = urllib.request.Request(url, headers=headers)
     try:
@@ -36,109 +32,78 @@ def get(url, headers, limit=3_000_000, delay=0.15):
         return 0, "%s %s" % (type(ex).__name__, str(ex)[:150])
 
 
-def jget(path):
-    st, body = get(API + path, HJ, delay=0.5)
+def jget(path, params=None):
+    q = urllib.parse.urlencode(params or {}, safe=",[]")
+    st, body = get(API + path + ("?" + q if q else ""), HJ)
     try:
         return st, json.loads(body)
     except Exception:
         return st, body
 
 
-def ctx(text, rx, width=220, cap=5):
-    """up to `cap` contexts around a regex, skipping analytics-vendor noise near the match"""
-    out = []
-    for mt in re.finditer(rx, text):
-        a, b = max(0, mt.start() - width), min(len(text), mt.end() + width)
-        if NOISE.search(text[max(0, mt.start() - 40):mt.end() + 40]):
-            continue
-        out.append(re.sub(r"\s+", " ", text[a:b]))
-        if len(out) >= cap:
-            break
-    return out
-
-
 def main():
     print("match slug:", SLUG, "| api:", API, "| site:", SITE)
-    st, m = jget("/matches/" + urllib.parse.quote(SLUG))
-    d = m if isinstance(m, dict) else {}
-    mid, t1, t2 = d.get("id"), d.get("team1_id"), d.get("team2_id")
-    print("match record HTTP %s: id %s, team ids %s / %s, tournament id %s" % (st, mid, t1, t2, d.get("tournament_id")))
+    st, base = jget("/matches/" + urllib.parse.quote(SLUG))
+    b = base if isinstance(base, dict) else {}
+    mid = b.get("id")
+    print("base match record HTTP %s, id %s, %d keys" % (st, mid, len(b)))
 
-    # ---- 1 crawl the site's own script chunks
+    print("\n=== 1  the match API with extra pieces asked for")
+    withs = ["insights", "ai_predictions", "insights,ai_predictions", "teams,tournament,insights", "teams", "teams,tournament", "games", "teams,tournament,games"]
+    got_insights = None
+    for w in withs:
+        st, o = jget("/matches/" + urllib.parse.quote(SLUG), {"with": w})
+        if st != 200 or not isinstance(o, dict):
+            print("  with=%-28s HTTP %s %s" % (w, st, short(o, 200)))
+            continue
+        new = [k for k in o if k not in b]
+        print("  with=%-28s HTTP 200, %d keys, new keys: %s" % (w, len(o), new))
+        for k in new:
+            v = o[k]
+            print("      new key '%s' (%s): %s" % (k, type(v).__name__, short(v, 2800 if "insight" in k else 600)))
+            if "insight" in k and v:
+                got_insights = got_insights or v
+    for p, par in (("/matches", {"filter[matches.id][eq]": mid, "with": "insights"}), ("/matches", {"filter[matches.slug][eq]": SLUG, "with": "insights,ai_predictions"})):
+        st, o = jget(p, par)
+        res = o.get("results") if isinstance(o, dict) else None
+        print("  list %s %s -> HTTP %s, %s" % (p, par, st, ("%d results, keys of the first: %s" % (len(res), sorted(res[0].keys())[:60])) if res else short(o, 200)))
+        if res and isinstance(res[0], dict) and res[0].get("insights"):
+            print("      insights: %s" % short(res[0]["insights"], 2800))
+
+    # ---- 2 the component source
+    print("\n=== 2  source of the WidgetMatchInsights component")
     page = "%s/matches/%s" % (SITE, urllib.parse.quote(SLUG))
     st, html = get(page, dict(HH, accept="text/html"))
-    entry = []
+    entry = None
     for s in re.findall(r"(?:src|href)=\"([^\"]+\.js)\"", html):
         u = urllib.parse.urljoin(page, s)
-        if u.startswith(SITE) and u not in entry:
-            entry.append(u)
-    print("\n=== 1  page HTTP %s, %d script files on the page; crawling their dynamic imports (max %d chunks)" % (st, len(entry), MAX_CHUNKS))
-    seen, queue, bodies = set(entry), list(entry), {}
-    chunk_rx = re.compile(r"[\"'](?:\./|/?_nuxt/)?([A-Za-z0-9_\-]{6,14}\.js)[\"']")
-    while queue and len(bodies) < MAX_CHUNKS:
-        u = queue.pop(0)
-        stc, js = get(u, HH)
-        if stc != 200:
+        if not u.startswith(SITE):
             continue
-        bodies[u] = js
-        for name in set(chunk_rx.findall(js)):
-            nu = urllib.parse.urljoin(u, "./" + name)
-            if nu not in seen:
-                seen.add(nu)
-                queue.append(nu)
-    print("   read %d script files, %.1f MB in total" % (len(bodies), sum(len(v) for v in bodies.values()) / 1e6))
-
-    terms = [("ai_predictions", r"ai_predictions|aiPredictions"), ("strengths / weaknesses", r"strengths|weaknesses"), ("insights", r"[Ii]nsights|analytics_insights")]
-    hot = set()
-    for label, rx in terms:
-        n = 0
-        print("\n--- '%s' in the site's code" % label)
-        for u, js in bodies.items():
-            hits = ctx(js, rx, 230, 3)
-            if hits:
-                hot.add(u)
-                for h in hits:
-                    if n < 8:
-                        n += 1
-                        print("   %s: ...%s..." % (u.rsplit("/", 1)[-1], h))
-        if n == 0:
-            print("   no hits")
-    for u in bodies:
-        if u.endswith("DhyZUSU1.js"):
-            hot.add(u)
-    lit_rx = re.compile(r"[`\"'](/[A-Za-z0-9_\-/${}.:?=\[\]&,]{2,140})[`\"']")
-    print("\n--- API-looking paths written in the chunks that mention those words (and the /analytics page chunk)")
-    for u in sorted(hot)[:12]:
-        lits = []
-        for l in lit_rx.findall(bodies[u]):
-            if l not in lits and (KEYWORDS.search(l) or "/matches" in l or l.startswith("/games")):
-                lits.append(l)
-        print("   %s (%d KB): %s" % (u.rsplit("/", 1)[-1], len(bodies[u]) // 1024, lits[:30]))
-    allp = []
-    for js in bodies.values():
-        for l in lit_rx.findall(js):
-            if KEYWORDS.search(l) and l not in allp:
-                allp.append(l)
-    print("\n--- every path-like string in all chunks that looks like predictions / insights / analytics (%d):" % len(allp), sorted(allp)[:70])
-
-    # ---- 2 guessed endpoints
-    print("\n=== 2  guessed API paths (answers other than 404 are listed)")
-    q = "filter[%s.match_id][eq]=" + str(mid)
-    paths = ["/ai_predictions?" + q % "ai_predictions", "/ai_predictions?filter[match_id][eq]=%s" % mid, "/ai_predictions/%s" % mid, "/ai_predictions/%s" % SLUG,
-             "/ai_predictions?limit=1", "/analytics/%s" % SLUG, "/analytics/%s" % mid, "/analytics?" + q % "analytics", "/analytics?limit=1",
-             "/analytics/matches/%s" % SLUG, "/analytics/matches/%s" % mid, "/matches/%s/analytics" % mid, "/matches/%s/ai_predictions" % mid,
-             "/matches/%s/ai_predictions" % SLUG, "/predictions?" + q % "predictions", "/predictions?limit=1", "/matches/%s/insights" % mid,
-             "/matches/%s/ai_insights" % mid, "/insights/%s" % SLUG, "/ai_insights/%s" % mid, "/ai_insights?" + q % "ai_insights",
-             "/matches/%s/preview" % mid, "/match_analytics/%s" % mid, "/matches_analytics/%s" % mid, "/matches/%s/team_analytics" % mid,
-             "/teams/%s/analytics" % t1, "/teams/%s/insights" % t1]
-    dead = 0
-    for p in paths:
-        s2, o = jget(p)
-        if s2 in (404, 405):
-            dead += 1
-            continue
-        print("  HTTP %s %s -> %s" % (s2, p, short(o, 700)))
-    print("  (%d guesses answered 404/405)" % dead)
+        st, js = get(u, HH, delay=0.15)
+        if st == 200 and "WidgetMatchInsights" in js:
+            entry = (u, js)
+            break
+    if not entry:
+        print("  the script that registers WidgetMatchInsights was not found on the page")
+        return
+    u, js = entry
+    mt = re.search(r"\[\"WidgetMatchInsights\",([A-Za-z0-9_$]+)\]", js)
+    var = mt.group(1) if mt else None
+    print("  registered in %s as variable %s" % (u.rsplit("/", 1)[-1], var))
+    chunk = None
+    if var:
+        m2 = re.search(re.escape(var) + r"\s*=\s*\(\)\s*=>\s*[A-Za-z0-9_$]+\(\(\)\s*=>\s*import\(\"\./([A-Za-z0-9_\-]+\.js)\"\)", js)
+        if not m2:
+            m2 = re.search(r"\b" + re.escape(var) + r"=[^;]{0,80}?import\(\"\./([A-Za-z0-9_\-]+\.js)\"\)", js)
+        chunk = m2.group(1) if m2 else None
+    print("  component file:", chunk)
+    if chunk:
+        st, src = get(urllib.parse.urljoin(u, "./" + chunk), HH)
+        src = re.sub(r"\s+", " ", src)
+        print("  HTTP %s, %d bytes. Source:" % (st, len(src)))
+        print("  " + src[:5000])
+        deps = sorted(set(re.findall(r"\"\./([A-Za-z0-9_\-]+\.js)\"", src)))
+        print("  it imports:", deps[:20])
     print("\ndone.")
 
 
