@@ -1,0 +1,22 @@
+name: bo3 probe (insights)
+on:
+  workflow_dispatch:
+    inputs:
+      slug:
+        description: bo3.gg match slug (the end of the match page link)
+        default: ex-rustec-vs-hype-tech-21-11-2026
+permissions:
+  contents: read
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Probe bo3.gg for the Analytics Insights panel
+        env:
+          MATCH_SLUG: ${{ github.event.inputs.slug }}
+        run: python bo3_probe.py
