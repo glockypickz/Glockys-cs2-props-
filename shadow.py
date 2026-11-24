@@ -50,9 +50,9 @@ def _letter(proj, line):
     return g, ("OVER" if proj >= line else "UNDER"), pct
 
 
-def shadow_single(gr, p, st, line, opp, year, before="9999", adj=None, model=None):
+def shadow_single(gr, p, st, line, opp, year, before="9999", adj=None, model=None, period=None):
     from grader import teq
-    cs = [c for c in gr.series(p) if c["date"] < before and c.get(st) is not None]
+    cs = [c for c in gr.series(p, period) if c["date"] < before and c.get(st) is not None]
     l10 = cs[:10]
     if len(l10) < MIN_L10:
         return {"skipped": "only %d earlier series (need %d)" % (len(l10), MIN_L10)}
@@ -81,13 +81,13 @@ def shadow_single(gr, p, st, line, opp, year, before="9999", adj=None, model=Non
             "grade": g, "pick": pick, "pieces": pieces, "weights": ws}
 
 
-def shadow_combo(gr, name, team, st, line, before="9999"):
+def shadow_combo(gr, name, team, st, line, before="9999", period=None):
     mu = 0.0
     for n in [x.strip() for x in str(name).split("+") if x.strip()]:
         p = gr.find(n, team)
         if not p:
             return {"skipped": "player not in data: " + n}
-        l10 = [c[st] for c in gr.series(p) if c["date"] < before and c.get(st) is not None][:10]
+        l10 = [c[st] for c in gr.series(p, period) if c["date"] < before and c.get(st) is not None][:10]
         if len(l10) < MIN_L10:
             return {"skipped": "%s: only %d earlier series (need %d)" % (n, len(l10), MIN_L10)}
         mu += _mean(l10)
@@ -157,7 +157,7 @@ def _apply_b(gr, e, now):
         year = (now.isoformat()[:4] if now else str(e.get("start", ""))[:4])
         p = gr.find(e["player"], e.get("team"))
         s = {"skipped": "player not found in data"} if not p else shadow_single(
-            gr, p, st, line, e.get("opponent") or "", year, adj=ADJ_B, model=MODEL_B)
+            gr, p, st, line, e.get("opponent") or "", year, adj=ADJ_B, model=MODEL_B, period=e.get("period"))
         s["at"] = now.isoformat(timespec="seconds") if now else None
         e["shadow_b"] = s
     except Exception as ex:
@@ -180,13 +180,13 @@ def _apply_a(gr, e, now, t0):
         line = float((e.get("lock") or {}).get("line", e["line"]))
         year = (now.isoformat()[:4] if now else str(e.get("start", ""))[:4])
         if "+" in e["player"]:
-            s = shadow_combo(gr, e["player"], e.get("team"), st, line)
+            s = shadow_combo(gr, e["player"], e.get("team"), st, line, period=e.get("period"))
         else:
             p = gr.find(e["player"], e.get("team"))
             if not p:
                 s = {"skipped": "player not found in data"}
             else:
-                s = shadow_single(gr, p, st, line, e.get("opponent") or "", year)
+                s = shadow_single(gr, p, st, line, e.get("opponent") or "", year, period=e.get("period"))
         s["at"] = now.isoformat(timespec="seconds") if now else None
         if "skipped" not in s:
             s["book"] = book_info(e)
