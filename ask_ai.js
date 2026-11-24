@@ -114,12 +114,27 @@ export function systemPrompt() {
   return [
     "You are Glocky, the assistant for Glockys Prop Grader. Always speak as Glocky in a short, clear, friendly tone.",
     "The chat already labels your bubble 'Glocky says', so do not start with 'Glocky says'.",
-    "Use ONLY the facts given in the user message. Do not use any other knowledge, memories, or opinions about CS2, players, teams, or lines.",
-    "Do not invent, round in a way that changes a reported figure, or fill gaps. Do not mention being an AI model, Google, Gemini, keys, prompts, or APIs.",
+    "Use ONLY the facts given in the user message. Those facts are from our data (Glocky's data). Do not use any other knowledge, memories, or opinions about CS2, players, teams, or lines.",
+    "Do not invent, round in a way that changes a reported figure, or fill gaps. Do not mention being an AI model, keys, prompts, or APIs.",
+    "Never name a data provider, vendor, website, or model. Attribute every figure to our data or Glocky's data.",
     "If the facts say the data is missing, or they do not contain the answer, say exactly that you don't have that in our data. Do not guess.",
     "When a grade is included, state our pick (Over or Under), the letter grade, and the projection exactly as given. Those numbers come from our grader, not from you.",
     "Do not mention locked picks, a track record, or historical slips. Do not offer to browse the web."
   ].join(" ");
+}
+
+// Provider names Glocky must never say in a reply or label. Books on a line (PrizePicks, Underdog) are not in this list.
+export const PROVIDER_RE = /\b(cito|bo3(?:\.gg)?|kash\s*rock|hltv(?:\.org)?|gemini|google(?:\s+ai(?:\s+studio)?)?)\b/gi;
+
+export function scrubProviders(text) {
+  let s = String(text || "");
+  s = s.replace(/\b(cito|bo3(?:\.gg)?|kash\s*rock|hltv(?:\.org)?)\s+(?:derived\s+)?(?:data|odds|stats?|rank(?:ing)?s?|match context|pick tendencies|team map stats(?:\s*\/\s*pick tendencies)?)\b/gi, "our data");
+  s = s.replace(/\(\s*(?:cito|bo3(?:\.gg)?|kash\s*rock|hltv(?:\.org)?)\s*,\s*/gi, "(");
+  s = s.replace(/\b(cito|bo3\.gg|bo3|kash\s*rock|hltv(?:\.org)?)\b/gi, "our data");
+  s = s.replace(/\b(gemini(?:\s+api)?|google(?:\s+ai(?:\s+studio)?)?)\b/gi, "Glocky");
+  s = s.replace(/\bour data(?:'s)? data\b/gi, "our data");
+  s = s.replace(/\s{2,}/g, " ").replace(/\s+([.,;:])/g, "$1");
+  return s.trim();
 }
 
 export function parsePrompt() {
@@ -183,6 +198,9 @@ function stripGlockySays(text) {
 }
 
 export function fallbackPhrase(result) {
+  return scrubProviders(_fallbackPhrase(result));
+}
+function _fallbackPhrase(result) {
   if (!result || result.missing) return DATA_MISSING;
   if (result.grade) {
     const g = result.grade;
@@ -206,7 +224,7 @@ export function fallbackPhrase(result) {
     const bits = [];
     if (f.vrs) bits.push("VRS rank #" + f.vrs.rank + " as of " + f.vrs.date);
     if (f.world) bits.push("world rank #" + f.world.rank);
-    if (f.odds && f.odds.win != null) bits.push("Cito win chance " + (f.odds.win * 100).toFixed(1) + "% vs " + f.odds.opp);
+    if (f.odds && f.odds.win != null) bits.push("win chance " + (f.odds.win * 100).toFixed(1) + "% vs " + f.odds.opp);
     if (bits.length) return (f.team || "This team") + ": " + bits.join("; ") + ".";
   }
   if (f && f.kind === "method") return f.text;
@@ -264,7 +282,7 @@ export async function handleAsk(request, env, url, keyHash) {
   const histText = hist.map((h) => (h && h.role ? h.role : "user") + ": " + String((h && (h.content || h.text)) || "").slice(0, 400)).join("\n");
   const userMsg = [
     "FACTS FROM OUR DATA (use only these):",
-    result.factText,
+    scrubProviders(result.factText),
     "",
     "USER QUESTION:",
     question,
@@ -273,7 +291,7 @@ export async function handleAsk(request, env, url, keyHash) {
 
   let answer;
   const g = await geminiGenerate(env, systemPrompt(), userMsg, 15000);
-  if (g.ok) answer = stripGlockySays(g.text);
+  if (g.ok) answer = scrubProviders(stripGlockySays(g.text));
   else answer = fallbackPhrase(result);
 
   return json({
@@ -285,4 +303,4 @@ export async function handleAsk(request, env, url, keyHash) {
 }
 
 // test helpers (no secrets)
-export const _test = { hasGeminiKey, geminiModel, DEFAULT_MODEL, USER_DAILY, SETUP_MSG, stripGlockySays, extractText };
+export const _test = { hasGeminiKey, geminiModel, DEFAULT_MODEL, USER_DAILY, SETUP_MSG, stripGlockySays, extractText, scrubProviders, PROVIDER_RE };
