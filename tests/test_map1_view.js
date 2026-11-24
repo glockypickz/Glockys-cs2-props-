@@ -73,6 +73,42 @@ var bothSplit = M.linesTabLines(both.concat(only1.map(function (l) { return Obje
 check("Map 1 filter does not include hidden Map 1 from a Maps 1-2 game", bothSplit.filter(M.isMap1).every(function (l) { return l.team === "C"; }));
 check("Maps 1-2 filter does not include Map 1-only games", bothSplit.filter(M.isMaps12).every(function (l) { return l.team === "Fnatic"; }));
 
+console.log("Lines tab Map 1 / Maps 1-2 filter (every line kept, no either/or rule)");
+var board = [
+  line({ period: "Maps 1-2", player: "a", line: 32.5 }),
+  line({ period: "Maps 1-2", player: "b", line: 31.5, book: "Underdog" }),
+  line({ period: "Map 1", player: "a", line: 16.5 }),
+  line({ period: "Map 1", player: "b", line: 15.5, book: "Underdog" }),
+  line({ period: "Map 1", player: "c", team: "C", opponent: "D", line: 14.5 })
+];
+var pcBoth = M.periodChoice(board, undefined);
+check("both kinds up: the filter is shown", pcBoth.show === true);
+check("nothing chosen yet: default is Maps 1-2, same as before", pcBoth.mode === "12");
+check("button counts are per kind and All is the sum", pcBoth.n["12"] === 2 && pcBoth.n.m1 === 3 && pcBoth.n.all === 5);
+check("All keeps every line", M.periodFilter(board, "all").length === 5);
+check("Maps 1-2 shows only Maps 1-2", M.periodFilter(board, "12").length === 2 && M.periodFilter(board, "12").every(M.isMaps12));
+check("Map 1 shows every Map 1 line, including a game that also has Maps 1-2", M.periodFilter(board, "m1").length === 3 && M.periodFilter(board, "m1").some(function (l) { return l.team === "Fnatic"; }));
+check("the saved click is honoured", M.periodChoice(board, "m1").mode === "m1" && M.periodChoice(board, "all").mode === "all" && M.periodChoice(board, "12").mode === "12");
+check("an unknown saved value falls back to Maps 1-2", M.periodChoice(board, "zzz").mode === "12");
+var onlyMap1 = M.periodChoice(board.filter(M.isMap1), "12");
+check("only Map 1 up: no filter, everything shows", onlyMap1.show === false && onlyMap1.mode === "all" && onlyMap1.n.all === 3);
+var only12b = M.periodChoice(board.filter(M.isMaps12), "m1");
+check("only Maps 1-2 up: no filter even if Map 1 was clicked on another day", only12b.show === false && only12b.mode === "all" && only12b.n.all === 2);
+check("empty board", M.periodChoice([], "m1").show === false && M.periodFilter([], "m1").length === 0);
+check("periodMatches treats a missing period as Maps 1-2 (old history rows)", M.periodMatches({}, "12") === true && M.periodMatches({}, "m1") === false);
+check("the either/or rule used by the slip and dashboard is unchanged", M.linesTabLines(board, tn).filter(M.isMap1).every(function (l) { return l.team === "C"; }));
+
+console.log("wiring in app.js (Lines tab)");
+var appSrc = require("fs").readFileSync(require("path").join(__dirname, "..", "app.js"), "utf8");
+var vl = appSrc.slice(appSrc.indexOf("function viewLines()"), appSrc.indexOf("// ---- track record"));
+check("allLines takes a flag that skips the either/or rule", /function allLines\(both\)/.test(appSrc) && /if\(!both&&typeof GPMap1!=='undefined'\)out=GPMap1\.linesTabLines/.test(appSrc));
+check("the Lines board reads every line", /function viewLines\(\)\{var ls=allLines\(true\)/.test(appSrc));
+check("the filter has All, Maps 1-2 and Map 1 buttons", /\['all','All'\],\['12','Maps 1-2'\],\['m1','Map 1'\]/.test(vl) && /data-act="lper"/.test(vl));
+check("the filter is only drawn when both kinds are up", /if\(pc\.show\)h\+=/.test(vl));
+check("rows, day counts and book counts all follow the filter", /pOK\(l\)&&\(d==='all'/.test(vl) && /if\(!pOK\(l\)\)return;/.test(vl));
+check("Grade and + Slip on Lines rows read the full list", (vl.match(/data-raw="1"/g) || []).length === 2 && /allLines\(b\.dataset\.raw==='1'\)\[i\]/.test(appSrc) && (appSrc.match(/allLines\(b\.dataset\.raw==='1'\)\[i\]/g) || []).length === 2);
+check("the dashboard, slip and game panel still use the either/or list", /function viewDash\(\)\{var ls=allLines\(\)\./.test(appSrc) && /var all=allLines\(\),mine=\[\]/.test(appSrc));
+
 console.log("Games without PrizePicks or Underdog lines are not listed");
 var keys = M.listedGameKeys(mixed, tn);
 check("PP/UD Maps 1-2 game is listed", M.gameIsListed({ team1: "A", team2: "B", start: "2026-11-24T10:00:00Z" }, keys, tn));

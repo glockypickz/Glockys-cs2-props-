@@ -170,10 +170,10 @@ function sname(s,period){var per=(typeof GPMap1!=='undefined'?GPMap1.periodOf({p
 function normStat(s){s=String(s||'').toLowerCase();return s.indexOf('head')>-1||s==='hs'?'hs':s.indexOf('kill')>-1?'kills':null}
 // ---- all lines = feed + manual
 function acceptedRaw(l){if(!normStat(l.stat))return false;var per=typeof GPMap1!=='undefined'?GPMap1.periodOf(l):(l.period||'Maps 1-2');if(per!=='Maps 1-2'&&per!=='Map 1')return false;return typeof GPMap1==='undefined'||GPMap1.isPpUd(l)}
-function allLines(){var out=[],now=NOW();
+function allLines(both){var out=[],now=NOW();
  LINES.concat(manual).forEach(function(l,i){if(typeof GPBoard!=='undefined'&&!GPBoard.isCurrentBoardLine(l,now))return;if(!acceptedRaw(l))return;var st=normStat(l.stat),per=typeof GPMap1!=='undefined'?GPMap1.periodOf(l):(l.period||'Maps 1-2');
  var combo=isCombo(l.player),p=combo?null:find(l.player,l.team);var o={player:l.player,team:l.team||(p&&p.team)||'',stat:st,line:+l.line,opp:l.opponent||'',src:l.src||'feed',idx:i,book:l.book||'',odds:l.odds,start:l.starts_at||'',period:per};var G=gradeFor(l.player,l.team,st,o.line,o.opp,{book:o.book,odds:o.odds,period:per,start:o.start});o.g=G&&!G.missing?G:null;o.miss=G&&G.missing?G.missing:'';out.push(o)});
- if(typeof GPMap1!=='undefined')out=GPMap1.linesTabLines(out,tn,function(iso){return iso?cday(iso):cday()});
+ if(!both&&typeof GPMap1!=='undefined')out=GPMap1.linesTabLines(out,tn,function(iso){return iso?cday(iso):cday()});
  return out}
 var BK_C=null;
 function dayFn(iso){return iso?cday(iso):cday()}
@@ -350,25 +350,25 @@ function viewGames(){if(!GAMES.length)return '<div class="card"><h2>Games</h2><d
  var days={};up.forEach(function(g){var d=new Intl.DateTimeFormat('en-US',{timeZone:'America/Chicago',weekday:'long',month:'short',day:'numeric'}).format(new Date(g.start));(days[d]=days[d]||[]).push(g)});
  return h+Object.keys(days).map(function(d){return '<h2>'+esc(d)+' · '+days[d].length+' games</h2><div class="grid c2">'+days[d].map(function(g){return gameCard(g,true)}).join('')+'</div>'}).join('')}
 function lineDays(ls){var t=cday(),set={};set[t]=1;set[addDays(t,1)]=1;ls.forEach(function(l){if(l.start)set[cday(l.start)]=1});return Object.keys(set).sort().filter(function(d){return d>=t})}
-function viewLines(){var ls=allLines();
+function viewLines(){var ls=allLines(true);
  if(boardEmpty()&&!ls.length)return '<div class="card"><h2>Lines</h2>'+emptyBoardHtml()+'</div>';
  var days=lineDays(ls),cnt={},t0=cday();
  ls.forEach(function(l){var k=l.start?cday(l.start):t0;cnt[k]=(cnt[k]||0)+1});
  var d=sel.ld;if(!d||(d!=='all'&&days.indexOf(d)<0))d=cnt[t0]?t0:(days.filter(function(x){return cnt[x]})[0]||'all');
- var h='<div class="btns" style="margin-bottom:8px">'+days.map(function(x){return '<button class="'+(d===x?'b':'g')+'" data-act="lday" data-d="'+x+'">'+esc(dayLabel(x))+' · '+(cnt[x]||0)+'</button>'}).join('')+'<button class="'+(d==='all'?'b':'g')+'" data-act="lday" data-d="all">All · '+ls.length+'</button></div>';
  var bkey=function(l){var b=String(l.book||'').toLowerCase();return b.indexOf('prize')>-1?'pp':b.indexOf('underdog')>-1?'ud':'other'},bf=sel.lb||'all',bc={all:0,pp:0,ud:0};
- ls.forEach(function(l){var k=l.start?cday(l.start):t0;if(d==='all'||k===d){bc.all++;if(bkey(l)==='pp')bc.pp++;else if(bkey(l)==='ud')bc.ud++}});
+ // Map 1 / Maps 1-2 filter: every line is kept (no either/or rule here). It shows when both kinds are up for this day and book. Default Maps 1-2.
+ var dayRaw=[];ls.forEach(function(l){var k=l.start?cday(l.start):t0;if((d==='all'||k===d)&&(bf==='all'||bkey(l)===bf))dayRaw.push(l)});
+ var pc=typeof GPMap1!=='undefined'?GPMap1.periodChoice(dayRaw,sel.lp):{show:false,mode:'all',n:{all:dayRaw.length}},pOK=function(l){return typeof GPMap1==='undefined'||GPMap1.periodMatches(l,pc.mode)};
+ var tot=0;cnt={};ls.forEach(function(l){if(!pOK(l))return;var k=l.start?cday(l.start):t0;tot++;cnt[k]=(cnt[k]||0)+1;if(d==='all'||k===d){bc.all++;if(bkey(l)==='pp')bc.pp++;else if(bkey(l)==='ud')bc.ud++}});
+ var h='<div class="btns" style="margin-bottom:8px">'+days.map(function(x){return '<button class="'+(d===x?'b':'g')+'" data-act="lday" data-d="'+x+'">'+esc(dayLabel(x))+' · '+(cnt[x]||0)+'</button>'}).join('')+'<button class="'+(d==='all'?'b':'g')+'" data-act="lday" data-d="all">All · '+tot+'</button></div>';
  h+='<div class="btns" style="margin-bottom:8px">'+[['all','All books'],['pp','PrizePicks'],['ud','Underdog']].map(function(x){return '<button class="'+(bf===x[0]?'b':'g')+'" data-act="lbook" data-b="'+x[0]+'">'+x[1]+' · '+bc[x[0]]+'</button>'}).join('')+'</div>';
- var dayBook=[];ls.forEach(function(l,i){var k=l.start?cday(l.start):t0;if((d==='all'||k===d)&&(bf==='all'||bkey(l)===bf))dayBook.push([l,i])});
- var has12=dayBook.some(function(a){return a[0].period==='Maps 1-2'}),has1=dayBook.some(function(a){return a[0].period==='Map 1'});
- var pf=sel.lp||'12';if(!has12||!has1)pf=has1&&!has12?'m1':'12';if(pf==='m1'&&!has1)pf='12';if(pf==='12'&&!has12&&has1)pf='m1';
- if(has12&&has1){var pc={12:0,m1:0};dayBook.forEach(function(a){if(a[0].period==='Maps 1-2')pc[12]++;if(a[0].period==='Map 1')pc.m1++});
-  h+='<div class="btns" style="margin-bottom:8px">'+[['12','Maps 1-2'],['m1','Map 1']].map(function(x){return '<button class="'+(pf===x[0]?'b':'g')+'" data-act="lper" data-p="'+x[0]+'">'+x[1]+' · '+pc[x[0]]+'</button>'}).join('')+'</div>'}
- var vis=dayBook.filter(function(a){return !has12||!has1||(pf==='m1'?a[0].period==='Map 1':a[0].period==='Maps 1-2')});
+ if(pc.show)h+='<div class="btns" style="margin-bottom:8px">'+[['all','All'],['12','Maps 1-2'],['m1','Map 1']].map(function(x){return '<button class="'+(pc.mode===x[0]?'b':'g')+'" data-act="lper" data-p="'+x[0]+'">'+x[1]+' · '+pc.n[x[0]]+'</button>'}).join('')+'</div>';
+ var dayBook=[];ls.forEach(function(l,i){var k=l.start?cday(l.start):t0;if(pOK(l)&&(d==='all'||k===d)&&(bf==='all'||bkey(l)===bf))dayBook.push([l,i])});
+ var vis=dayBook;
  vis.sort(function(a,b){var x=a[0].start||'9',y=b[0].start||'9';if(x!==y)return x<y?-1:1;var ea=a[0].g?a[0].g.edgePP:-999,eb=b[0].g?b[0].g.edgePP:-999;return eb-ea});
- var perLabel=!vis.length?'':(has12&&has1?(pf==='m1'?'Map 1':'Maps 1-2'):(has1?'Map 1':'Maps 1-2'));
+ var perLabel=!vis.length?'':(pc.mode==='m1'?'Map 1':pc.mode==='12'?'Maps 1-2':pc.show?'Maps 1-2 + Map 1':(vis[0][0].period==='Map 1'?'Map 1':'Maps 1-2'));
  h+='<div><div class="card"><h2>'+(d==='all'?'All lines':esc(dayLabel(d))+' lines')+' · '+(bf==='pp'?'PrizePicks':bf==='ud'?'Underdog':'PrizePicks + Underdog')+(perLabel?' · '+perLabel:'')+'</h2>'+(boardEmpty()?emptyBoardHtml():(LINES.length?'<div class="muted">Feed observed '+esc(META.lines_at||'')+'. Refreshes about every hour. Times are Central.</div>':'<div class="warn">No lines feed is connected yet, so lines are manual. PrizePicks is the source of truth: type the line you see in the app.</div>'))+
- (vis.length?vis.map(function(a){var l=a[0],i=a[1],g=l.g,live=l.team&&liveFor(l.team),started=l.start&&new Date(l.start).getTime()<NOW();return '<div class="item"><div><b>'+esc(l.player)+'</b> <span class="muted">'+esc(l.team)+(l.opp?' vs '+esc(l.opp):'')+'</span>'+evBadgeLine(l)+(live?' <span class="pill">LIVE</span>':(started?' <span class="muted">· started</span>':''))+'<br><span class="muted">'+(l.book?esc(l.book)+' · ':'')+sname(l.stat,l.period)+(l.period==='Map 1'?' <span class="pill">Map 1</span>':'')+(l.start?' · '+esc(fmt(l.start)):'')+' · </span><b>'+l.line+'</b>'+(g?'<span class="muted"> · proj '+g.proj+'</span>'+hitBoxes(g.hits):'<span class="muted"> · Can\'t grade this one. '+(rp(l)?'Research the player in the Players tab':'Research needed')+'</span>')+blowPropLine(g||{team:l.team,opp:l.opp,start:l.start},{start:l.start,team:l.team,opp:l.opp})+'</div><div class="item-side">'+(g?gradePill(g)+pickChance(g):'')+(g||!rp(l)?'<button class="g" data-act="lg" data-i="'+i+'">Grade</button> <button class="g" data-act="ladd" data-i="'+i+'">+ Slip</button>':'<button class="g" data-act="plview" data-p="'+esc(rp(l))+'">Research</button>')+(l.src==='manual'?' <button class="g" data-act="ldel" data-i="'+l.idx+'">✕</button>':'')+'</div></div>'}).join(''):(emptyBoardHtml()||'<div class="muted">No lines for this day yet. New lines appear as the books post them.</div>'))+'</div>';
+ (vis.length?vis.map(function(a){var l=a[0],i=a[1],g=l.g,live=l.team&&liveFor(l.team),started=l.start&&new Date(l.start).getTime()<NOW();return '<div class="item"><div><b>'+esc(l.player)+'</b> <span class="muted">'+esc(l.team)+(l.opp?' vs '+esc(l.opp):'')+'</span>'+evBadgeLine(l)+(live?' <span class="pill">LIVE</span>':(started?' <span class="muted">· started</span>':''))+'<br><span class="muted">'+(l.book?esc(l.book)+' · ':'')+sname(l.stat,l.period)+(l.period==='Map 1'?' <span class="pill">Map 1</span>':'')+(l.start?' · '+esc(fmt(l.start)):'')+' · </span><b>'+l.line+'</b>'+(g?'<span class="muted"> · proj '+g.proj+'</span>'+hitBoxes(g.hits):'<span class="muted"> · Can\'t grade this one. '+(rp(l)?'Research the player in the Players tab':'Research needed')+'</span>')+blowPropLine(g||{team:l.team,opp:l.opp,start:l.start},{start:l.start,team:l.team,opp:l.opp})+'</div><div class="item-side">'+(g?gradePill(g)+pickChance(g):'')+(g||!rp(l)?'<button class="g" data-act="lg" data-raw="1" data-i="'+i+'">Grade</button> <button class="g" data-act="ladd" data-raw="1" data-i="'+i+'">+ Slip</button>':'<button class="g" data-act="plview" data-p="'+esc(rp(l))+'">Research</button>')+(l.src==='manual'?' <button class="g" data-act="ldel" data-i="'+l.idx+'">✕</button>':'')+'</div></div>'}).join(''):(emptyBoardHtml()||'<div class="muted">No lines for this day yet. New lines appear as the books post them.</div>'))+'</div>';
  h+='</div>';return h}
 // ---- track record: every saved line is graded with stats from BEFORE its match date, then checked against the real result
 var TS_CACHE={};
@@ -881,8 +881,8 @@ document.addEventListener('click',function(e){var b=e.target.closest('[data-act]
  else if(a==='gshare'){var g3=curGrade();if(g3)(window.GPCards?GPCards.img:function(g,f){img({g:g},f)})(g3,function(c){share(c,'glocky-card.png')})}
  else if(a==='madd'){var n=$('mp').value.trim(),l=parseFloat($('ml').value);if(!n||isNaN(l)){toast('Enter a player and a line');return}var p2=find(n);manual.push({player:p2?p2.name:n,team:p2?p2.team:'',stat:$('ms').value,line:l,opponent:$('mo').value,period:'Maps 1-2',src:'manual'});save('gp_manual',manual);render();toast('Line saved')}
  else if(a==='ldel'){manual.splice(i-LINES.length,1);save('gp_manual',manual);render();toast('Line removed')}
- else if(a==='lg'){var l2=allLines()[i];sel={player:l2.player,stat:l2.stat,line:String(l2.line),opp:l2.opp,team:l2.team,book:l2.book||'PrizePicks',odds:l2.odds,oddsLine:String(+l2.line),period:l2.period||'Maps 1-2',start:l2.start||'',gtab:'insights'};go('grader');toast('Loaded '+l2.player)}
- else if(a==='ladd'){var l3=allLines()[i];if(!l3.g){toast('Can\'t grade this one. Research the player in the Players tab');return}addSlip(l3.g);render()}
+ else if(a==='lg'){var l2=allLines(b.dataset.raw==='1')[i];sel={player:l2.player,stat:l2.stat,line:String(l2.line),opp:l2.opp,team:l2.team,book:l2.book||'PrizePicks',odds:l2.odds,oddsLine:String(+l2.line),period:l2.period||'Maps 1-2',start:l2.start||'',gtab:'insights'};go('grader');toast('Loaded '+l2.player)}
+ else if(a==='ladd'){var l3=allLines(b.dataset.raw==='1')[i];if(!l3.g){toast('Can\'t grade this one. Research the player in the Players tab');return}addSlip(l3.g);render()}
  else if(a==='auto'){var r=buildSlip(+b.dataset.n,b.dataset.m||'bal');if(!r.out.length){toast('No graded lines yet. Add lines first');return}slip=r.out;save('gp_slip',slip);render();toast(r.msg)}
  else if(a==='svar'){svar=b.dataset.v;render();toast(svar==='var'?'Variety on: each build is a new mix':'Best edges: always the biggest edges')}
  else if(a==='sskip'){if(!slip.length){toast('Build a slip first');return}slip.forEach(function(x){excl[norm(x.player)]=1});slip=[];save('gp_slip',slip);render();toast('Skipping those players. Build again')}
