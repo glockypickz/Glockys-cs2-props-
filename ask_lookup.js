@@ -75,6 +75,7 @@ function buildCtx(store) {
   const seen = {};
   const teamRows = {};
   const tmp = { P, ser: new Map(), ser1: new Map() };
+  const allMaps = {}, teamUniq = {}, teamEv = {};
   for (const stub of store.players) {
     const t = GM.tn(stub.team);
     const rows = (stub._src && stub._src.rows) || [];
@@ -93,6 +94,25 @@ function buildCtx(store) {
     }
     const hyd = decodeStub(store, stub);
     if (hyd && hyd.logs) {
+      // Same scout-map data GPModel.build makes (one row per (mid, n), rounds >= 13): used by the per-map term and match-type lookup.
+      hyd.logs.forEach(function (l) {
+        if ((l.ev === "lan" || l.ev === "online") && l.date) {
+          const m = teamEv[t] = teamEv[t] || {};
+          m[l.date] = (m[l.date] === "lan" || l.ev === "lan") ? "lan" : "online";
+        }
+      });
+      const pos = {};
+      hyd.logs.forEach(function (l) { if ((l.mid || 0) > 0) pos[String(l.date) + "|" + l.n + "|" + GM.tn(l.opp)] = 1; });
+      hyd.logs.forEach(function (l) {
+        const mid = l.mid;
+        if (mid == null || l.n == null || !l.date) return;
+        if (mid < 0 && pos[String(l.date) + "|" + l.n + "|" + GM.tn(l.opp)]) return;
+        if (!(t && typeof l.rd === "number" && l.rd >= 13)) return;
+        const key = String(mid) + "|" + l.n;
+        if (!allMaps[key]) allMaps[key] = [l.date, l.map];
+        if (!teamUniq[t]) teamUniq[t] = {};
+        if (!teamUniq[t][key]) teamUniq[t][key] = { date: l.date, map: l.map };
+      });
       GM.series(tmp, hyd).forEach(function (c) {
         (ctx.teamMids[t] = ctx.teamMids[t] || []).push([c.date, c.mid]);
         if (c.rd) (teamRows[t] = teamRows[t] || []).push([c.date, c.kills, c.hs != null ? c.hs : 0, c.rd]);
@@ -135,6 +155,16 @@ function buildCtx(store) {
     });
     ctx.teamCum[t] = [ds, ck, ch, cr];
   });
+  const gmaps = Object.keys(allMaps).map(function (k) { return allMaps[k]; });
+  gmaps.sort(function (a, b) { return a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0; });
+  const teamMaps = {};
+  Object.keys(teamUniq).forEach(function (t) {
+    teamMaps[t] = Object.keys(teamUniq[t]).map(function (k) { return teamUniq[t][k]; });
+    teamMaps[t].sort(function (a, b) { return a.date < b.date ? -1 : a.date > b.date ? 1 : 0; });
+  });
+  ctx.gmaps = gmaps; ctx.gdates = gmaps.map(function (x) { return x[0]; });
+  ctx.teamEv = teamEv;
+  ctx.teamMaps = teamMaps; ctx.matchMaps = (ctx.S && ctx.S.match_maps) || [];
   return ctx;
 }
 
@@ -559,8 +589,12 @@ export function gradeIntent(intent, store) {
   }
   if (line == null || isNaN(line)) return { missing: true, reason: "no line" };
   const evr = evFor(store, p.team, opp, start || intent.start);
+  const startAt = start || intent.start || "";
+  const before = startAt ? String(startAt).slice(0, 10) : undefined;
+  let maps;
+  try { maps = (M().confirmedMaps && opp) ? (M().confirmedMaps(ensureCtx(store), p.team, opp, startAt) || []) : []; } catch (e) { maps = []; }
   const m = M().grade(ensureCtx(store), p, stat, line, opp, {
-    team: p.team, book, odds, period, ev: evr[0]
+    team: p.team, book, odds, period, ev: evr[0], before, maps
   });
   if (!m) return { missing: true, reason: "could not grade" };
   const lan = m.v1 && m.v1.lan && m.v1.lan.used ? { n: m.v1.lan.n, adr: m.v1.lan.adrLan, ev: evr[0] } : null;
