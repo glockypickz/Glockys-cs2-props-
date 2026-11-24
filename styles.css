@@ -247,3 +247,18 @@ body.aipanel-open #aibtn{display:none}
 .ins-leg>span{display:inline-flex;align-items:center;gap:7px}
 .ins-leg .ins-dot{margin-top:0}
 @media(max-width:500px){.ins-why-title{font-size:15px}.ins-list li{font-size:13px}}
+
+
+/* ---- Slip reader (Grader tab) ---- */
+.slip-reader .slip-up{display:inline-flex;align-items:center;justify-content:center;margin-top:6px;cursor:pointer;min-height:44px;background:var(--green);color:#000;border:0;border-radius:10px;padding:10px 14px;font-weight:800}
+.slip-row{border:1px solid var(--line);border-radius:12px;padding:10px;margin:10px 0}
+.slip-row.bad{border-color:rgba(255,77,109,.5)}
+.slip-sum{border-color:rgba(0,255,102,.28);background:#00ff660a}
+.slip-verdict{border-radius:10px;padding:8px 10px;margin:8px 0;font-weight:700}
+.slip-verdict.ok{background:#00ff6614;border:1px solid rgba(0,255,102,.35);color:var(--green)}
+.slip-verdict.no{background:#ff4d6d14;border:1px solid rgba(255,77,109,.4);color:var(--red)}
+.slip-verdict.miss{background:#ffc53d14;border:1px solid rgba(255,197,61,.4);color:var(--amber)}
+.slip-leg{margin:12px 0 18px}
+.slip-results .gresult>.btns{display:none}
+.aif .aiup{flex:none;display:flex;align-items:center;justify-content:center;background:transparent;color:var(--green);border:1px solid var(--green);border-radius:10px;padding:0 12px;font:800 13px system-ui;cursor:pointer;min-height:44px}
+@media(max-width:500px){.slip-row .row{flex-direction:column}}

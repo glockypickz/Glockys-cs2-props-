@@ -448,6 +448,120 @@ function recordCard(){if(HIST==null)return '';var h='<div class="card" style="ma
 // Hidden when HIST is missing (customers never receive lines_history.json). Does not change recordCard or old locks.
 function updateSheetCard(){if(HIST==null||typeof GPTrackSheet==='undefined')return '';return GPTrackSheet.html(GPTrackSheet.fromEntries(HIST,NOW()),esc)}
 function opts(){var t={};DB.forEach(function(p){t[p.team]=1});return '<datalist id="plist">'+DB.map(function(p){return '<option value="'+esc(p.name)+'">'+esc(p.team)}).join('')+'</datalist><datalist id="tlist">'+Object.keys(t).sort().map(function(x){return '<option value="'+esc(x)+'">'}).join('')+'</datalist>'}
+
+// ---- Slip reader (Grader tab): upload a slip screenshot, edit the reads, then grade with our math.
+var slipUI={step:'idle',error:'',note:'',book:'',entry:null,payout:null,picks:[],results:null,busy:false};
+function slipReset(){slipUI={step:'idle',error:'',note:'',book:'',entry:null,payout:null,picks:[],results:null,busy:false}}
+function slipVerdictHtml(r,g){
+ if(r.error&&!g)return '<div class="slip-verdict miss">Glocky couldn\'t grade this pick: '+esc(r.error)+'.</div>';
+ if(r.verdict==='agree')return '<div class="slip-verdict ok">Glocky agrees — our grade is '+esc(g.pick)+' at a '+esc(g.grade)+(r.like?' (a play we like)':'')+'.</div>';
+ if(r.verdict==='disagree')return '<div class="slip-verdict no">Glocky disagrees — our grade is '+esc(g.pick)+' at a '+esc(g.grade)+'.</div>';
+ return '<div class="slip-verdict">Glocky graded this line, but the slip did not show Over or Under.</div>';
+}
+function slipClientGrade(p){
+ if(!p||!p.player)return null;
+ try{var g=gradeFor(p.player,p.team||'',p.stat==='hs'?'hs':'kills',p.line,p.opponent||p.opp||'',{book:p.book||slipUI.book||'PrizePicks',odds:p.odds,period:p.period||'Maps 1-2',start:p.start||''});return g&&!g.missing?g:null}catch(e){return null}
+}
+function slipSummaryHtml(s){
+ if(!s)return '';
+ var bits=[];
+ bits.push('Glocky likes <b>'+s.liked+' of '+s.total+'</b> legs');
+ if(s.agreed||s.disagreed)bits.push('agrees on '+s.agreed+', disagrees on '+s.disagreed);
+ if(s.skipped)bits.push(s.skipped+' could not be graded');
+ var h='<div class="card slip-sum"><h2>Slip summary</h2><div>'+bits.join(' · ')+'.</div>';
+ if(s.weakest)h+='<div class="muted" style="margin-top:6px">Weakest leg: '+esc(s.weakest)+'</div>';
+ if(s.flags&&s.flags.length)h+='<div class="muted" style="margin-top:6px">Flags: '+esc(s.flags.join('; '))+'</div>';
+ if(s.book||s.entry!=null||s.payout!=null)h+='<div class="muted" style="margin-top:6px">'+(s.book?esc(s.book):'')+(s.entry!=null?' · entry $'+s.entry:'')+(s.payout!=null?' · payout $'+s.payout:'')+'</div>';
+ return h+'</div>';
+}
+function slipRow(p,i){
+ var st=p.stat==='hs'?'hs':'kills';
+ var per=p.period==='Map 1'?'Map 1':'Maps 1-2';
+ var side=p.side==='under'?'under':(p.side==='over'?'over':'');
+ var hint=p.matched?'Matched as '+esc(p.matched.name)+(p.matched.team?' ('+esc(p.matched.team)+')':'')+(p.matched.match==='fuzzy'?' — check the name':'')+(p.boardNote?'. '+esc(p.boardNote):''):(p.error?esc(p.error):'Not matched yet — fix the name if this is wrong');
+ return '<div class="slip-row'+(p.error&&!p.matched?' bad':'')+'"><div class="row"><div><label>Player</label><input id="slip-p'+i+'" list="plist" value="'+esc(p.player||'')+'"></div><div><label>Side</label><select id="slip-side'+i+'"><option value=""'+(side?'':' selected')+'>—</option><option value="over"'+(side==='over'?' selected':'')+'>Over</option><option value="under"'+(side==='under'?' selected':'')+'>Under</option></select></div></div><div class="row"><div><label>Stat</label><select id="slip-st'+i+'"><option value="kills"'+(st==='kills'?' selected':'')+'>Kills</option><option value="hs"'+(st==='hs'?' selected':'')+'>Headshots</option></select></div><div><label>Line</label><input id="slip-l'+i+'" type="number" step="0.5" value="'+esc(p.line==null?'':p.line)+'"></div></div><div class="row"><div><label>Period</label><select id="slip-per'+i+'"><option value="Maps 1-2"'+(per==='Maps 1-2'?' selected':'')+'>Maps 1-2</option><option value="Map 1"'+(per==='Map 1'?' selected':'')+'>Map 1</option></select></div><div><label>Opponent</label><input id="slip-o'+i+'" list="tlist" value="'+esc(p.opponent||'')+'"></div></div><input type="hidden" id="slip-t'+i+'" value="'+esc(p.team||'')+'"><input type="hidden" id="slip-b'+i+'" value="'+esc(p.book||'')+'"><div class="muted">'+hint+'</div></div>';
+}
+function slipReaderHtml(){
+ var h='<div class="card slip-reader" id="slipreader"><h2>Upload slip</h2><div class="muted">Upload a screenshot of your PrizePicks or Underdog CS2 slip. Glocky reads the picks, you can fix any misreads, then we grade each leg with the same math as the Grader.</div>';
+ h+='<div class="btns"><label class="b slip-up" for="slipfile">Upload slip</label><input type="file" id="slipfile" accept="image/png,image/jpeg,image/webp,image/*" hidden>'+(slipUI.picks.length||slipUI.results?'<button type="button" class="g" data-act="slipclear">Clear</button>':'')+'</div>';
+ if(slipUI.step==='reading')h+='<div class="muted" style="margin-top:8px">Reading your slip…</div>';
+ if(slipUI.step==='grading')h+='<div class="muted" style="margin-top:8px">Grading with our math…</div>';
+ if(slipUI.error)h+='<div class="warn" style="margin-top:8px">'+esc(slipUI.error)+'</div>';
+ if(slipUI.note)h+='<div class="muted" style="margin-top:6px">'+esc(slipUI.note)+'</div>';
+ if(slipUI.picks.length){
+  h+='<h2 style="margin-top:14px">Picks on this slip</h2><div class="muted">Edit anything that looks wrong, then grade the slip.</div>'+slipUI.picks.map(slipRow).join('');
+  h+='<div class="btns"><button type="button" class="b" data-act="slipgrade"'+(slipUI.busy?' disabled':'')+'>Grade slip</button></div>';
+ }
+ if(slipUI.results&&slipUI.results.summary){
+  h+=slipSummaryHtml(slipUI.results.summary);
+  h+='<div class="slip-results">'+slipUI.results.results.map(function(r,i){
+   var p=r.pick||{},g=slipClientGrade(p);
+   var head='<div class="slip-leg"><div class="muted">'+esc(p.player||'Unknown')+(p.side?' · '+esc(p.side):'')+' '+(p.line!=null?p.line:'')+' · '+esc(p.stat==='hs'?'Headshots':'Kills')+' · '+esc(p.period||'Maps 1-2')+'</div>'+slipVerdictHtml(r,g||r.grade);
+   if(g)return head+(window.GPCards?GPCards.html(g):'')+gradeCard(g)+'<div class="btns"><button type="button" class="b" data-act="slipadd" data-i="'+i+'">Add to slip</button></div></div>';
+   return head+'</div>';
+  }).join('')+'</div>';
+ }
+ return h+'</div>';
+}
+function slipCollect(){
+ var out=[],n=slipUI.picks.length;
+ for(var i=0;i<n;i++){
+  var p=$('slip-p'+i);if(!p)continue;
+  out.push({player:(p.value||'').trim(),team:(($('slip-t'+i)||{}).value||'').trim(),stat:(($('slip-st'+i)||{}).value)||'kills',line:parseFloat(($('slip-l'+i)||{}).value),period:(($('slip-per'+i)||{}).value)||'Maps 1-2',side:(($('slip-side'+i)||{}).value)||'',opponent:(($('slip-o'+i)||{}).value||'').trim(),book:(($('slip-b'+i)||{}).value||slipUI.book||'')});
+ }
+ return out;
+}
+function slipApplyRead(d){
+ slipUI.note=d&&d.note||'';
+ slipUI.book=d&&d.book||'';
+ slipUI.entry=d&&d.entry!=null?d.entry:null;
+ slipUI.payout=d&&d.payout!=null?d.payout:null;
+ slipUI.picks=(d&&d.picks)||[];
+ slipUI.results=null;
+ slipUI.step=slipUI.picks.length?'review':'error';
+ if(!slipUI.picks.length&&!slipUI.error)slipUI.error=(d&&d.error)||'We couldn\'t find any CS2 kills or headshots picks on that slip.';
+}
+function slipReadFile(file){
+ if(!file||slipUI.busy)return;
+ if(file.size>5*1024*1024){slipUI.error='Please use an image under 5 MB.';slipUI.step='error';render();toast('Image is too large');return}
+ var typ=String(file.type||'').toLowerCase(),ok=typ==='image/png'||typ==='image/jpeg'||typ==='image/jpg'||typ==='image/webp'||/\.(png|jpe?g|webp)$/i.test(file.name||'');
+ if(!ok){slipUI.error='Please upload a PNG, JPG, or WebP image of your slip.';slipUI.step='error';render();return}
+ slipUI.busy=true;slipUI.step='reading';slipUI.error='';slipUI.results=null;slipUI.picks=[];render();
+ var fr=new FileReader();
+ fr.onerror=function(){slipUI.busy=false;slipUI.step='error';slipUI.error='Could not read that file.';render()};
+ fr.onload=function(){
+  fetch('/ai/slip/read',{method:'POST',credentials:'include',headers:{'Content-Type':'application/json'},body:JSON.stringify({image:String(fr.result||''),mime:typ==='image/jpg'?'image/jpeg':typ})})
+   .then(function(r){return r.json().catch(function(){return{}}).then(function(d){return{ok:r.ok,status:r.status,d:d}})})
+   .then(function(x){
+     slipUI.busy=false;
+     if(x.status===401){slipUI.error='Please sign in to use the slip reader.';slipUI.step='error'}
+     else if(x.status===503&&x.d&&x.d.error){slipUI.error=x.d.error;slipUI.step='error'}
+     else if(x.status===429&&x.d&&x.d.error){slipUI.error=x.d.error;slipUI.step='error'}
+     else if(x.ok&&x.d&&x.d.picks&&x.d.picks.length){slipApplyRead(x.d);toast('Check the picks, then grade the slip')}
+     else{slipUI.error=(x.d&&x.d.error)||'We couldn\'t read that image. Try a clearer screenshot of a CS2 slip.';slipUI.step='error';if(x.d)slipApplyRead(x.d)}
+     render();var el=$('slipreader');if(el)el.scrollIntoView({block:'start'})
+   })
+   .catch(function(){slipUI.busy=false;slipUI.step='error';slipUI.error='Could not reach Glocky. Check your connection and try again.';render()});
+ };
+ fr.readAsDataURL(file);
+}
+function slipGradeNow(){
+ if(slipUI.busy)return;
+ var picks=slipCollect();
+ if(!picks.length){toast('Add at least one pick');return}
+ slipUI.busy=true;slipUI.step='grading';slipUI.picks=picks;render();
+ fetch('/ai/slip/grade',{method:'POST',credentials:'include',headers:{'Content-Type':'application/json'},body:JSON.stringify({picks:picks,book:slipUI.book,entry:slipUI.entry,payout:slipUI.payout})})
+  .then(function(r){return r.json().catch(function(){return{}}).then(function(d){return{ok:r.ok,status:r.status,d:d}})})
+  .then(function(x){
+    slipUI.busy=false;
+    if(x.status===401){slipUI.error='Please sign in to use the slip reader.';slipUI.step='review'}
+    else if(!x.ok){slipUI.error=(x.d&&x.d.error)||'Could not grade this slip.';slipUI.step='review'}
+    else{slipUI.error='';slipUI.results=x.d;slipUI.step='done';toast('Slip graded')}
+    render();var el=$('slipreader');if(el)el.scrollIntoView({block:'start'})
+  })
+  .catch(function(){slipUI.busy=false;slipUI.step='review';slipUI.error='Could not reach Glocky. Check your connection and try again.';render()});
+}
+
 function viewGrader(){var combo=isCombo(sel.player),p=combo?{name:sel.player}:find(sel.player,sel.team);
  var per=sel.period||'Maps 1-2';if(per!=='Map 1')per='Maps 1-2';sel.period=per;
  var line=parseFloat(sel.line),g=p&&!isNaN(line)?gradeFor(sel.player,sel.team||'',sel.stat,line,sel.opp,{book:sel.book||'PrizePicks',odds:sel.odds,period:per}):null,miss='';if(sel.odds!=null&&sel.oddsLine==null)sel.oddsLine=String(line);if(g&&g.missing){miss=g.missing;g=null}
@@ -459,7 +573,7 @@ function viewGrader(){var combo=isCombo(sel.player),p=combo?{name:sel.player}:fi
  else if(!p)h+='<div class="card"><div class="warn">No player named "'+esc(sel.player)+'" in the data.</div></div>';
  else if(!g&&miss)h+='<div class="card"><div class="warn">Cannot grade this combo: no usable '+unit+' stats for '+esc(miss)+'. Every player in a combo needs stats.</div></div>';
  else if(!g)h+='<div class="card"><div class="warn">Not enough '+unit+' data for '+esc(p.name)+' yet'+(per==='Map 1'?' (needs Map 1 logs)':' (needs matches where both Map 1 and Map 2 were played)')+' or the line is empty.</div></div>';
- else h+='<div>'+(window.GPCards?GPCards.html(g):'')+gradeCard(g)+scoutCard(g)+'</div>';return h+'</div>'+opts()}
+ else h+='<div>'+(window.GPCards?GPCards.html(g):'')+gradeCard(g)+scoutCard(g)+'</div>';return h+'</div>'+slipReaderHtml()+opts()}
 // ---- bar chart: real number on every bar, dashed line = the prop line, green over / red under
 function chart(cs,st,line,n){var rows=cs.slice(0,n||10).filter(function(c){return c[st]!=null}).reverse();if(!rows.length)return '<div class="muted">No '+(st==='hs'?'headshot':'kill')+' data for this selection.</div>';
  var hasL=line!=null&&!isNaN(line),mx=Math.max.apply(null,rows.map(function(c){return c[st]}).concat([hasL?line:0,1]))*1.25;
@@ -717,9 +831,13 @@ document.addEventListener('click',function(e){var b=e.target.closest('[data-act]
  else if(a==='scopy'){var t=slip.map(function(s){return s.player+' '+sname(s.stat,s.period)+' '+s.pick+' '+s.line}).join('\n');(navigator.clipboard?navigator.clipboard.writeText(t):Promise.reject()).then(function(){toast('Copied')}).catch(function(){toast('Copy not allowed here')})}
  else if(a==='spp'){window.open('https://app.prizepicks.com','_blank','noopener');toast('Opening PrizePicks. Enter your picks there')}
  else if(a==='simg'||a==='sshare'){if(!slip.length){toast('Slip is empty');return}exportSlipCards()}
+ else if(a==='slipgrade'){slipGradeNow()}
+ else if(a==='slipclear'){slipReset();render();toast('Slip reader cleared')}
+ else if(a==='slipadd'){var rr=slipUI.results&&slipUI.results.results&&slipUI.results.results[i];if(!rr){toast('Grade the slip first');return}var gp=slipClientGrade(rr.pick||{});if(!gp){toast('Can\'t add this pick');return}addSlip(gp)}
+ else if(a==='slipto'){go('grader');var el=$('slipreader');if(el)setTimeout(function(){el.scrollIntoView({block:'start'})},50)}
 });
 document.addEventListener('input',function(e){if(e.target.id==='pq'){sel.q=e.target.value;var pos=e.target.selectionStart;render();var n=$('pq');n.focus();n.setSelectionRange(pos,pos)}});
-document.addEventListener('change',function(e){var i=e.target.id,m={pt:'tm',pn:'n',pv:'v',po:'o',pl1:'l1',pl2:'l2'};if(m[i]){sel[m[i]]=e.target.value;render();toast('Updated')}});
+document.addEventListener('change',function(e){var i=e.target.id,m={pt:'tm',pn:'n',pv:'v',po:'o',pl1:'l1',pl2:'l2'};if(m[i]){sel[m[i]]=e.target.value;render();toast('Updated')}else if(i==='slipfile'||i==='aislip'){var f=e.target.files&&e.target.files[0];e.target.value='';if(f){if(i==='aislip')chatSlipFile(f);else slipReadFile(f)}}});
 // ---- data
 // admin key: open the site once as  /#admin=YOURKEY  to unlock the Track record on this device ( #admin=off removes it )
 (function(){try{var m=/admin=([^&]*)/.exec(location.hash||'');if(m){var k=decodeURIComponent(m[1]);if(k==='off')localStorage.removeItem('gp_admin');else localStorage.setItem('gp_admin',k);history.replaceState(null,'',location.pathname+location.search)}}catch(e){}})();
@@ -739,10 +857,41 @@ setInterval(function(){if(document.hidden||!DB.length)return;var ae=document.act
 // lines with the same v1e math as the Grader. Gemini only phrases the reply. The chat renders
 // the current Grader trading card (GPCards.html) when a grade comes back.
 var chatLog=[],chatBusy=false;
+function chatSlipFile(file){
+ if(chatBusy||!file)return;
+ if(file.size>5*1024*1024){addMsg('a','Please use an image under 5 MB.');return}
+ chatBusy=true;var wait=addMsg('a','Reading your slip...');
+ var typ=String(file.type||'').toLowerCase();
+ var fr=new FileReader();
+ fr.onerror=function(){chatBusy=false;fillAssistant(wait,'Could not read that file.',null)};
+ fr.onload=function(){
+  fetch('/ai/slip/read',{method:'POST',credentials:'include',headers:{'Content-Type':'application/json'},body:JSON.stringify({image:String(fr.result||''),mime:typ==='image/jpg'?'image/jpeg':typ})})
+   .then(function(r){return r.json().catch(function(){return{}}).then(function(d){return{ok:r.ok,status:r.status,d:d}})})
+   .then(function(x){
+     var a;
+     if(x.status===401)a='Please sign in to use the slip reader.';
+     else if(x.d&&x.d.error&&!(x.ok&&x.d.picks&&x.d.picks.length))a=x.d.error;
+     else if(x.ok&&x.d&&x.d.picks&&x.d.picks.length){
+       slipApplyRead(x.d);
+       var lines=x.d.picks.map(function(p){return (p.player||'?')+' '+(p.side||'')+' '+(p.line!=null?p.line:'')+' '+(p.stat==='hs'?'headshots':'kills')+' '+(p.period||'')});
+       a='I found '+x.d.picks.length+' pick'+(x.d.picks.length===1?'':'s')+' on this slip:\n'+lines.join('\n')+'\n\nYou can fix any misreads on the Grader tab, then grade the slip.';
+     }else a=(x.d&&x.d.error)||'We couldn\'t read that image. Try a clearer screenshot of a CS2 slip.';
+     fillAssistant(wait,String(a).replace(/^\s*glocky says[:\-\s]*/i,''),null);
+     if(x.ok&&x.d&&x.d.picks&&x.d.picks.length){
+       var btn=document.createElement('button');btn.type='button';btn.className='b';btn.setAttribute('data-act','slipto');btn.textContent='Review on Grader';
+       wait.appendChild(btn);
+     }
+   })
+   .catch(function(){fillAssistant(wait,'Could not reach Glocky. Check your connection and try again.',null)})
+   .then(function(){chatBusy=false;scrollChat(wait)});
+ };
+ fr.readAsDataURL(file);
+}
+
 function chatUI(){if($('aibtn'))return;
  var b=document.createElement('button');b.id='aibtn';b.type='button';b.textContent='Ask Glocky';document.body.appendChild(b);
  var p=document.createElement('div');p.id='aipanel';p.className='hide';
- p.innerHTML='<div class="aih"><b>Ask Glocky</b><button type="button" id="aix" aria-label="Close">✕</button></div><div id="aimsgs"></div><div class="aif"><input id="aiq" placeholder="e.g. What is EliGE\'s HS% on LAN?" maxlength="400" autocomplete="off"><button type="button" id="ais">Send</button></div>';
+ p.innerHTML='<div class="aih"><b>Ask Glocky</b><button type="button" id="aix" aria-label="Close">✕</button></div><div id="aimsgs"></div><div class="aif"><label class="aiup" for="aislip" title="Upload a slip">Slip</label><input type="file" id="aislip" accept="image/png,image/jpeg,image/webp,image/*" hidden><input id="aiq" placeholder="e.g. What is EliGE\'s HS% on LAN?" maxlength="400" autocomplete="off"><button type="button" id="ais">Send</button></div>';
  document.body.appendChild(p);
  function show(){p.classList.toggle('hide');document.body.classList.toggle('aipanel-open',!p.classList.contains('hide'));if(!p.classList.contains('hide')){if(!chatLog.length)addMsg('a',"Ask me about our players and teams — for example EliGE's headshot percentage on LAN, a team's VRS rank, or 'EliGE over 35.5 kills maps 1-2?'. I only answer from our stats and Cito data, and I'll grade a line with the same math as the Grader.");$('aiq').focus()}}
  b.onclick=show;$('aix').onclick=show;

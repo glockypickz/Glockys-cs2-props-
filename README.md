@@ -83,6 +83,16 @@ The default model is `gemini-2.5-flash` (free tier). To use another Flash model 
 
 Tests: `node --test tests/test_ask_lookup.mjs tests/test_ask_ai.mjs`.
 
+
+## Slip reader
+
+Signed-in users (when the beta gate is on) can upload a PrizePicks or Underdog CS2 slip screenshot from the **Upload slip** section on the Grader tab, or from the Slip button in Ask Glocky. Glocky only reads the picks off the image. After you fix any misreads, each leg is graded with the same math as the site (Map 1 vs Maps 1-2, LAN rule, head-to-head, bait flag, blowout warning). Images are not stored.
+
+Limits: PNG, JPG, or WebP, up to 5 MB; 10 slips per signed-in user per UTC day, plus a short cooldown. It uses the same Worker secret as Ask Glocky. Until that secret is set, the reader says it isn't set up yet.
+
+Tests: `node --test tests/test_slip_reader.mjs tests/test_slip_ai.mjs`.
+
+
 ## Shadow S: Scout-style factor projection (admin only, test)
 
 `scout_model.py` grades every upcoming prop a third way and saves it once, before the match starts, as `e["shadow_s"]` in `lines_history.json` (via `shadow.py`). It never changes the live projection, pick, letter or any locked grade.
