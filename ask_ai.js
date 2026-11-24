@@ -3,6 +3,7 @@
 // is a Worker secret (GEMINI_API_KEY) and must never be logged, returned, or shown.
 import { identify, gateState } from "./beta_auth.js";
 import { parseQuestion, mergeParsedIntent, answerQuestion, makeStore } from "./ask_lookup.js";
+import GPModel from "./model.js";
 
 const DEFAULT_MODEL = "gemini-3.8-flash";
 const FALLBACK_MODELS = ["gemini-3.8-flash", "gemini-3.5-flash-lite", "gemini-3.6-flash"];
@@ -83,17 +84,18 @@ function sameOrigin(request, url) {
   return ct.includes("application/json");
 }
 
-export function loadGPModelFromSource(src) {
-  const module = { exports: {} };
-  const root = globalThis;
-  const fn = new Function("window", "self", "globalThis", "module", "exports", String(src));
-  fn(root, root, root, module, module.exports);
-  const api = (module.exports && module.exports.grade) ? module.exports : root.GPModel;
+// Workers forbid eval / new Function ("Code generation from strings disallowed
+// for this context"). model.js is bundled via a static import instead of being
+// fetched from ASSETS and compiled at request time. Ask Glocky and the slip
+// reader share this path.
+export function installGPModel(api) {
   if (!api || !api.grade) throw new Error("GPModel failed to load");
   globalThis.GPModel = api;
   modelReady = true;
   return api;
 }
+
+if (GPModel && GPModel.grade) installGPModel(GPModel);
 
 // Hostname is ignored by the ASSETS binding (only the pathname is matched).
 // Do not use the public Worker origin here: with run_worker_first, some
@@ -102,11 +104,10 @@ function assetRequest(path) {
   return new Request("https://assets.local" + path);
 }
 
-async function ensureModel(env, origin) {
+function ensureModel() {
   if (modelReady && globalThis.GPModel && globalThis.GPModel.grade) return globalThis.GPModel;
-  const r = await env.ASSETS.fetch(assetRequest("/model.js"));
-  if (!r.ok) throw new Error("model.js missing");
-  return loadGPModelFromSource(await r.text());
+  if (globalThis.GPModel && globalThis.GPModel.grade) return installGPModel(globalThis.GPModel);
+  throw new Error("GPModel is not loaded");
 }
 
 export function resetDataCache() {
@@ -115,7 +116,7 @@ export function resetDataCache() {
 
 export async function loadStore(env, origin) {
   if (dataCache.store && Date.now() - dataCache.at < 60000) return dataCache.store;
-  await ensureModel(env, origin);
+  ensureModel();
   const get = async (path) => {
     const r = await env.ASSETS.fetch(assetRequest(path));
     if (!r.ok) return null;
