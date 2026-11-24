@@ -450,8 +450,8 @@ function updateSheetCard(){if(HIST==null||typeof GPTrackSheet==='undefined')retu
 function opts(){var t={};DB.forEach(function(p){t[p.team]=1});return '<datalist id="plist">'+DB.map(function(p){return '<option value="'+esc(p.name)+'">'+esc(p.team)}).join('')+'</datalist><datalist id="tlist">'+Object.keys(t).sort().map(function(x){return '<option value="'+esc(x)+'">'}).join('')+'</datalist>'}
 
 // ---- Slip reader (Grader tab): upload a slip screenshot, edit the reads, then grade with our math.
-var slipUI={step:'idle',error:'',note:'',book:'',entry:null,payout:null,picks:[],results:null,busy:false};
-function slipReset(){slipUI={step:'idle',error:'',note:'',book:'',entry:null,payout:null,picks:[],results:null,busy:false}}
+var slipUI={step:'idle',error:'',note:'',book:'',entry:null,payout:null,picks:[],results:null,busy:false,fileName:''};
+function slipReset(){slipUI={step:'idle',error:'',note:'',book:'',entry:null,payout:null,picks:[],results:null,busy:false,fileName:''}}
 function slipVerdictHtml(r,g){
  if(r.error&&!g)return '<div class="slip-verdict miss">Glocky couldn\'t grade this pick: '+esc(r.error)+'.</div>';
  if(r.verdict==='agree')return '<div class="slip-verdict ok">Glocky agrees — our grade is '+esc(g.pick)+' at a '+esc(g.grade)+(r.like?' (a play we like)':'')+'.</div>';
@@ -483,7 +483,7 @@ function slipRow(p,i){
 }
 function slipReaderHtml(){
  var h='<div class="card slip-reader" id="slipreader"><h2>Upload slip</h2><div class="muted">Upload a screenshot of your PrizePicks or Underdog CS2 slip. Glocky reads the picks, you can fix any misreads, then we grade each leg with the same math as the Grader.</div>';
- h+='<div class="btns"><label class="b slip-up" for="slipfile">Upload slip</label><input type="file" id="slipfile" accept="image/png,image/jpeg,image/webp,image/*" hidden>'+(slipUI.picks.length||slipUI.results?'<button type="button" class="g" data-act="slipclear">Clear</button>':'')+'</div>';
+ h+='<div class="btns slip-uprow"><label class="b slip-up"><input type="file" id="slipfile" class="slip-file" accept="image/png,image/jpeg,image/webp,image/*" aria-label="Upload image"><span class="slip-up-txt">Upload image</span></label>'+(slipUI.fileName?'<span class="slip-fname muted" id="slipfname">'+esc(slipUI.fileName)+'</span>':'<span class="slip-fname muted hide" id="slipfname"></span>')+(slipUI.picks.length||slipUI.results?'<button type="button" class="g" data-act="slipclear">Clear</button>':'')+'</div>';
  if(slipUI.step==='reading')h+='<div class="muted" style="margin-top:8px">Reading your slip…</div>';
  if(slipUI.step==='grading')h+='<div class="muted" style="margin-top:8px">Grading with our math…</div>';
  if(slipUI.error)h+='<div class="warn" style="margin-top:8px">'+esc(slipUI.error)+'</div>';
@@ -523,6 +523,7 @@ function slipApplyRead(d){
 }
 function slipReadFile(file){
  if(!file||slipUI.busy)return;
+ slipUI.fileName=file.name||'image';
  if(file.size>5*1024*1024){slipUI.error='Please use an image under 5 MB.';slipUI.step='error';render();toast('Image is too large');return}
  var typ=String(file.type||'').toLowerCase(),ok=typ==='image/png'||typ==='image/jpeg'||typ==='image/jpg'||typ==='image/webp'||/\.(png|jpe?g|webp)$/i.test(file.name||'');
  if(!ok){slipUI.error='Please upload a PNG, JPG, or WebP image of your slip.';slipUI.step='error';render();return}
@@ -837,7 +838,7 @@ document.addEventListener('click',function(e){var b=e.target.closest('[data-act]
  else if(a==='slipto'){go('grader');var el=$('slipreader');if(el)setTimeout(function(){el.scrollIntoView({block:'start'})},50)}
 });
 document.addEventListener('input',function(e){if(e.target.id==='pq'){sel.q=e.target.value;var pos=e.target.selectionStart;render();var n=$('pq');n.focus();n.setSelectionRange(pos,pos)}});
-document.addEventListener('change',function(e){var i=e.target.id,m={pt:'tm',pn:'n',pv:'v',po:'o',pl1:'l1',pl2:'l2'};if(m[i]){sel[m[i]]=e.target.value;render();toast('Updated')}else if(i==='slipfile'||i==='aislip'){var f=e.target.files&&e.target.files[0];e.target.value='';if(f){if(i==='aislip')chatSlipFile(f);else slipReadFile(f)}}});
+document.addEventListener('change',function(e){var i=e.target.id,m={pt:'tm',pn:'n',pv:'v',po:'o',pl1:'l1',pl2:'l2'};if(m[i]){sel[m[i]]=e.target.value;render();toast('Updated')}else if(i==='slipfile'||i==='aislip'){var f=e.target.files&&e.target.files[0];if(f){var nm=f.name||'image';if(i==='slipfile'){slipUI.fileName=nm;var sf=$('slipfname');if(sf){sf.textContent=nm;sf.classList.remove('hide')}}else{var af=$('aifname');if(af){af.textContent=nm;af.classList.remove('hide')}}if(i==='aislip')chatSlipFile(f);else slipReadFile(f)}e.target.value=''}});
 // ---- data
 // admin key: open the site once as  /#admin=YOURKEY  to unlock the Track record on this device ( #admin=off removes it )
 (function(){try{var m=/admin=([^&]*)/.exec(location.hash||'');if(m){var k=decodeURIComponent(m[1]);if(k==='off')localStorage.removeItem('gp_admin');else localStorage.setItem('gp_admin',k);history.replaceState(null,'',location.pathname+location.search)}}catch(e){}})();
@@ -891,7 +892,7 @@ function chatSlipFile(file){
 function chatUI(){if($('aibtn'))return;
  var b=document.createElement('button');b.id='aibtn';b.type='button';b.textContent='Ask Glocky';document.body.appendChild(b);
  var p=document.createElement('div');p.id='aipanel';p.className='hide';
- p.innerHTML='<div class="aih"><b>Ask Glocky</b><button type="button" id="aix" aria-label="Close">✕</button></div><div id="aimsgs"></div><div class="aif"><label class="aiup" for="aislip" title="Upload a slip">Slip</label><input type="file" id="aislip" accept="image/png,image/jpeg,image/webp,image/*" hidden><input id="aiq" placeholder="e.g. What is EliGE\'s HS% on LAN?" maxlength="400" autocomplete="off"><button type="button" id="ais">Send</button></div>';
+ p.innerHTML='<div class="aih"><b>Ask Glocky</b><button type="button" id="aix" aria-label="Close">✕</button></div><div id="aimsgs"></div><div class="aif"><label class="aiup" title="Upload image"><input type="file" id="aislip" class="slip-file" accept="image/png,image/jpeg,image/webp,image/*" aria-label="Upload image"><span class="slip-up-txt">Upload image</span></label><span class="slip-fname muted hide" id="aifname"></span><input id="aiq" placeholder="e.g. What is EliGE\'s HS% on LAN?" maxlength="400" autocomplete="off"><button type="button" id="ais">Send</button></div>';
  document.body.appendChild(p);
  function show(){p.classList.toggle('hide');document.body.classList.toggle('aipanel-open',!p.classList.contains('hide'));if(!p.classList.contains('hide')){if(!chatLog.length)addMsg('a',"Ask me about our players and teams — for example EliGE's headshot percentage on LAN, a team's VRS rank, or 'EliGE over 35.5 kills maps 1-2?'. I only answer from our stats and Cito data, and I'll grade a line with the same math as the Grader.");$('aiq').focus()}}
  b.onclick=show;$('aix').onclick=show;

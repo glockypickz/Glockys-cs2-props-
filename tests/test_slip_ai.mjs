@@ -210,9 +210,13 @@ test("UI source has Upload slip on the Grader path and never mentions keys", () 
   const app = readFileSync(join(root, "app.js"), "utf8");
   const css = readFileSync(join(root, "styles.css"), "utf8");
   assert.match(app, /Upload slip/);
+  assert.match(app, /Upload image/);
+  assert.doesNotMatch(app, /Choose file|No file chosen/i);
   assert.match(app, /slipReaderHtml/);
   assert.match(app, /viewGrader[\s\S]*slipReaderHtml\(\)/);
   assert.match(app, /aislip/);
+  assert.match(app, /class="slip-file"/);
+  assert.match(css, /\.slip-file/);
   assert.doesNotMatch(app, /GP_AI_URL|GEMINI_API_KEY|api key/i);
   assert.doesNotMatch(app, /Ask AI/);
   assert.match(css, /slip-reader/);
