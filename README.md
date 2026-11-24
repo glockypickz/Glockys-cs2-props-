@@ -63,6 +63,30 @@ After merging: press *Set up notifications* at `/beta-admin` (or `POST /auth/adm
 
 Tests: `node --test tests/test_push.mjs` (includes the RFC 8291 test vector).
 
+
+## Community Wins tab (Cloudflare Worker only)
+
+The **Wins** tab is a community board where signed-in users post screenshots of their own hit slips. It is **not** the grader Track Record: customers never see our locked grades, losses, hit rate, or units. The existing admin-only Track Record on the Dashboard is unchanged and still comes only from `lines_history.json`.
+
+- Anyone signed in can open the tab, browse posts (newest first, with optional admin pins at the top), and submit a win: a PNG, JPG, or WebP screenshot (up to 5 MB) plus an optional caption, picks, and payout. The post shows their username and the date (Central Time).
+- Each user can post 5 wins per calendar day (America/Chicago). The Worker checks the file's magic bytes (not just the name), and strips EXIF / text metadata from the image before it is stored.
+- Admins can pin, hide, or delete a post from the same tab. Hidden posts and their images are left out of the public feed (and return 404 for non-admins).
+- GitHub Pages has no Worker, so the tab shows a short "use the live site" note there.
+
+### One-time setup (needed before Wins will accept posts)
+
+The Worker bindings are already in `wrangler.jsonc` (`WINS` KV and `WINS_R2`). You still need to create the R2 bucket once, and the first deploy will create the KV namespace if it is not there yet.
+
+1. Create the R2 bucket (once), from this repo or the dashboard:
+   - `npx wrangler r2 bucket create glockys-wins`
+   - Or: Cloudflare dashboard → R2 → Create bucket → name it exactly `glockys-wins`.
+2. Deploy as usual (`npx wrangler deploy`, or push to `main` if that auto-deploys). Wrangler 4.45+ should create and link the `WINS` KV namespace automatically, the same way as `BETA`. If that step fails: Storage & Databases → KV → Create namespace `glockys-wins`, copy its ID, and add `"id": "<ID>"` next to the `WINS` binding in `wrangler.jsonc`.
+3. After deploy, sign in on the live site and open the **Wins** tab. If the bucket or KV binding is missing, the tab says "The Wins board isn't set up yet."
+
+No new secrets are required for this tab. Never put API keys or the admin key in the board, the wrangler file, or a chat.
+
+Tests: `node --test tests/test_wins.mjs`.
+
 ## Ask Glocky (Cloudflare Worker only)
 
 The **Ask Glocky** button opens a chat. Answers use only our existing data (`players.json`, `team_strength.json`, the live `lines.json` board, and `games.json`). The Worker looks up the numbers first (including the same v1e grader math the site uses for over/under questions) and then phrases a "Glocky says" reply. It does not read `lines_history.json` or the Track Record. Replies and the chat UI never name data providers; they say "our data" or "Glocky's data".

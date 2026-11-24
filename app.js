@@ -31,7 +31,7 @@ var MCTX=null,MCTXN=-1;
 function mctx(){if(!MCTX||MCTXN!==DB.length){MCTX=GPModel.build(DB,null,STRENGTH,RANK);MCTXN=DB.length}return MCTX} // STRENGTH = team_strength.json (Cito-derived), null if absent; RANK = players.json ordinal ranks for the v1 same-tier term
 function pc1(x){return x==null||isNaN(x)?'–':(x*100).toFixed(1)+'%'}
 var STRENGTH=null,DB=[],RANK={},GAMES=[],LINES=[],LINES_FEED=null,HIST=null,META={updated:'',lines_at:'',games_at:'',games_iso:''};
-var TABS=[['dash','⌂','Dashboard'],['games','▦','Games'],['lines','↗','Lines'],['grader','⚡','Grader'],['slip','◎','Slip'],['players','☰','Players']];
+var TABS=[['dash','⌂','Dashboard'],['games','▦','Games'],['lines','↗','Lines'],['grader','⚡','Grader'],['slip','◎','Slip'],['wins','★','Wins'],['players','☰','Players']];
 var tab='dash',slip=[],manual=[],sel={player:'',stat:'kills',line:'',opp:''};
 function load(k,d){try{var v=localStorage.getItem(k);return v?JSON.parse(v):d}catch(e){return d}}
 function save(k,v){try{localStorage.setItem(k,JSON.stringify(v))}catch(e){}}
@@ -722,7 +722,8 @@ function viewShadow(){var rows=[],up=[],skip=0,voids=0,wait=0;
  h+='<div class="card" style="margin-top:12px"><h2>Upcoming shadow picks · '+up.length+'</h2>'+(up.length?up.slice(0,150).map(function(it){return card(it,false)}).join('')+(up.length>150?'<div class="muted">Showing the first 150.</div>':''):'<div class="muted">None yet. Shadow picks are saved at the next hourly lines run after shadow.py and fetch_lines.py are uploaded, for props that have not started.</div>')+'</div>';
  h+='<div class="card" style="margin-top:12px"><h2>Settled shadow picks · '+rows.length+'</h2>'+(rows.length?rows.slice(0,80).map(function(it){return card(it,true)}).join('')+(rows.length>80?'<div class="muted">Showing the latest 80.</div>':''):'<div class="muted">Nothing settled yet. Results fill in by themselves after the matches finish.</div>')+'</div>';
  return h}
-function render(){if(tab==='shadow'&&!shadowOK())tab='dash';nav();chips();var v={dash:viewDash,games:viewGames,lines:viewLines,grader:viewGrader,slip:viewSlip,players:viewPlayers,shadow:viewShadow}[tab]();$('main').innerHTML=v+(tab==='lines'?opts():'')}
+function viewWins(){return typeof GPWins!=='undefined'?GPWins.html():'<div class="card"><h2>Wins</h2><div class="warn">Wins is not loaded.</div></div>'}
+function render(){if(tab==='shadow'&&!shadowOK())tab='dash';nav();chips();var v={dash:viewDash,games:viewGames,lines:viewLines,grader:viewGrader,slip:viewSlip,wins:viewWins,players:viewPlayers,shadow:viewShadow}[tab]();$('main').innerHTML=v+(tab==='lines'?opts():'');if(tab==='wins'&&typeof GPWins!=='undefined'){if(!GPWins.state.loaded)GPWins.load(function(){if(tab!=='wins')return;var r=document.getElementById('wins-root');if(r){r.outerHTML=GPWins.html();GPWins.afterRender()}});else GPWins.afterRender()}}
 function go(t){gpClose();tab=t;render();window.scrollTo(0,0)}
 // ---- images (grade + translucent logo only). Font: Russo One (bold, sporty), loaded from Google Fonts; falls back to Impact.
 var IMGFONT='"Russo One",Impact,"Arial Black",sans-serif';

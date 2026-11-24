@@ -209,7 +209,7 @@ export async function gate(request, env, url, keyHash) {
   if (isOpenPath(path)) return null;
   if ((await gateState(env)) !== "on") return null;
   if (await identify(request, env, keyHash)) return null;
-  if (wantsHtml(request, path) && request.method === "GET" && !/\.json$/i.test(path) && !/^\/(live|push|support)\//.test(path)) {
+  if (wantsHtml(request, path) && request.method === "GET" && !/\.json$/i.test(path) && !/^\/(live|push|support|wins|ai)\//.test(path)) {
     const next = path + url.search;
     return new Response(null, { status: 302, headers: { Location: "/login?next=" + encodeURIComponent(next), "Cache-Control": "no-store" } });
   }

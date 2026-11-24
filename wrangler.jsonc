@@ -10,6 +10,13 @@
   },
   // Beta login storage. No id on purpose: Wrangler (4.45+) creates the namespace on the first deploy and keeps it linked.
   // If you created one by hand in the dashboard instead, add  "id": "<namespace id>"  here.
-  "kv_namespaces": [{ "binding": "BETA" }],
+  "kv_namespaces": [
+    { "binding": "BETA" },
+    // Community Wins posts + daily quotas. Same no-id pattern as BETA.
+    { "binding": "WINS" }
+  ],
+  // Community Wins slip screenshots. Create the bucket once before the first deploy
+  // (see README):  npx wrangler r2 bucket create glockys-wins
+  "r2_buckets": [{ "binding": "WINS_R2", "bucket_name": "glockys-wins" }],
   "previews": {}
 }
