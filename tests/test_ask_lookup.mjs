@@ -149,7 +149,9 @@ test("LAN ev is passed into the grader when the match is a LAN game", () => {
   const p = L.findPlayer(store, "EliGE", "");
   const lanGames = { games: [{ team1: "Liquid", team2: "FaZe", start: "2026-11-25T18:00:00Z", ev: "lan", status: "upcoming" }] };
   const s = L.makeStore({ players: playersRaw, strength, games: lanGames, lines: { lines: [] } });
-  const withLan = globalThis.GPModel.grade(s.ctx, p, "kills", 35.5, "FaZe", { team: p.team, period: "Maps 1-2", ev: "lan", start: "2026-11-25T18:00:00Z" });
+  // Expected value is graded the way the site grades a line: date cutoff = match day, confirmed maps if the veto is in.
+  const GMx = globalThis.GPModel, startAt = "2026-11-25T18:00:00Z";
+  const withLan = GMx.grade(s.ctx, p, "kills", 35.5, "FaZe", { team: p.team, period: "Maps 1-2", ev: "lan", before: startAt.slice(0, 10), maps: (GMx.confirmedMaps && GMx.confirmedMaps(s.ctx, p.team, "FaZe", startAt)) || [] });
   const g = L.gradeIntent({ player: p, stat: "kills", line: 35.5, period: "Maps 1-2", opp: "FaZe", start: "2026-11-25T18:00:00Z" }, s);
   assert.equal(g.proj, +withLan.proj.toFixed(1));
   assert.equal(g.grade, withLan.grade);
