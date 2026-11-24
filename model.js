@@ -100,6 +100,8 @@ function normMap(name){var s=String(name||'').trim();if(s.toLowerCase().indexOf(
  return s.length>1?s.charAt(0).toUpperCase()+s.slice(1):s.toUpperCase()}
 function mapLogRows(p){var logs=p.logs||[],pos={};logs.forEach(function(l){if((l.mid||0)>0)pos[String(l.date)+'|'+l.n+'|'+tn(l.opp)]=1});
  return logs.filter(function(l){return !(l.mid!=null&&l.mid<0&&pos[String(l.date)+'|'+l.n+'|'+tn(l.opp)])})}
+// No cutoff (or the '9999' sentinel) means 'as of today'. A non-date cutoff made addDays() return junk, the 60-day map pool came back empty and the per-map (veto) term silently switched off.
+function cutDay(before){var d=String(before||'').slice(0,10);return /^\d{4}-\d{2}-\d{2}$/.test(d)?d:new Date().toISOString().slice(0,10)}
 function addDays(d,n){var t=Date.parse(String(d).slice(0,10)+'T00:00:00Z');if(isNaN(t))return d;return new Date(t+n*864e5).toISOString().slice(0,10)}
 function poolOf(ctx,D){ctx._pool=ctx._pool||{};if(ctx._pool[D])return ctx._pool[D];var lo=addDays(D,-60),c={},n=0;
  (ctx.gmaps||[]).forEach(function(x){if(x[0]>=lo&&x[0]<D&&x[1]){c[x[1]]=(c[x[1]]||0)+1;n++}});n=n||1;
@@ -130,11 +132,11 @@ function mapBlend(ctx,p,st,opp,before,period,maps){var team=p.team,known=(maps||
  if(known.length){
   if(map1){var a=playerMapAvg(ctx,p,st,known[0],before);return {avg:a[0],n:a[1],src:'known',maps:known.slice(0,1),weights:{}}}
   var pieces=[],ns=[],i;for(i=0;i<Math.min(2,known.length);i++){var a=playerMapAvg(ctx,p,st,known[i],before);if(a[0]!=null){pieces.push(a[0]);ns.push(a[1])}}
-  if(pieces.length===1){var ev=expectedMapAvg(ctx,p,st,vetoWeights(ctx,team,opp,String(before||'9999').slice(0,10)),before);if(ev[0]!=null){pieces.push(ev[0]);ns.push(ev[1]||ns[0])}}
+  if(pieces.length===1){var ev=expectedMapAvg(ctx,p,st,vetoWeights(ctx,team,opp,cutDay(before)),before);if(ev[0]!=null){pieces.push(ev[0]);ns.push(ev[1]||ns[0])}}
   if(pieces.length>=2)return {avg:pieces[0]+pieces[1],n:Math.min(ns[0],ns[1]),src:'known',maps:known.slice(0,2),weights:null};
   if(pieces.length===1)return {avg:pieces[0]*2,n:ns[0],src:'known',maps:known.slice(0,1),weights:null};
   return {avg:null,n:0,src:'known',maps:known,weights:null}}
- var w=vetoWeights(ctx,team,opp,String(before||'9999').slice(0,10)),per=expectedMapAvg(ctx,p,st,w,before);
+ var w=vetoWeights(ctx,team,opp,cutDay(before)),per=expectedMapAvg(ctx,p,st,w,before);
  if(per[0]==null)return {avg:null,n:0,src:'veto',maps:[],weights:w};
  return {avg:map1?per[0]:2*per[0],n:per[1],src:'veto',maps:[],weights:w,nMaps:per[2]}}
 

@@ -625,7 +625,7 @@ function slipGradeNow(){
 
 function viewGrader(){var combo=isCombo(sel.player),p=combo?{name:sel.player}:find(sel.player,sel.team);
  var per=sel.period||'Maps 1-2';if(per!=='Map 1')per='Maps 1-2';sel.period=per;
- var line=parseFloat(sel.line),g=p&&!isNaN(line)?gradeFor(sel.player,sel.team||'',sel.stat,line,sel.opp,{book:sel.book||'PrizePicks',odds:sel.odds,period:per}):null,miss='';if(sel.odds!=null&&sel.oddsLine==null)sel.oddsLine=String(line);if(g&&g.missing){miss=g.missing;g=null}
+ var line=parseFloat(sel.line),g=p&&!isNaN(line)?gradeFor(sel.player,sel.team||'',sel.stat,line,sel.opp,{book:sel.book||'PrizePicks',odds:sel.odds,period:per,start:sel.start}):null,miss='';if(sel.odds!=null&&sel.oddsLine==null)sel.oddsLine=String(line);if(g&&g.missing){miss=g.missing;g=null}
  var statOpts='<option value="kills"'+(sel.stat==='kills'?' selected':'')+'>Kills '+per+'</option><option value="hs"'+(sel.stat==='hs'?' selected':'')+'>Headshots '+per+'</option>';
  var periodUI='<div><label>Period</label><select id="gper"><option value="Maps 1-2"'+(per==='Maps 1-2'?' selected':'')+'>Maps 1-2</option><option value="Map 1"'+(per==='Map 1'?' selected':'')+'>Map 1</option></select></div>';
  var h='<div class="grid c2"><div class="card"><h2>Prop grader</h2><label>Player</label><input id="gp" list="plist" value="'+esc(sel.player)+'" placeholder="Start typing a player"><div class="row"><div><label>Stat</label><select id="gs">'+statOpts+'</select></div><div><label>Line</label><input id="gl" type="number" step="0.5" value="'+esc(sel.line)+'"></div></div>'+periodUI+'<label>Opponent</label><input id="go" list="tlist" value="'+esc(sel.opp)+'" placeholder="Team name"><label>Book (sets the break-even)</label><select id="gb">'+['PrizePicks','Underdog'].map(function(x){return '<option'+((sel.book||'PrizePicks')===x?' selected':'')+'>'+x+'</option>'}).join('')+'</select><div class="btns"><button class="b" data-act="grade">Grade it</button></div></div>';
@@ -811,7 +811,7 @@ function showImg(url,blob,name){var old=document.getElementById('imgov');if(old)
  ov.appendChild(im);ov.appendChild(hint);ov.appendChild(row);document.body.appendChild(ov)}
 function dl(c,name){c.toBlob(function(b){if(!b){toast('Could not build the image');return}showImg(URL.createObjectURL(b),b,name)},'image/png')}
 function share(c,name){dl(c,name)}
-function curGrade(){var g=gradeFor(sel.player,sel.team||'',sel.stat,parseFloat(sel.line),sel.opp,{book:sel.book||'PrizePicks',odds:sel.odds,period:sel.period});return g&&!g.missing?g:null}
+function curGrade(){var g=gradeFor(sel.player,sel.team||'',sel.stat,parseFloat(sel.line),sel.opp,{book:sel.book||'PrizePicks',odds:sel.odds,period:sel.period,start:sel.start});return g&&!g.missing?g:null}
 function addSlip(g){if(slip.some(function(s){return norm(s.player)===norm(g.player)&&s.stat===g.stat&&(s.period||'Maps 1-2')===(g.period||'Maps 1-2')})){toast('Already on slip');return}slip.push({player:g.player,team:g.team||'',opp:g.opp||'',stat:g.stat,line:g.line,pick:g.pick,grade:g.grade,book:g.book||'',period:g.period||'Maps 1-2'});save('gp_slip',slip);toast('Added '+g.player+' '+g.pick+' '+g.line)}
 function slipGrade(s){var team=s.team||'',p=find(s.player,team);return gradeFor(s.player,team||(p&&p.team)||'',s.stat,parseFloat(s.line),s.opp||'',{book:s.book||'PrizePicks',period:s.period})}
 function exportSlipCards(){if(!window.GPCards){toast('Cards are not loaded');return}var i=0,out=[];
@@ -874,9 +874,9 @@ document.addEventListener('click',function(e){var b=e.target.closest('[data-act]
  else if(a==='rclear'){save('gp_recent',[]);render();toast('Search history cleared')}
  else if(a==='gameopen'){toast('Search a player to see his stats')}
  else if(a==='pclose'){sel.pl='';render();toast('Back to list')}
- else if(a==='pgrade'){var pp2=find(sel.pl);sel.player=pp2.name;sel.line=sel.stat==='hs'?(sel.l2||''):(sel.l1||'');sel.opp=sel.o||'';go('grader');toast('Loaded '+pp2.name+' in the grader')}
- else if(a==='pg'){sel.player=b.dataset.p;var p=find(sel.player);sel.opp='';go('grader');toast('Loaded '+sel.player+'. Enter a line')}
- else if(a==='grade'){var np=$('gp').value;if(np!==sel.player)sel.team='';sel.player=np;sel.stat=$('gs').value;sel.line=$('gl').value;sel.opp=$('go').value;if($('gper'))sel.period=$('gper').value;var nb=$('gb')?$('gb').value:'PrizePicks';if(nb!==sel.book||String(parseFloat(sel.line))!==String(sel.oddsLine))sel.odds=null;sel.book=nb;sel.gtab='insights';render();toast('Graded')}
+ else if(a==='pgrade'){var pp2=find(sel.pl);sel.start='';sel.player=pp2.name;sel.line=sel.stat==='hs'?(sel.l2||''):(sel.l1||'');sel.opp=sel.o||'';go('grader');toast('Loaded '+pp2.name+' in the grader')}
+ else if(a==='pg'){sel.start='';sel.player=b.dataset.p;var p=find(sel.player);sel.opp='';go('grader');toast('Loaded '+sel.player+'. Enter a line')}
+ else if(a==='grade'){var np=$('gp').value;if(np!==sel.player)sel.team='';if(np!==sel.player||$('go').value!==sel.opp)sel.start='';sel.player=np;sel.stat=$('gs').value;sel.line=$('gl').value;sel.opp=$('go').value;if($('gper'))sel.period=$('gper').value;var nb=$('gb')?$('gb').value:'PrizePicks';if(nb!==sel.book||String(parseFloat(sel.line))!==String(sel.oddsLine))sel.odds=null;sel.book=nb;sel.gtab='insights';render();toast('Graded')}
  else if(a==='gadd'){var g=curGrade();if(g)addSlip(g)}
  else if(a==='gimg'){var g2=curGrade();if(g2)(window.GPCards?GPCards.img:function(g,f){img({g:g},f)})(g2,function(c){dl(c,'glocky-card.png')})}
  else if(a==='gshare'){var g3=curGrade();if(g3)(window.GPCards?GPCards.img:function(g,f){img({g:g},f)})(g3,function(c){share(c,'glocky-card.png')})}
