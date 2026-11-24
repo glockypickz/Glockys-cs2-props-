@@ -55,3 +55,18 @@ Code: `push.js` (Web Push: VAPID RFC 8292 + aes128gcm RFC 8291, WebCrypto only),
 After merging: press *Set up notifications* at `/beta-admin` (or `POST /auth/admin/push/setup` with the admin key), and add the repo secret `GP_ADMIN_KEY` = the admin key (Settings → Secrets and variables → Actions).
 
 Tests: `node --test tests/test_push.mjs` (includes the RFC 8291 test vector).
+
+## Shadow S: Scout-style factor projection (admin only, test)
+
+`scout_model.py` grades every upcoming prop a third way and saves it once, before the match starts, as `e["shadow_s"]` in `lines_history.json` (via `shadow.py`). It never changes the live projection, pick, letter or any locked grade.
+
+- **Form:** kills per round over every logged map this season, recency weighted (half-life 30 maps), blended with the raw season rate (weight 0.2, never 0) and with head-to-head kills per round vs this opponent (from a single prior meeting, shrunk toward his own rate, weight 0.15).
+- **Rounds:** expected rounds per map from both teams' recent rounds per map and the Elo closeness pw(1-pw), times 2 maps (Maps 1-2) or 1 map (Map 1).
+- **Opponent:** deaths per player-round the opponent gives up vs the average of the teams he faced (coefficient fitted).
+- **Headshots:** the kills projection times his headshots per kill (recent, shrunk to season).
+- Letters use the live v1 cutoffs and the Under break-even rule.
+- The Shadow tab shows its record next to the live grader. The Grader card shows a "What moved the projection" table and the likely maps (veto estimate, context only) when the prop is on the board.
+
+Tested and dropped (no holdout gain): LAN/online KPR, veto-weighted per-map KPR (even with the real maps known it added nothing), per-map rounds and Elo as a kills-per-round factor.
+
+Backtest: `python scout_backtest.py build` (features, cached in /tmp), `report` (staged factor selection), `factors` (per-factor table), `final` (holdout + real locked lines), `fit` (writes `scout_params.json`; Apr 1 - Oct 19 fit window). Tests: `python tests/test_scout.py`.

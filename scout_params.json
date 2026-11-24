@@ -1,0 +1,48 @@
+{
+ "model": "shadow-scout-v1",
+ "fit_window": [
+  "2026-04-01",
+  "2026-10-20"
+ ],
+ "rounds": {
+  "rd_a": 12.9293,
+  "rd_b": 0.2169,
+  "rd_c": 15.968
+ },
+ "hyper": {
+  "hl": 30.0,
+  "m": 80.0,
+  "w_szn": 0.2,
+  "m_h2h": 60.0,
+  "w_h2h": 0.15,
+  "k_lan": 150.0,
+  "k_map": 120.0,
+  "k_opp": 200.0,
+  "k_rd": 6.0,
+  "hl_rd": 20.0,
+  "veto_days": 180,
+  "pool_days": 60,
+  "k_veto": 1.5,
+  "k_hs": 40.0,
+  "hl_hs": 30.0
+ },
+ "coefs": {
+  "Maps 1-2|kills": {
+   "b0": 0.0013,
+   "b_opp": 0.9456
+  },
+  "Maps 1-2|hs": {
+   "b0": 0.007,
+   "b_opp": 0.8352
+  },
+  "Map 1|kills": {
+   "b0": 0.0006,
+   "b_opp": 1.0898
+  },
+  "Map 1|hs": {
+   "b0": 0.0052,
+   "b_opp": 0.8787
+  }
+ },
+ "note": "Fitted by scout_backtest.py (fit). Kept factors only; 0 = factor off."
+}
