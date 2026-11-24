@@ -137,11 +137,40 @@ def book_info(e):
 
 
 def apply(gr, e, now, t0):
-    """Add e["shadow"] (and e["shadow_b"]) to one history entry: only before the match starts, once, never overwritten."""
+    """Add e["shadow"], e["shadow_b"] and e["shadow_s"] to one history entry: only before the match starts, once, never overwritten."""
     if t0 and now and now >= t0:
         return
     _apply_a(gr, e, now, t0)
     _apply_b(gr, e, now)
+    _apply_s(gr, e, now)
+
+
+# Shadow S (e["shadow_s"]): Scout-style factor projection (scout_model.py, coefficients in scout_params.json):
+# kills per round (recency-weighted + season + head-to-head) x expected rounds x maps, then the opponent adjustment
+# (deaths per player-round the opponent gives up vs the opponents he faced). Headshots = that x his headshots per kill.
+# Same letters as live (v1 cutoffs + Under break-even rule). Saved once before the start with a "what moved it" list and
+# the likely maps (veto estimate, context only). Never changes the live lock, pick or letter.
+_SCOUT = {}
+
+
+def _scout(gr):
+    k = id(gr)
+    if k not in _SCOUT:
+        import scout_model
+        _SCOUT.clear()
+        _SCOUT[k] = scout_model.ScoutGrader(gr)
+    return _SCOUT[k]
+
+
+def _apply_s(gr, e, now):
+    if e.get("shadow_s") or gr is None:
+        return
+    try:
+        s = _scout(gr).grade_entry(e)
+        s["at"] = now.isoformat(timespec="seconds") if now else None
+        e["shadow_s"] = s
+    except Exception as ex:
+        print("shadow S failed for", e.get("player"), ex)
 
 
 def _apply_b(gr, e, now):

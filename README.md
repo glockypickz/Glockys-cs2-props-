@@ -55,3 +55,23 @@ Code: `push.js` (Web Push: VAPID RFC 8292 + aes128gcm RFC 8291, WebCrypto only),
 After merging: press *Set up notifications* at `/beta-admin` (or `POST /auth/admin/push/setup` with the admin key), and add the repo secret `GP_ADMIN_KEY` = the admin key (Settings → Secrets and variables → Actions).
 
 Tests: `node --test tests/test_push.mjs` (includes the RFC 8291 test vector).
+
+## Shadow S: Scout-style factor projection (admin only, test)
+
+`scout_model.py` grades every upcoming prop a third way and saves it once, before the match starts, as `e["shadow_s"]` in `lines_history.json` (via `shadow.py`). It never changes the live projection, pick, letter or any locked grade.
+
+- **Form:** kills per round over every logged map this season, recency weighted (half-life 30 maps), blended with the raw season rate (weight 0.2, never 0) and with head-to-head kills per round vs this opponent (from a single prior meeting, shrunk toward his own rate, weight 0.15).
+- **Rounds:** expected rounds per map from both teams' recent rounds per map and the Elo closeness pw(1-pw), times 2 maps (Maps 1-2) or 1 map (Map 1).
+- **Opponent:** deaths per player-round the opponent gives up vs the average of the teams he faced (coefficient fitted).
+- **Headshots:** the kills projection times his headshots per kill (recent, shrunk to season).
+- Letters use the live v1 cutoffs and the Under break-even rule.
+- The Shadow tab shows its record next to the live grader. The Grader card shows a "What moved the projection" table and the likely maps (veto estimate, context only) when the prop is on the board.
+
+Likely maps: each team's share of every active-pool map among its Maps 1-2 over the last 180 days (smoothed), averaged for the two teams; the top 3 are kept and renormalized (best-of-5: top 5, format from games.json). On Oct 20+ Bo3 matches 64% of the maps actually played were in our top 3 (a random top 3 of 7 gets 43%).
+
+Tested and dropped (no holdout gain): LAN/online KPR, per-map KPR and per-map rounds weighted by the top-3 maps (or by the whole pool; even with the real maps known it added nothing), and Elo as a kills-per-round factor. Blowouts (a map won or lost 13-5 or wider): the predicted blowout chance (logistic on the Elo win chance) times his own kills per round in past blowout wins / losses / close maps (shrunk to the league ratio) cut validation MAE by only 0.000-0.004, under the 0.005 bar, at thresholds 7 / 8 / 9 and with lighter shrinkage; the player-specific part alone added nothing. It is shown on cards as context only.
+
+Backtest: `python scout_backtest.py build` (features, cached in /tmp), `report` (staged factor selection), `factors` (per-factor table), `final` (holdout + real locked lines), `fit` (writes `scout_params.json`; Apr 1 - Oct 19 fit window). Tests: `python tests/test_scout.py`.
+
+### Shadow S: LAN data (owner request, Nov 24)
+When `infer_ev` says the match is LAN (the newest logged map of either team in the 3 days before it was LAN), Shadow S builds its form (recent and season kills per round), head-to-head, opponent (deaths given up on LAN maps, vs the LAN opponents he faced) and headshots-per-kill inputs from the player's LAN maps only. Each LAN piece is shrunk to the same piece from all maps by 150 rounds (`lan_k_rd`), so a few LAN maps lean on overall. Like every Shadow S input it uses maps from both scopes; Map 1 changes only the number of maps. `lan_data: 0` turns it off. Backtest (`python lan_scout_backtest.py`): on LAN matches it did not lower MAE (holdout Maps 1-2 kills 6.240 → 6.250, HS 3.799 → 3.827). It is shown with a "LAN data" label.
