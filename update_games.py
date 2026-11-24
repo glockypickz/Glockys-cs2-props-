@@ -123,6 +123,19 @@ def parse_streams(raw):
     return out[:STREAM_MAX]
 
 
+def _ev(x):
+    x = str(x or "").lower()
+    return "lan" if x == "lan" else "online" if x == "online" else None
+
+
+def known_event_types():
+    """tournament id -> "lan"/"online" from season_state.json (filled by update_data.py from bo3.gg match detail). File read only."""
+    try:
+        return {str(k): _ev(v) for k, v in (json.load(open("season_state.json", encoding="utf-8")).get("events") or {}).items() if _ev(v)}
+    except Exception:
+        return {}
+
+
 async def fill_streams(session, jobs):
     """jobs: list of (game dict, slug). Fetches match detail and sets game['streams']."""
     sem = asyncio.Semaphore(STREAM_CONCURRENCY)
@@ -136,6 +149,9 @@ async def fill_streams(session, jobs):
                 return
             if isinstance(det, dict):
                 g["streams"] = parse_streams(det.get("streams") or [])
+                et = _ev((det.get("tournament") or {}).get("event_type"))
+                if et and not g.get("ev"):
+                    g["ev"] = et
 
     await asyncio.gather(*(one(g, slug) for g, slug in jobs))
 
@@ -144,6 +160,7 @@ async def main():
     global printed_keys
     now = datetime.datetime.now(datetime.timezone.utc)
     games, seen, details = [], set(), []
+    evmap = known_event_types()
     async with aiohttp.ClientSession(headers=H) as s:
         for status, label in (("current", "live"), ("upcoming", "upcoming")):
             try:
@@ -174,6 +191,14 @@ async def main():
                 g = {"id": m["id"], "start": start, "team1": t1["name"], "team2": t2["name"],
                      "tournament": (m.get("tournament") or {}).get("name", ""), "bo": m.get("bo_type"),
                      "status": label, "s1": score(m, 1), "s2": score(m, 2), "streams": []}
+                # LAN / online for the grader's LAN data: list payload event_type if present, else season_state.json by
+                # tournament id, else the match detail (stream fetch) fills it; missing = grader falls back to the 3-day rule.
+                tour = m.get("tournament") or {}
+                if tour.get("id") is not None:
+                    g["tournament_id"] = tour["id"]
+                ev = _ev(tour.get("event_type")) or evmap.get(str(tour.get("id")))
+                if ev:
+                    g["ev"] = ev
                 games.append(g)
                 slug = m.get("slug")
                 # List payload only has stream names; live matches and any row with stream names get a detail fetch.

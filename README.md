@@ -4,6 +4,13 @@ prop grader for cs2 props , research done for you. Backed by real data &amp; ana
 ## Active grader
 New locks and live grades use the v1 projection (35% last 10 series, 20% all logged series, 20% head-to-head, 15% vs the same rank tier from `players.json`, 10% last 3 series, then a small ADR adjustment) and the v1 letter cutoffs on `(proj - line) / line`: A+ ≥ +15%, B ≥ +5%, C ≥ −2%, D ≥ −10%, otherwise F. The pick is Over if the projection is at or above the line, otherwise Under. When that pick is Under and the letter is D or F, a v2 negative-binomial P(under) with a 0.7 line blend is compared to the book's break-even (stored odds, or the book default): F if the Under is at least +3 percentage points over break-even, otherwise D. The pick does not change. There is no hit-rate letter override and no plain A. Already-locked props keep the letter stored on the lock.
 
+### LAN data (owner request, Nov 24)
+When the match is LAN, every v1 input (last 10, season, head-to-head, same rank tier, last 3, ADR nudge) is computed from the player's LAN games only (Map 1 props: LAN Map 1s). Weights are unchanged.
+- **Is the match LAN?** 1) `games.json` `ev` (bo3.gg tournament event type; `update_games.py` fills it from the list payload, `season_state.json` events, or the match detail; no extra API calls); 2) otherwise the newest logged map of either team in the 3 days before the match (same event, several match days); 3) otherwise not LAN. Locks record `ev` / `ev_src`.
+- **Thin LAN samples:** last 10 / last 3 use the n LAN series for n of the 10 / 3 slots and the overall value for the rest, `(n·LAN + (N−n)·overall)/N`. Season, head-to-head and same tier are `(n·LAN + 5·overall)/(n+5)`. A part with no LAN series uses overall. ADR nudge uses LAN rows when 3+ of the last 5 LAN series have ADR, else overall.
+- The Breakdown labels each part "· LAN data" with "n LAN of N" series; grade cards show a "LAN data" tag. `lan_data: 0` in PARAMS turns it off.
+- Backtest (`python lan_backtest.py`): it does not improve accuracy. See the PR for the numbers.
+
 ## Cito API (optional team-strength data)
 - `cito_client.py`: Cito client. It saves every reply to `cito_cache/`, spaces calls 6.5 s apart, and allows at most 14 calls a day, keeping 40 of the monthly allowance in reserve. It retries a 429 after the time given in `Retry-After`.
 - `cito_update.py` is the only script that calls Cito. It runs once a day in the "Update CS2 data" workflow, the only step that gets the `CITO_API_KEY` secret. It writes `team_strength.json` (dated VRS and world ranking points plus team map stats), `cito_ids.json`, and `cito_cache/_results_index.json` (backup results for settling).

@@ -53,7 +53,7 @@ function html(g){if(!g)return '';var t=tier(g.grade),u=g.pick==='UNDER',fo=t.foi
  var top='<div class="tc-top"><div class="tc-rate"><b>'+esc(g.grade)+'</b><span>'+t.name+'</span></div>'+
   '<div class="tc-logo'+(logoUrl(g.team)?'':' mono')+'" data-team="'+esc(g.team)+'">'+badge(g.team)+'<span>'+esc(mono(g.team))+'</span></div></div>';
  var name='<div class="tc-name"><b>'+esc(g.player)+'</b><span>'+esc(g.team||'')+(g.opp?' vs '+esc(g.opp):'')+' · '+bk+'</span></div>';
- var info='<div class="tc-info"><div class="tc-stat">'+esc(sname(g.stat))+' · Maps 1-2</div><div class="tc-pick'+(u?' u':'')+'">'+esc(g.pick)+' '+esc(g.line)+'</div>'+
+ var info='<div class="tc-info"><div class="tc-stat">'+esc(sname(g.stat))+' · Maps 1-2'+(g.lan?' · LAN data':'')+'</div><div class="tc-pick'+(u?' u':'')+'">'+esc(g.pick)+' '+esc(g.line)+'</div>'+
   '<div class="tc-proj"><span>PROJ</span><b>'+esc(g.proj)+'</b></div>'+'<div class="tc-meta">'+pct(g.pPick)+' chance · '+edge(g)+' edge · L10 '+l10(g)+'</div>'+spark(g)+'</div>';
  var port=pic?'<div class="tc-port"><div class="tc-pic"><img src="'+esc(photoSrc(g.player))+'" alt="" onerror="GPCards.dropPic(this)"></div></div>':'';
  var mid=pic?(port+top+name+info):(top+info+name);
