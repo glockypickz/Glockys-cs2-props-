@@ -108,7 +108,7 @@ function pickBest(arr) {
   return arr.slice().sort((a, b) => (b.logs || []).length - (a.logs || []).length)[0] || null;
 }
 
-function findTeam(store, name) {
+export function findTeam(store, name) {
   const GM = M();
   const k = GM.tn(name);
   if (!k) return null;
@@ -378,7 +378,7 @@ export function matchOdds(store, team, opp) {
   };
 }
 
-function findBoardLine(store, player, stat, period, opp) {
+export function findBoardLine(store, player, stat, period, opp) {
   const GM = M();
   const st = stat === "hs" ? "hs" : "kills";
   const per = period || "Maps 1-2";

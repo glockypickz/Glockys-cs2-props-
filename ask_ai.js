@@ -26,11 +26,11 @@ function json(obj, status) {
   });
 }
 
-function hasGeminiKey(env) {
+export function hasGeminiKey(env) {
   return !!(env && typeof env.GEMINI_API_KEY === "string" && env.GEMINI_API_KEY.trim());
 }
 
-function geminiModel(env) {
+export function geminiModel(env) {
   const m = env && env.GEMINI_MODEL ? String(env.GEMINI_MODEL).trim() : "";
   return m || DEFAULT_MODEL;
 }
@@ -90,7 +90,7 @@ async function ensureModel(env, origin) {
   return loadGPModelFromSource(await r.text());
 }
 
-async function loadStore(env, origin) {
+export async function loadStore(env, origin) {
   if (dataCache.store && Date.now() - dataCache.at < 60000) return dataCache.store;
   await ensureModel(env, origin);
   const get = async (path) => {
@@ -156,20 +156,25 @@ function extractText(data) {
   }
 }
 
-async function geminiGenerate(env, system, user, timeoutMs) {
+export async function geminiRequest(env, opts) {
+  opts = opts || {};
   const key = String(env.GEMINI_API_KEY || "").trim();
   const model = encodeURIComponent(geminiModel(env));
   const url = "https://generativelanguage.googleapis.com/v1beta/models/" + model + ":generateContent";
   const ctrl = typeof AbortController !== "undefined" ? new AbortController() : null;
-  const t = ctrl ? setTimeout(() => ctrl.abort(), timeoutMs || 15000) : null;
+  const t = ctrl ? setTimeout(() => ctrl.abort(), opts.timeoutMs || 15000) : null;
+  const parts = opts.parts || [{ text: opts.user || "" }];
   try {
     const r = await fetch(url, {
       method: "POST",
       headers: { "content-type": "application/json", "x-goog-api-key": key },
       body: JSON.stringify({
-        systemInstruction: { parts: [{ text: system }] },
-        contents: [{ role: "user", parts: [{ text: user }] }],
-        generationConfig: { temperature: 0.2, maxOutputTokens: 512 }
+        systemInstruction: { parts: [{ text: opts.system || "" }] },
+        contents: [{ role: "user", parts }],
+        generationConfig: {
+          temperature: opts.temperature != null ? opts.temperature : 0.2,
+          maxOutputTokens: opts.maxOutputTokens || 512
+        }
       }),
       signal: ctrl ? ctrl.signal : undefined
     });
@@ -182,6 +187,10 @@ async function geminiGenerate(env, system, user, timeoutMs) {
   } finally {
     if (t) clearTimeout(t);
   }
+}
+
+async function geminiGenerate(env, system, user, timeoutMs) {
+  return geminiRequest(env, { system, parts: [{ text: user }], timeoutMs, temperature: 0.2, maxOutputTokens: 512 });
 }
 
 function stripGlockySays(text) {
