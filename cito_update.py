@@ -115,11 +115,81 @@ def build_strength(c, old):
     out = {"source": "cito", "updated": datetime.datetime.now(datetime.timezone.utc).isoformat(timespec="seconds"),
            "note": "Derived numbers only. rankings: dated lists (team key -> points). maps: per team, dated snapshots "
                    "{map: [maps played, total rounds on those maps, pick %]}. The grader only uses entries dated before the match day. "
-                   "odds: match winner prices from the saved upcoming-matches reply (display only, not used by the grader).",
+                   "odds: match winner prices from the saved upcoming-matches reply (display only, not used by the grader). "
+                   "match_maps: confirmed map names from a completed veto or the listed maps on an upcoming match "
+                   "(TBA / placeholder names are dropped). There are no per-match map pick probabilities in that reply.",
            "rankings": {kind: [{"date": d, "points": rank[kind][d]} for d in sorted(rank[kind])[-KEEP_RANK_SNAPS:]] for kind in rank},
            "maps": {k: [{"asof": a, "maps": v[a]} for a in sorted(v)[-KEEP_MAP_SNAPS:]] for k, v in sorted(maps.items())}}
     if odds:
         out["odds"] = odds
+    mm = match_confirmed_maps(c)
+    if mm:
+        out["match_maps"] = mm
+    return out
+
+
+
+def _canon_map(name):
+    s = str(name or "").strip()
+    if s.lower().startswith("de_"):
+        s = s[3:]
+    s = s.strip()
+    if not s or s.lower() in ("tba", "tbd", "tbc", "unknown", "pending", "?", "-"):
+        return None
+    return s[0].upper() + s[1:] if len(s) > 1 else s.upper()
+
+
+def confirmed_maps_of(m):
+    """Real map names already listed for a Cito upcoming/recent match. TBA and empty names are ignored.
+    Prefers maps[] (mapNumber order). Falls back to a veto with real team/ban steps and a mapNumber on the pick.
+    Two identical unattributed picks are not treated as a veto."""
+    by = {}
+    for g in m.get("maps") or []:
+        n = g.get("mapNumber") or g.get("n")
+        nm = _canon_map(g.get("mapNameCanonical") or g.get("mapName"))
+        if nm and n:
+            try:
+                by[int(n)] = nm
+            except (TypeError, ValueError):
+                continue
+    if by:
+        return [by[k] for k in sorted(by)]
+    vo = m.get("vetoOrder") or []
+    real = any(isinstance(s, dict) and (s.get("teamId") or str(s.get("action") or "").lower() == "ban") for s in vo)
+    if not real:
+        return []
+    for s in vo:
+        if not isinstance(s, dict):
+            continue
+        if str(s.get("action") or "").lower() not in ("pick", "decider", "leftover", "remain"):
+            continue
+        nm = _canon_map(s.get("mapName") or s.get("map"))
+        n = s.get("mapNumber")
+        if nm and n:
+            try:
+                by[int(n)] = nm
+            except (TypeError, ValueError):
+                continue
+    return [by[k] for k in sorted(by)]
+
+
+def match_confirmed_maps(c):
+    """Confirmed maps from the newest saved /cs2/matches/upcoming reply (no extra call)."""
+    recs = [r for r in c.saved("/cs2/matches/upcoming") if r.get("status") == 200]
+    if not recs:
+        return []
+    rec = max(recs, key=lambda r: str(r.get("fetched") or ""))
+    out = []
+    for m in data(rec.get("body")) or []:
+        maps = confirmed_maps_of(m)
+        if not maps:
+            continue
+        t1, t2 = tn(m.get("team1Name")), tn(m.get("team2Name"))
+        if not t1 or not t2:
+            continue
+        out.append({"t1": t1, "t2": t2, "n1": m.get("team1Name"), "n2": m.get("team2Name"),
+                    "start": m.get("startsAt"), "maps": maps, "src": "veto",
+                    "at": rec.get("fetched")})
     return out
 
 

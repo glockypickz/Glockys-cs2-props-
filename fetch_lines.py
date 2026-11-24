@@ -145,14 +145,33 @@ def match_odds_for(e):
     return None
 
 
+def _lock_model_of(e):
+    return (e.get("lock") or {}).get("model")
+
+
+def needs_regrade(e):
+    """Unstarted, unsettled locks whose stored grade is on an older model or an older REGRADE_TAG.
+    Started and settled locks are never regraded. REGRADE_TAG itself is not bumped for a model change."""
+    if e.get("result") or not e.get("lock"):
+        return False
+    lock = e["lock"]
+    if lock.get("rg") != REGRADE_TAG:
+        return True
+    try:
+        from grader import MODEL_VERSION
+        return lock.get("model") != MODEL_VERSION
+    except Exception:
+        return False
+
+
 def try_lock(gr, e, now, t0):
     """Save the app's grade, projection, pick and probability for this line, once, before the match starts."""
     if t0 and now and now >= t0:
         return
     if e.get("lock"):
-        if gr is not None and e["lock"].get("rg") != REGRADE_TAG and not e.get("result"):
-            _lock(gr, e, now, regrade=True)   # one-time regrade of props that have not started yet (the new grade replaces the old one)
-            if e["lock"].get("rg") == REGRADE_TAG:
+        if gr is not None and needs_regrade(e):
+            _lock(gr, e, now, regrade=True)   # unstarted only (started already returned above); the new grade replaces the old one
+            if not needs_regrade(e):
                 return
         # already locked: add the match odds if they were missing at lock time (still before the match, grade untouched)
         if "mo" not in e["lock"]:
@@ -176,13 +195,15 @@ def _lock(gr, e, now, regrade=False):
         # LAN data (grader.py lan_data): match type from games.json "ev", else the 3-day rule. New locks only; REGRADE_TAG is
         # NOT bumped, so props that are already locked keep their grade.
         ev, ev_src = gr.match_ev(e.get("team"), e.get("opponent") or "", e.get("start"))
+        before = str(e.get("start") or "")[:10] or "9999"
+        maps = gr.confirmed_maps(e.get("team"), e.get("opponent") or "", e.get("start"))
         if "+" in e["player"]:
-            g = gr.grade_combo(e["player"], e.get("team"), st, float(e["line"]), e.get("opponent") or "", e.get("book"), e.get("odds"), period=e.get("period"), ev=ev)
+            g = gr.grade_combo(e["player"], e.get("team"), st, float(e["line"]), e.get("opponent") or "", e.get("book"), e.get("odds"), before=before, period=e.get("period"), ev=ev, maps=maps)
         else:
             p = gr.find(e["player"], e.get("team"))
             if not p:
                 return
-            g = gr.grade(p, st, float(e["line"]), e.get("opponent") or "", e.get("team"), e.get("book"), e.get("odds"), period=e.get("period"), ev=ev)
+            g = gr.grade(p, st, float(e["line"]), e.get("opponent") or "", e.get("team"), e.get("book"), e.get("odds"), before=before, period=e.get("period"), ev=ev, maps=maps)
         if g:
             o = e["lock"] if regrade else None
             e["lock"] = {"line": float(e["line"]), "proj": g["proj"], "grade": g["grade"], "pick": g["pick"],
@@ -198,6 +219,11 @@ def _lock(gr, e, now, regrade=False):
             if ev:
                 e["lock"]["ev"] = ev   # match type the grade used: "lan" = LAN data inputs (when lan_data is on)
                 e["lock"]["ev_src"] = ev_src
+            if maps:
+                e["lock"]["maps"] = maps
+            mb = (g.get("v1") or {}).get("map") if isinstance(g.get("v1"), dict) else None
+            if mb and mb.get("used"):
+                e["lock"]["map_src"] = mb.get("src")
             if regrade:
                 e["lock"]["rg"] = REGRADE_TAG   # marks "regraded once"; the old grade is not kept
             mo = match_odds_for(e) or (o.get("mo") if regrade else None)

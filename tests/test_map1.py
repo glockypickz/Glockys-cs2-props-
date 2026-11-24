@@ -88,7 +88,7 @@ class GradeMap1Tests(unittest.TestCase):
         self.assertGreater(g["p_pick"], 0.5)
         self.assertFalse(g.get("under_be", {}).get("applied"))
         self.assertIn("stake", g)
-        self.assertEqual(g["model"], "v1e")
+        self.assertEqual(g["model"], "v1f")
 
 
 class SettleMap1Tests(unittest.TestCase):

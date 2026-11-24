@@ -115,22 +115,36 @@ function find(name,team){
 // o = {team, book, odds, before}; before = 'YYYY-MM-DD' grades with data from before that day only (track record)
 // LAN data: match type from games.json ev (bo3.gg), else the 3-day rule on the teams' last logged maps (GPModel.matchEv, same as grader.py).
 function evFor(team,opp,start){if(!opp)return[null,null];return GPModel.matchEv(mctx(),team,opp,start||new Date().toISOString(),GAMES)}
+function knownMaps(team,opp,start){var out=[];
+ if(typeof mctx==='function'&&typeof DB!=='undefined'&&DB.length&&typeof GPModel!=='undefined'&&GPModel.confirmedMaps){try{out=GPModel.confirmedMaps(mctx(),team,opp,start)||[]}catch(e){out=[]}}
+ if(out.length)return out;
+ var day=String(start||'').slice(0,10);
+ (typeof GAMES!=='undefined'?GAMES:[]).forEach(function(g){
+  if(!((teq(g.team1,team)&&teq(g.team2,opp))||(teq(g.team2,team)&&teq(g.team1,opp))))return;
+  if(day&&String(g.start||'').slice(0,10)!==day)return;
+  var L=typeof LIVE!=='undefined'&&LIVE[g.id], names=[];
+  ((L&&L.maps)||[]).forEach(function(x){var n=GPModel.normMap?GPModel.normMap(x.map):null;if(n)names.push(n)});
+  if(names.length)out=names});
+ return out}
 function grade(p,st,line,opp,o){o=o||{};var cs=seriesFor(p,o.period);var v=nums(cs,st);if(!v.length||isNaN(line))return null;
  var evr=o.ev!==undefined?[o.ev,o.evSrc||null]:evFor(o.team||p.team,opp,o.start||o.before);
- var m=GPModel.grade(mctx(),p,st,line,opp,{team:o.team||'',book:o.book,odds:o.odds,before:o.before,period:o.period,ev:evr[0]});if(!m)return null;
+ var before=o.before||(o.start?String(o.start).slice(0,10):'9999'),maps=o.maps||knownMaps(o.team||p.team,opp,o.start||before);
+ var m=GPModel.grade(mctx(),p,st,line,opp,{team:o.team||'',book:o.book,odds:o.odds,before:before,period:o.period,ev:evr[0],maps:maps});if(!m)return null;
  var yr=cs.length?cs[0].date.slice(0,4):'',last=nums(cs.filter(function(c){return c.date.slice(0,4)===yr}),st),over=last.filter(function(x){return x>line}).length; // full season (calendar year), not a short window
  var det=m.v1||{},lan=det.lan&&det.lan.used?{n:det.lan.n,src:evr[1],adr:det.lan.adrLan}:null,comp=(det.parts||[]).map(function(p){return{k:p.label+' (weight '+p.w.toFixed(2)+')',v:p.v,n:p.nLan!=null?p.nLan+' LAN of '+p.n:p.n,f:1}});
  if(opp)comp=comp.concat(h2hSeasonRows(cs,st,opp,o.before));
  if(det.adr5!=null||det.adrc!=null){comp.push({k:'ADR nudge (last 5 vs all series, cap 5%)'+(lan&&lan.adr?' · LAN data':''),v:det.adrUsed?((det.adrMult-1)*100):null,n:det.adrN5,f:1,u:'%'});
   if(det.adr5!=null)comp.push({k:'ADR, last 5 series',v:det.adr5,n:det.adrN5,f:1});
   if(det.adrc!=null)comp.push({k:'ADR, all series',v:det.adrc,n:det.adrN,f:1})}
+ var mb=det.map;if(mb){var lab=mb.src==='known'?'Per-map average ('+((mb.maps||[]).join(', ')||'known maps')+', k=5 shrink)':'Per-map average (expected maps, k=5 shrink)';
+  comp.push({k:lab,v:mb.avg,n:mb.n,f:1});if(mb.used&&mb.pre!=null&&mb.proj!=null)comp.push({k:'Projection after per-map shrink',v:mb.proj,n:mb.n,f:1})}
  if(m.underBe&&m.underBe.applied)comp.push({k:'P(under) vs break-even (F if at least +3pp, else D)',v:m.underBe.epp,n:null,f:1,u:'pp'});
  var used=(det.parts||[]).filter(function(p){return p.v!=null}),mix=used.map(function(p){return p.label+' '+p.v.toFixed(1)+' \xd7 '+p.w.toFixed(2)}).join(', ');
  var redis=det.weightSum!=null&&Math.abs(det.weightSum-1)>1e-6,nudgeTxt=det.adrUsed?(', then an ADR nudge of '+(det.adrMult>=1?'+':'')+((det.adrMult-1)*100).toFixed(1)+'% (capped at 5%) from last 5 series vs overall ADR'):', with no ADR nudge';
  var beNote='The letter is from the model chance on this pick minus the book\'s break-even (same cutoffs on Over and Under)';
  if(m.gradeCap&&m.gradeCap.applied)beNote+='. Capped at C+ from '+m.gradeCap.preGrade+' because this is a '+(m.gradeCap.reason||'').replace('lan_kills','LAN kills prop').replace('bait','bait-flagged prop').replace('+',' and a ');
  if(opp)beNote+='. H2H last 10 / last 15 (this season) are shown for reference only and are not used in the projection or the letter';
- var adj='Projection '+m.proj.toFixed(1)+' is the v1 mix'+(mix?': '+mix:'')+(redis?' (missing windows dropped, their weight redistributed)':'')+nudgeTxt+'. P(over) '+pc1(m.pOver)+(m.pPush>0.0005?' (push '+pc1(m.pPush)+')':'')+'. P(pick) '+pc1(m.pPick)+'. Break-even '+pc1(m.be)+(o.book?' ('+o.book+')':' (PrizePicks default)')+'. Edge '+(m.edgePP>=0?'+':'')+m.edgePP.toFixed(1)+' pts. '+beNote+(m.reasons.length?'. Flag: '+m.reasons.join('; '):'');
+ var adj='Projection '+m.proj.toFixed(1)+' is the v1 mix'+(mix?': '+mix:'')+(redis?' (missing windows dropped, their weight redistributed)':'')+nudgeTxt+(function(){var mb=det.map;if(!mb||!mb.used||mb.avg==null)return '';var from=mb.pre!=null?mb.pre.toFixed(1):'';var to=mb.proj!=null?mb.proj.toFixed(1):m.proj.toFixed(1);var src=mb.src==='known'?('his '+((mb.maps||[]).join(' + ')||'known map')+' average of '+mb.avg.toFixed(1)+' ('+mb.n+' maps)'):('his expected-map average of '+mb.avg.toFixed(1)+' ('+mb.n+' maps, from the map-pool veto weights)');return '. Then shrunk toward '+src+', moving the projection from '+from+' to '+to})()+'. P(over) '+pc1(m.pOver)+(m.pPush>0.0005?' (push '+pc1(m.pPush)+')':'')+'. P(pick) '+pc1(m.pPick)+'. Break-even '+pc1(m.be)+(o.book?' ('+o.book+')':' (PrizePicks default)')+'. Edge '+(m.edgePP>=0?'+':'')+m.edgePP.toFixed(1)+' pts. '+beNote+(m.reasons.length?'. Flag: '+m.reasons.join('; '):'');
  if(lan)adj='LAN data: this is a LAN match ('+(lan.src==='games'?'bo3.gg event type':'teams played LAN in the last 3 days')+'), so every input uses only '+p.name+'\'s LAN '+(o.period&&GPModel.isMap1Period(o.period)?'Map 1s':'series')+' ('+lan.n+' before this match), blended with overall when thin: Last 10 / Last 3 fill missing slots with the overall value, season / h2h / tier = (n\xb7LAN + 5\xb7overall)/(n+5), ADR nudge from LAN rows when 3+ of the last 5 LAN series have ADR. '+adj;
  var label=glabel(m);
  return{lan:lan,player:p.name,team:p.team,stat:st,line:line,period:o.period||m.period||'Maps 1-2',opp:opp||'',proj:+m.proj.toFixed(1),edge:+m.edge.toFixed(1),grade:m.grade,label:label,pick:m.pick,pOver:m.pOver,pPick:m.pPick,be:m.be,edgePP:m.edgePP,reasons:m.reasons,comp:comp,over:over,of:last.length,sd:+sd(last).toFixed(1),cs:cs,adj:adj,book:o.book||'',hits:m.hits||null,bait:!!m.bait,v1:m.v1||null}}
@@ -140,7 +154,7 @@ function gradeCombo(name,team,st,line,opp,o){o=o||{};
  var names=String(name).split('+').map(function(x){return x.trim()}).filter(Boolean);if(names.length<2||isNaN(line))return null;
  var ps=[],series=[];
  for(var i=0;i<names.length;i++){var p=find(names[i],team);if(!p)return{missing:names[i]};ps.push(p);series.push(seriesFor(p,o.period))}
- var evr=o.ev!==undefined?[o.ev,null]:evFor(team||ps[0].team,opp,o.start||o.before),m=GPModel.gradeCombo(mctx(),ps,names,st,line,opp,{team:team||'',book:o.book,odds:o.odds,before:o.before,period:o.period,ev:evr[0]});if(!m)return{missing:names[0]};
+ var evr=o.ev!==undefined?[o.ev,null]:evFor(team||ps[0].team,opp,o.start||o.before),before=o.before||(o.start?String(o.start).slice(0,10):'9999'),maps=o.maps||knownMaps(team||ps[0].team,opp,o.start||before),m=GPModel.gradeCombo(mctx(),ps,names,st,line,opp,{team:team||'',book:o.book,odds:o.odds,before:before,period:o.period,ev:evr[0],maps:maps});if(!m)return{missing:names[0]};
  var parts=m.parts.map(function(x){return{name:x.name,proj:+x.proj.toFixed(1),n:x.n}}),proj=m.proj;
  var joint=[];if(series.length){series[0].forEach(function(c0){var rows=[c0],ok=true;for(var j=1;j<series.length;j++){var m=series[j].filter(function(c){return String(c.mid)===String(c0.mid)})[0];if(!m){ok=false;break}rows.push(m)}
   if(!ok||rows.some(function(r){return r[st]==null}))return;joint.push({mid:c0.mid,date:c0.date,opp:c0.opp,maps:c0.maps,kills:rows.reduce(function(a,r){return a+r.kills},0),hs:rows.every(function(r){return r.hs!=null})?rows.reduce(function(a,r){return a+r.hs},0):null})})}
@@ -249,7 +263,7 @@ function citoBlock(g){if(!STRENGTH)return '<div class="cito muted">No Cito data 
  var h='<div class="cito"><table class="ct"><tr><th>Cito</th><th>'+esc(g.team1)+'</th><th>'+esc(g.team2)+'</th></tr>'+rows.map(function(r){return '<tr><td class="muted">'+r[0]+'</td><td>'+r[1]+'</td><td>'+r[2]+'</td></tr>'}).join('')+'</table>';
  if(ma||mb){var pw=pm!=null?pm:pr!=null?pr:0.5,base=P.rd_a+P.rd_b*pw*(1-pw),lc={P:P,S:{rank:{},maps:{}}};if(ma)lc.S.maps[a]=[[ma.d],[ma.v]];if(mb)lc.S.maps[b]=[[mb.d],[mb.v]];
   var em=GPModel.mapRounds(lc,g.team1,g.team2,'9999',base);if(em!=null)h+='<div class="muted">Expected rounds, Maps 1-2: <b>'+(2*em).toFixed(1)+'</b> from map stats · '+(2*(base+P.w_maps*(em-base))).toFixed(1)+' in the model</div>';
-  if(ma)h+='<div class="muted"><b>'+esc(g.team1)+'</b> maps: '+citoMaps(ma)+'</div>';if(mb)h+='<div class="muted"><b>'+esc(g.team2)+'</b> maps: '+citoMaps(mb)+'</div>'}
+  if(ma)h+='<div class="muted"><b>'+esc(g.team1)+'</b> maps: '+citoMaps(ma)+'</div>';if(mb)h+='<div class="muted"><b>'+esc(g.team2)+'</b> maps: '+citoMaps(mb)+'</div>'}var cm=knownMaps(g.team1,g.team2,g.start);if(cm&&cm.length)h+='<div class="muted">Confirmed map'+(cm.length>1?'s':'')+': <b>'+cm.map(esc).join(', ')+'</b> (veto complete)</div>';
  if(!has.a)notes.push('no Cito data for '+esc(g.team1));if(!has.b)notes.push('no Cito data for '+esc(g.team2));
  var src=[];if(asof.vrs||asof.world)src.push('rankings as of '+esc(asof.vrs||asof.world));if(ma||mb)src.push('map stats as of '+esc((ma||mb).d)+((ma||mb).late?' (newest)':'')+' (last 30 days)');
  if(od&&od.p)src.push('odds: '+esc(String(od.src||'').replace(/_/g,' '))+', '+esc(ftime(od.at)));else src.push(STRENGTH.odds?'odds: n/a for this match':'odds: n/a (needs Cito Pro)');

@@ -33,7 +33,7 @@ RANKS = {"G2": 3, "MOUZ": 4, "NAVI": 5, "Vitality": 1}
 class LanParts(unittest.TestCase):
     def setUp(self):
         self.p = make()
-        self.g = Grader([self.p], RANKS)
+        self.g = Grader([self.p], RANKS, params={"map_data": 0})
 
     def part(self, d, k):
         return [x for x in d["parts"] if x["key"] == k][0]
@@ -41,7 +41,7 @@ class LanParts(unittest.TestCase):
     def test_off_is_unchanged(self):
         a = self.g.v1_project_parts(self.p, "kills", "G2", "2026-11-01")
         b = self.g.v1_project_parts(self.p, "kills", "G2", "2026-11-01", ev="online")
-        g0 = Grader([self.p], RANKS, params={"lan_data": 0})
+        g0 = Grader([self.p], RANKS, params={"lan_data": 0, "map_data": 0})
         c = g0.v1_project_parts(self.p, "kills", "G2", "2026-11-01", ev="lan")
         self.assertAlmostEqual(a["proj"], b["proj"]); self.assertAlmostEqual(a["proj"], c["proj"])
         self.assertFalse(a["lan"]["used"]); self.assertFalse(c["lan"]["used"])
@@ -69,7 +69,7 @@ class LanParts(unittest.TestCase):
 
     def test_no_lan_history_is_overall(self):
         p = make(n_lan=0)
-        g = Grader([p], RANKS)
+        g = Grader([p], RANKS, params={"map_data": 0})
         a = g.v1_project_parts(p, "kills", "NAVI", "2026-11-01")
         b = g.v1_project_parts(p, "kills", "NAVI", "2026-11-01", ev="lan")
         self.assertAlmostEqual(a["proj"], b["proj"])
@@ -77,7 +77,7 @@ class LanParts(unittest.TestCase):
     def test_no_lookahead(self):
         p = make()
         p["logs"] += [log("2026-11-05", 999, 1, "NAVI", 60, "lan"), log("2026-11-05", 999, 2, "NAVI", 60, "lan")]
-        g = Grader([p], RANKS)
+        g = Grader([p], RANKS, params={"map_data": 0})
         a = self.g.v1_project_parts(self.p, "kills", "G2", "2026-11-01", ev="lan")
         b = g.v1_project_parts(p, "kills", "G2", "2026-11-01", ev="lan")
         self.assertAlmostEqual(a["proj"], b["proj"])
@@ -87,7 +87,7 @@ class LanParts(unittest.TestCase):
         for l in p["logs"]:
             if l["n"] == 1 and l["ev"] == "lan":
                 l["kills"] = 9
-        g = Grader([p], RANKS)
+        g = Grader([p], RANKS, params={"map_data": 0})
         d = g.v1_project_parts(p, "kills", "G2", "2026-11-01", period="Map 1", ev="lan")
         self.assertAlmostEqual(self.part(d, "l3")["v"], 9.0)
         self.assertIn("Map 1", self.part(d, "l10")["label"])
@@ -114,12 +114,12 @@ class JsParity(unittest.TestCase):
         p = make()
         cases = [("kills", "G2", "2026-11-01", None, "lan"), ("hs", "G2", "2026-11-01", None, "lan"),
                  ("kills", "MOUZ", "2026-11-01", "Map 1", "lan"), ("kills", "G2", "2026-11-01", None, None)]
-        js = r"""const M=require('./model.js');const a=JSON.parse(require('fs').readFileSync(0,'utf8'));const ctx=M.build([a.p],null,null,a.r);
+        js = r"""const M=require('./model.js');const a=JSON.parse(require('fs').readFileSync(0,'utf8'));const ctx=M.build([a.p],{map_data:0},null,a.r);
 process.stdout.write(JSON.stringify({d:a.c.map(c=>{const d=M.v1ProjectParts(ctx,a.p,c[0],c[1],c[2],c[3],c[4]);return d?d.proj:null}),
  e:[M.matchEv(ctx,'Spirit','G2','2026-10-16',[]),M.matchEv(ctx,'Spirit','G2','2026-09-05',[])]}))"""
         r = subprocess.run(["node", "-e", js], input=json.dumps({"p": p, "r": RANKS, "c": cases}), capture_output=True, text=True, cwd=ROOT, check=True)
         out = json.loads(r.stdout)
-        g = Grader([p], RANKS)
+        g = Grader([p], RANKS, params={"map_data": 0})
         for c, j in zip(cases, out["d"]):
             self.assertAlmostEqual(g.v1_project_parts(p, c[0], c[1], c[2], period=c[3], ev=c[4])["proj"], j, places=6)
         self.assertEqual(out["e"], [["online", "recent maps"], ["lan", "recent maps"]])
