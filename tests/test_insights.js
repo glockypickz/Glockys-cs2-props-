@@ -173,6 +173,106 @@ var l10item = ins.support.concat(ins.risk).filter(function (x) { return x.key ==
 // 28+30+22+18+19+21+20+17+16+15 = 206, /10 = 20.6
 check("last 10 average is 20.6", !!l10item && /20\.6/.test(l10item.text));
 
+console.log("Why Glocky thinks it's bait");
+check("no bait section when the grade is not flagged", !ins.bait.length && I.html(grade()).indexOf("Why Glocky thinks it") < 0);
+
+// Make the last 5 all meet or beat 21.0: 28,30,22,18,19 -> 18 and 19 are under 21, so use a lower line and override cs head
+var baitCs = series([
+  { kills: 28, ev: "online", date: "2026-11-20" },
+  { kills: 30, ev: "online", date: "2026-11-19" },
+  { kills: 22, ev: "online", date: "2026-11-18" },
+  { kills: 25, ev: "lan", date: "2026-11-17" },
+  { kills: 24, ev: "online", date: "2026-11-16" },
+  { kills: 21, ev: "lan", date: "2026-11-15" },
+  { kills: 20, ev: "online", date: "2026-11-14" },
+  { kills: 17, ev: "lan" }, { kills: 16, ev: "online" }, { kills: 15, ev: "lan" },
+  { kills: 14, ev: "online" }, { kills: 33, ev: "lan" }, { kills: 12, ev: "online" },
+  { kills: 11, ev: "lan" }, { kills: 10, ev: "online" }, { kills: 9, ev: "online" },
+  { kills: 8, ev: "lan" }, { kills: 7, ev: "online" }, { kills: 26, ev: "lan" }, { kills: 5, ev: "online" }
+]);
+var baitGrade = grade({
+  bait: true, line: 21.5, proj: 20.1, edge: -1.4, cs: baitCs,
+  v1: {
+    parts: [
+      { key: "l10", w: 0.35, v: 21.8, n: 10 },
+      { key: "szn", w: 0.20, v: 22.4, n: 20 },
+      { key: "h2h", w: 0.20, v: null, n: 0 },
+      { key: "tier", w: 0.15, v: 18.0, n: 8 },
+      { key: "l3", w: 0.10, v: 26.7, n: 3 }
+    ],
+    adr_used: false, adr_mult: 1
+  }
+});
+var b1 = I.build(baitGrade, { start: "2026-11-22T18:00:00Z", logs: baitCs });
+check("bait section is built when flagged", b1.bait && b1.bait.length >= 1);
+var l5b = b1.bait.filter(function (x) { return x.key === "bait-l5"; })[0];
+check("last 5 all green uses the five real values", !!l5b && /all green/.test(l5b.text) && /21\.5/.test(l5b.text) && /28\.0, 30\.0, 22\.0, 25\.0, 24\.0/.test(l5b.text));
+check("last 5 all green is not used in the grade", !!l5b && l5b.used === false);
+var tb = b1.bait.filter(function (x) { return x.key === "bait-tier"; })[0];
+check("same-tier underperform is included with both averages", !!tb && /underperforms against similarly ranked/.test(tb.text) && /18\.0/.test(tb.text) && /22\.4/.test(tb.text) && /8 Maps 1-2 series/.test(tb.text));
+check("same-tier bait bullet is used in the grade (the window is)", !!tb && tb.used === true);
+// ev on newest logs in the 3 days before 2026-11-22: dates 11-20,19,18 are online
+var evb = b1.bait.filter(function (x) { return x.key === "bait-ev"; })[0];
+check("online underperform is included when that is the setting and the average is lower", !!evb && /underperforms on online/.test(evb.text) && /this match's setting/.test(evb.text) && /online/.test(evb.text) && /LAN/.test(evb.text));
+check("LAN / online bait bullet is not used in the grade", !!evb && evb.used === false);
+// online avgs from baitCs: 28,30,22,24,20,16,14,12,10,9,7,5  and lan: 25,21,17,15,33,11,8,6
+// wait ev bullets use evRows on cs (baitCs) for ALL series, not just last days
+// online mean vs lan mean must have online < lan for the bullet to show
+
+check("html heading is present only when bait is flagged", I.html(baitGrade, { start: "2026-11-22T18:00:00Z", logs: baitCs }).indexOf("Why Glocky thinks it's bait") > -1);
+check("no leftover bait bullet in also-good-to-know", b1.also.every(function (x) { return x.key !== "bait"; }));
+
+var noTier = I.build(grade({
+  bait: true, line: 14.0,
+  cs: series([{ kills: 20 }, { kills: 19 }, { kills: 18 }, { kills: 17 }, { kills: 16 }, { kills: 10 }]),
+  v1: { parts: [
+    { key: "l10", w: 0.35, v: 16, n: 6 },
+    { key: "szn", w: 0.20, v: 16, n: 6 },
+    { key: "h2h", v: null, n: 0 },
+    { key: "tier", v: 18.0, n: 8 },
+    { key: "l3", v: 19, n: 3 }
+  ], adr_used: false, adr_mult: 1 }
+}));
+check("skips same-tier bait bullet when he does not underperform vs that tier", noTier.bait.every(function (x) { return x.key !== "bait-tier"; }));
+
+var noEv = I.build(grade({
+  bait: true, line: 14.0,
+  cs: series([{ kills: 20 }, { kills: 19 }, { kills: 18 }, { kills: 17 }, { kills: 16 }, { kills: 10 }]),
+  v1: { parts: [
+    { key: "l10", v: 16, n: 6 }, { key: "szn", v: 16, n: 6 },
+    { key: "h2h", v: null, n: 0 }, { key: "tier", v: null, n: 0 }, { key: "l3", v: 19, n: 3 }
+  ], adr_used: false, adr_mult: 1 }
+}), { start: "2026-11-22" });
+check("skips LAN/online bait bullet when the match setting is unknown", noEv.bait.every(function (x) { return x.key !== "bait-ev"; }));
+
+var thinTier = I.build(grade({
+  bait: true, line: 14.0,
+  cs: series([{ kills: 20 }, { kills: 19 }, { kills: 18 }, { kills: 17 }, { kills: 16 }, { kills: 10 }]),
+  v1: { parts: [
+    { key: "l10", v: 16, n: 6 }, { key: "szn", v: 20, n: 20 },
+    { key: "h2h", v: null, n: 0 }, { key: "tier", v: 10, n: 2 }, { key: "l3", v: 19, n: 3 }
+  ], adr_used: false, adr_mult: 1 }
+}));
+check("skips same-tier bait bullet when the sample is under 3", thinTier.bait.every(function (x) { return x.key !== "bait-tier"; }));
+
+var tinyGap = I.build(grade({
+  bait: true, line: 1.0,
+  cs: series([
+    { kills: 10, ev: "online" }, { kills: 10, ev: "online" }, { kills: 10, ev: "online" },
+    { kills: 10, ev: "online" }, { kills: 10, ev: "online" },
+    { kills: 10.2, ev: "lan" }, { kills: 10.2, ev: "lan" }, { kills: 10.2, ev: "lan" },
+    { kills: 10.2, ev: "lan" }, { kills: 10.2, ev: "lan" }
+  ]),
+  v1: { parts: [
+    { key: "l10", v: 10, n: 10 }, { key: "szn", v: 10, n: 10 },
+    { key: "h2h", v: null, n: 0 }, { key: "tier", v: null, n: 0 }, { key: "l3", v: 10, n: 3 }
+  ], adr_used: false, adr_mult: 1 }
+}), { start: "2026-11-22" });
+check("skips LAN/online bait bullet when the gap is tiny", tinyGap.bait.every(function (x) { return x.key !== "bait-ev"; }));
+
+check("inferMatchEv returns online from the newest day in the window", I.inferMatchEv(baitCs, "2026-11-22") === "online");
+check("inferMatchEv is null with no start date", I.inferMatchEv(baitCs, "") == null);
+
 if (failed) {
   console.log("\n" + failed + " failed");
   process.exit(1);

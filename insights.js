@@ -118,6 +118,32 @@
     var vals = rows.filter(function (r) { return r.ev === ev; }).map(function (r) { return r.v; });
     return { n: vals.length, avg: mean(vals) };
   }
+  function ymd(s) { return String(s || "").slice(0, 10); }
+  function shiftDay(day, n) {
+    var d = new Date(day + "T12:00:00Z");
+    if (isNaN(d.getTime())) return "";
+    d.setUTCDate(d.getUTCDate() + n);
+    return d.toISOString().slice(0, 10);
+  }
+  // Match setting (lan / online): newest log from this player or either team in the 3 days
+  // before the match day, when that day has a single setting. None if unknown.
+  function inferMatchEv(logs, start, extraLogs) {
+    var day = ymd(start);
+    if (!day || day.length < 10) return null;
+    var lo = shiftDay(day, -3), best = "", evs = {};
+    if (!lo) return null;
+    function consider(date, ev) {
+      if (ev !== "lan" && ev !== "online") return;
+      date = ymd(date);
+      if (!date || date < lo || date >= day) return;
+      if (date > best) { best = date; evs = {}; evs[ev] = 1; }
+      else if (date === best) evs[ev] = 1;
+    }
+    (logs || []).forEach(function (l) { consider(l.date, l.ev); });
+    (extraLogs || []).forEach(function (l) { consider(l.date, l.ev); });
+    var keys = Object.keys(evs);
+    return keys.length === 1 ? keys[0] : null;
+  }
   function latestMaps(strength, team, before, tn) {
     if (!strength || !strength.maps || !team) return null;
     tn = tn || tnDef;
@@ -363,14 +389,39 @@
     if (g.reasons && g.reasons.length) {
       risk.push(item("Flag (display only, does not change the letter): " + g.reasons.join("; "), false, "flag"));
     }
+
+    // Why Glocky thinks it's bait (display only; only when the grade is flagged, and only bullets that apply)
+    var bait = [];
     if (g.bait) {
-      also.push(item("He met or beat this line in each of the last 5 " + un, false, "bait"));
+      var last5 = (cs || []).filter(function (c) { return c[st] != null; }).slice(0, 5);
+      var allGreen = last5.length === 5 && last5.every(function (c) { return c[st] >= line; });
+      if (allGreen) {
+        var vals = last5.map(function (c) { return r1(c[st]); }).join(", ");
+        bait.push(item("Last 5 " + un + " were all green: he met or beat " + line + " in each one (" + vals + ").", false, "bait-l5"));
+      }
+      var tPart = partBy(g, "tier"), sPart = partBy(g, "szn");
+      if (partUsed(tPart) && partUsed(sPart) && tPart.n >= 3 && sPart.n >= 3 && tPart.v < sPart.v) {
+        var rkB = opts.ranks && g.opp ? rankOf(opts.ranks, g.opp) : null;
+        var tierBit = r1(tPart.v) + " " + sn + " vs teams ranked like " + (g.opp || "this opponent");
+        if (rkB != null) tierBit += " (" + tierName(rkB) + ", #" + rkB + ", " + tPart.n + " " + un + ")";
+        else tierBit += " (" + tPart.n + " " + un + ")";
+        bait.push(item("He underperforms against similarly ranked teams: " + tierBit + ", below his season average of " + r1(sPart.v) + " (" + sPart.n + " " + un + ").", true, "bait-tier"));
+      }
+      var matchEv = inferMatchEv(logs, opts.start, opts.evLogs);
+      var setA = matchEv === "lan" ? lan : matchEv === "online" ? onl : null;
+      var othA = matchEv === "lan" ? onl : matchEv === "online" ? lan : null;
+      var setLabel = matchEv === "lan" ? "LAN" : matchEv === "online" ? "online" : "";
+      var othLabel = matchEv === "lan" ? "online" : matchEv === "online" ? "LAN" : "";
+      var evGap = (st === "hs" ? 0.5 : 1.0);
+      if (matchEv && setA && othA && setA.n >= 5 && othA.n >= 5 && setA.avg != null && othA.avg != null && setA.avg + evGap <= othA.avg) {
+        bait.push(item("He underperforms on " + setLabel + " (this match's setting, from logs in the 3 days before it): " + r1(setA.avg) + " " + sn + " on " + setLabel + " (" + setA.n + " " + un + ") vs " + r1(othA.avg) + " " + othLabel + " (" + othA.n + ").", false, "bait-ev"));
+      }
     }
 
     return {
       side: side, line: line, period: period,
       headline: { title: title, text: head, used: true },
-      support: support, risk: risk, also: also
+      support: support, risk: risk, also: also, bait: bait
     };
   }
 
@@ -390,6 +441,9 @@
     var h = '<div class="ins">';
     h += "<h2>Key insights</h2>";
     h += '<div class="ins-why"><div class="ins-why-title">' + e(ins.headline.title) + "</div><p>" + e(ins.headline.text) + "</p></div>";
+    if (ins.bait && ins.bait.length) {
+      h += "<h2>Why Glocky thinks it's bait</h2>" + renderList(ins.bait, e);
+    }
     if (ins.support.length) {
       h += "<h2>Other numbers that point to " + e(ins.side) + "</h2>" + renderList(ins.support, e);
     }
@@ -404,7 +458,7 @@
     return h;
   }
 
-  var api = { build: build, html: html };
+  var api = { build: build, html: html, inferMatchEv: inferMatchEv };
   if (typeof module !== "undefined" && module.exports) module.exports = api;
   else root.GPInsights = api;
 })(typeof window !== "undefined" ? window : this);
