@@ -48,6 +48,29 @@ class ScoutTests(unittest.TestCase):
         self.assertAlmostEqual(f1["kpr"], f2["kpr"], places=9)
         self.assertAlmostEqual(f1["x_opp"], f2["x_opp"], places=9)
 
+    def test_lan_data(self):
+        # first 7 series LAN at 30 kills, rest online: LAN data pulls the form toward the LAN maps, off = unchanged
+        pl = copy.deepcopy(self.pl)
+        for l in pl[0]["logs"]:
+            if l["date"] < "2026-10-08":
+                l["ev"], l["kills"] = "lan", 30
+        gr = Grader(pl, {"Alpha": 10, "Beta": 20})
+        S = SM.ScoutData(pl, gr)
+        on = SM.features(S, pl[0], "Alpha", "Beta", "2026-10-14", "Maps 1-2", "lan")
+        off = SM.features(S, pl[0], "Alpha", "Beta", "2026-10-14", "Maps 1-2", "lan", P={"lan_data": 0})
+        onl = SM.features(S, pl[0], "Alpha", "Beta", "2026-10-14", "Maps 1-2", "online")
+        self.assertTrue(on["lan_data"]); self.assertFalse(off["lan_data"]); self.assertEqual(on["n_lan_maps"], 14)
+        self.assertGreater(on["kpr"], off["kpr"])
+        self.assertAlmostEqual(off["kpr"], onl["kpr"], places=12)
+        # no look-ahead: LAN maps on or after the match day do not count
+        pl2 = copy.deepcopy(pl)
+        for l in pl2[0]["logs"]:
+            if l["date"] >= "2026-10-14":
+                l["ev"], l["kills"] = "lan", 60
+        gr2 = Grader(pl2, {"Alpha": 10, "Beta": 20})
+        on2 = SM.features(SM.ScoutData(pl2, gr2), pl2[0], "Alpha", "Beta", "2026-10-14", "Maps 1-2", "lan")
+        self.assertAlmostEqual(on["kpr"], on2["kpr"], places=12)
+
     def test_owner_rules(self):
         cfg = SM.load_params()
         self.assertIsNotNone(cfg, "scout_params.json missing")

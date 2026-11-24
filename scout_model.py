@@ -19,7 +19,7 @@ import bisect, math
 from grader import tn, teq, winp, is_map1
 
 LEAGUE_KPR = 0.68
-DEF = {"hl": 30.0, "m": 80.0, "w_szn": 0.2, "m_h2h": 60.0, "w_h2h": 0.15,
+DEF = {"lan_data": 1, "lan_k_rd": 150.0, "hl": 30.0, "m": 80.0, "w_szn": 0.2, "m_h2h": 60.0, "w_h2h": 0.15,
        "k_lan": 150.0, "k_map": 120.0, "k_opp": 200.0, "k_rd": 6.0, "hl_rd": 20.0,
        "veto_days": 180, "pool_days": 60, "k_veto": 1.5, "k_hs": 40.0, "hl_hs": 30.0,
        # rounds per map: rd = a + b * base + c * pw(1-pw); refit by scout_backtest.py
@@ -119,6 +119,20 @@ class ScoutData:
         if not x:
             return []
         return x[0][:bisect.bisect_left(x[1], D)]
+
+    def conc_ev(self, t, D, P, ev, k):
+        """conc() from the team's maps of one event type only, shrunk to its all-maps conc() by k rounds."""
+        key = (t, D, ev, k)
+        if key not in self._conc:
+            base = self.conc(t, D, P)
+            lst = [g for g in self.team_prior_maps(t, D) if g["np"] >= 3 and g.get("ev") == ev][-60:]
+            dd = pr = 0.0
+            for i, g in enumerate(reversed(lst)):
+                w = 0.5 ** (i / 30.0)
+                dd += w * g["dsum"] / g["np"]
+                pr += w * g["rd"]
+            self._conc[key] = (dd + k * base) / (pr + k) if base and lst else base
+        return self._conc[key]
 
     def pool(self, D):
         if D not in self._pool:
@@ -241,8 +255,24 @@ def features(S, p, team, opp, D, period=None, ev=None, P=None, bo=3):
     szn = [r for r in pr if r["date"][:4] == yr] or pr
     K, R = sum(r["k"] for r in szn), sum(r["rd"] for r in szn)
     kpr_szn = K / R
+    # LAN data (owner, Nov 24): a LAN match uses the player's LAN maps for form, h2h, opponent and HS inputs. Each LAN piece
+    # is shrunk to the same piece from all maps by lan_k_rd rounds (150 = ~7 maps), so thin LAN samples lean on overall.
+    lan_on = ev == "lan" and bool(P.get("lan_data", 1))
+    KL = float(P.get("lan_k_rd", 150.0))
+    prl = [r for r in pr if r["ev"] == "lan"] if lan_on else []
+    if lan_on:
+        sk = sr = 0.0
+        for i, r in enumerate(reversed(prl[-300:])):
+            w = 0.5 ** (i / P["hl"])
+            sk += w * r["k"]
+            sr += w * r["rd"]
+        kpr_dec = (sk + KL * kpr_dec) / (sr + KL)
+        szl = [r for r in prl if r["date"][:4] == yr]
+        kpr_szn = (sum(r["k"] for r in szl) + KL * kpr_szn) / (sum(r["rd"] for r in szl) + KL)
     kpr = (1 - P["w_szn"]) * kpr_dec + P["w_szn"] * kpr_szn
     h = [r for r in pr if o and r["opp"] == o]
+    if lan_on and [r for r in h if r["ev"] == "lan"]:
+        h = [r for r in h if r["ev"] == "lan"]   # LAN meetings when there are any, else every meeting
     kpr_h2h = None
     if h:
         kh, rh = sum(r["k"] for r in h), sum(r["rd"] for r in h)
@@ -257,9 +287,10 @@ def features(S, p, team, opp, D, period=None, ev=None, P=None, bo=3):
         x_lan = math.log(kpr_ev / kpr_szn)
     # OPPONENT: what the opponent gives up vs the opponents he faced
     x_opp, c_o, sos = 0.0, None, None
-    c_o = S.conc(o, D, P) if o else None
+    cfun = (lambda t: S.conc_ev(t, D, P, "lan", KL)) if lan_on else (lambda t: S.conc(t, D, P))
+    c_o = cfun(o) if o else None
     if c_o:
-        cs = [S.conc(r["opp"], D, P) for r in pr[-60:]]
+        cs = [cfun(r["opp"]) for r in (prl if lan_on and prl else pr)[-60:]]
         cs = [c for c in cs if c]
         if cs:
             sos = sum(cs) / len(cs)
@@ -317,11 +348,18 @@ def features(S, p, team, opp, D, period=None, ev=None, P=None, bo=3):
     sh = [r for r in hrows if r["date"][:4] == yr] or hrows
     hs_szn = (sum(r["hs"] for r in sh) / max(1.0, sum(r["k"] for r in sh))) if sh else 0.5
     hspk = (hk + P["k_hs"] * hs_szn) / (kk + P["k_hs"])
+    if lan_on:
+        hk = kk = 0.0
+        for i, r in enumerate(reversed([r for r in hrows if r["ev"] == "lan"][-200:])):
+            w = 0.5 ** (i / P["hl_hs"])
+            hk += w * r["hs"]
+            kk += w * r["k"]
+        hspk = (hk + P["k_hs"] * hspk) / (kk + P["k_hs"])
     nmaps = 1 if is_map1(period) else 2
     return {"kpr": kpr, "kpr_dec": kpr_dec, "kpr_szn": kpr_szn, "kpr_h2h": kpr_h2h, "n_h2h_maps": len(h),
             "rd_hat": rd_hat, "rbase": rbase, "pw": pw, "nmaps": nmaps, "hspk": hspk,
             "x_lan": x_lan, "x_opp": x_opp, "x_maps": x_maps, "x_mapr": x_mapr, "x_elo": pw - 0.5, "x_blow": x_blow, "x_blowp": x_blowp, "blow": blow,
-            "veto": vw, "veto_top": vt, "bo": bo, "x_maps_pool": x_maps_pool, "x_mapr_pool": x_mapr_pool, "ev": ev, "n_maps_sample": len(szn), "conc_opp": c_o, "sos": sos}
+            "veto": vw, "veto_top": vt, "bo": bo, "x_maps_pool": x_maps_pool, "x_mapr_pool": x_mapr_pool, "ev": ev, "lan_data": lan_on, "n_lan_maps": len(prl), "n_maps_sample": len(szn), "conc_opp": c_o, "sos": sos}
 
 
 FACTORS = ("lan", "opp", "maps", "mapr", "elo", "maps_pool", "mapr_pool", "blow", "blowp")
@@ -448,7 +486,8 @@ class ScoutGrader:
                              "hs_per_kill": round(f["hspk"], 3) if st == "hs" else None,
                              "opp_gives_up": None if f["conc_opp"] is None else round(f["conc_opp"], 3),
                              "opps_faced": None if f["sos"] is None else round(f["sos"], 3),
-                             "maps_in_sample": f["n_maps_sample"], "team_win_elo": round(f["pw"], 3)}
+                             "maps_in_sample": f["n_maps_sample"], "team_win_elo": round(f["pw"], 3),
+                             "lan_data": f["lan_data"], "lan_maps": f["n_lan_maps"]}
             out["likely_maps"] = likely_maps(f)
             out["blowout"] = f["blow"]   # context only (did not pass the holdout test; not in the projection)
             out["bo"] = bo
