@@ -73,6 +73,28 @@ check("icon title and aria-label are escaped", W.icon({ bait: true }, { winp: 0.
 var viaGrade = W.flags({ bait: false, blowout: { p_win: 0.22, p_loss: 0.14 } });
 check("blowout object on the grade is used when no opts.shadow is passed", viaGrade.source === "shadow" && viaGrade.blowout);
 
+console.log("BLOWOUT tag (like the BAIT tag)");
+var tag80 = W.badge({ bait: false, team: "FaZe", opp: "G2" }, { winp: 0.8, team: "FaZe", opp: "G2" });
+check("a 80% favorite gets a BLOWOUT pill", /<span class="pill blow"[^>]*>BLOWOUT<\/span>/.test(tag80));
+check("the tooltip has the chance, the favored side and the 13-5 meaning", /Blowout risk 37% per map/.test(tag80) && /FaZe favored/.test(tag80) && /13-5 or wider/.test(tag80));
+check("the tooltip says it never changes the grade or pick", /never changes the grade or pick/.test(tag80));
+check("an even match gets no tag", W.badge({ bait: false }, { winp: 0.5, team: "FaZe", opp: "G2" }) === "");
+check("a 60% favorite gets no tag (under 30%)", W.badge({ bait: false }, { winp: 0.6, team: "FaZe", opp: "G2" }) === "");
+check("a 70% favorite gets the tag (30% is the line)", W.badge({ bait: false }, { winp: 0.7, team: "FaZe", opp: "G2" }).indexOf("BLOWOUT") > -1);
+check("a 25% underdog's match gets the tag too", W.badge({ bait: false }, { winp: 0.25, team: "G2", opp: "FaZe" }).indexOf("BLOWOUT") > -1);
+check("no chance available means no tag", W.badge({ bait: false }, {}) === "" && W.badge(null, {}) === "");
+check("bait alone does not make a BLOWOUT tag", W.badge({ bait: true, period: "Maps 1-2" }, { winp: 0.5 }) === "");
+check("a saved scout shadow is used for the tag", W.badge({ bait: false }, { shadow: { p_win: 0.40, p_loss: 0.05 }, winp: 0.5, team: "FaZe" }).indexOf("BLOWOUT") > -1);
+check("shadow under 30% gives no tag even if Elo would", W.badge({ bait: false }, { shadow: { p_win: 0.10, p_loss: 0.10 }, winp: 0.9 }) === "");
+check("team names in the tooltip are escaped", W.badge({ bait: false }, { winp: 0.8, team: "<b>x</b>", opp: "G2" }).indexOf("<b>x</b>") < 0);
+check("the warning icon still shows for bait and blowout as before", W.icon({ bait: true }, { winp: 0.5 }).indexOf("⚠️") > -1 && W.icon({ bait: false }, { winp: 0.8, team: "FaZe", opp: "G2" }).indexOf("⚠️") > -1);
+var appSrc = fs.readFileSync(path.join(__dirname, "..", "app.js"), "utf8");
+check("every grade pill carries the BLOWOUT tag after BAIT", /function gradePill\(g\)\{return [^}]*baitBadge\(g\)\+blowBadge\(g\)\+warnIcon\(g\)\}/.test(appSrc));
+check("the Grader result header shows it too", /baitBadge\(g\)\+blowBadge\(g\)\+warnIcon\(g\)\+'<div><span class="pill '/.test(appSrc));
+check("blowBadge uses the same options as the icon", /function blowBadge\(g,extra\)\{return \(typeof GPWarn!=='undefined'&&g\)\?GPWarn\.badge\(g,warnOpts\(g,extra\)\):''\}/.test(appSrc));
+var cssB = fs.readFileSync(path.join(__dirname, "..", "styles.css"), "utf8").replace(/\s+/g, "");
+check("the BLOWOUT pill has its own style, next to BAIT", /\.pill\.blow\{background:#ff7a3d;color:#000;margin-left:4px/.test(cssB));
+
 console.log("display only: CSS pulse, reduced motion, visible chance line");
 var css = fs.readFileSync(path.join(__dirname, "..", "styles.css"), "utf8");
 var css1 = css.replace(/\s+/g, "");

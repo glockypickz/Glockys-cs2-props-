@@ -14,8 +14,8 @@
  *  computed, e.g. "Blowout risk 34% per map · FaZe favored" (the side more
  *  likely to win big). A 48-52% Elo split is labeled "even match".
  *
- *  Threshold: the pulsing ⚠️ is shown when that predicted chance is >= 30%
- *  per map (BLOWOUT_RISK_THRESHOLD = 0.30). Even matches sit around 24% and
+ *  Threshold: the pulsing ⚠️ and the BLOWOUT tag (like the BAIT tag) are shown when that
+ *  predicted chance is >= 30% per map (BLOWOUT_RISK_THRESHOLD = 0.30). Even matches sit around 24% and
  *  are not flagged; about a 70/30 Elo favorite crosses 30%.
  *
  *  When a saved shadow_s.blowout object is passed in, those p_win / p_loss
@@ -155,6 +155,14 @@
     return ' <span class="warn-icon" title="' + t + '" role="img" aria-label="' + t + '">⚠️</span>';
   }
 
+  // Text tag like BAIT, shown when blowout risk is at or above the threshold. Display only.
+  function badge(g, opts) {
+    var f = flags(g, opts);
+    if (!f.blowout) return "";
+    var t = esc(f.text + ". A blowout is a map won 13-5 or wider. This tag shows at " + Math.round(100 * BLOWOUT_RISK_THRESHOLD) + "% or more per map. It never changes the grade or pick.");
+    return ' <span class="pill blow" title="' + t + '">BLOWOUT</span>';
+  }
+
   function lineHtml(p, withIcon) {
     if (!p || !p.text) return "";
     var cls = "blow-line" + (p.flagged ? " hot" : "");
@@ -183,6 +191,7 @@
     flags: flags,
     tooltip: tooltip,
     icon: icon,
+    badge: badge,
     gameLine: gameLine,
     propLine: propLine
   };

@@ -21,9 +21,10 @@ function warnOpts(g,extra){extra=extra||{};var shadow=null,pw=null,team=null,opp
   team=extra.team||g.team||'';opp=extra.opp||g.opp||'';start=extra.start||g.start||'';pw=eloWinp(team,opp,start)}
  return{shadow:shadow,winp:pw,period:(g&&g.period)||extra.period,team:team,opp:opp}}
 function warnIcon(g,extra){return (typeof GPWarn!=='undefined'&&g)?GPWarn.icon(g,warnOpts(g,extra)):''}
+function blowBadge(g,extra){return (typeof GPWarn!=='undefined'&&g)?GPWarn.badge(g,warnOpts(g,extra)):''}
 function blowGameLine(g){if(typeof GPWarn==='undefined'||!g||!g.team1||!g.team2)return '';return GPWarn.gameLine(GPWarn.predict({winp:eloWinp(g.team1,g.team2,g.start),team:g.team1,opp:g.team2}))}
 function blowPropLine(g,extra){if(typeof GPWarn==='undefined'||!g)return '';return GPWarn.propLine(GPWarn.predict(warnOpts(g,extra)))}
-function gradePill(g){return '<span class="pill '+(g.pick==='UNDER'?'u':'')+'">'+pillTxt(g)+'</span>'+baitBadge(g)+warnIcon(g)}
+function gradePill(g){return '<span class="pill '+(g.pick==='UNDER'?'u':'')+'">'+pillTxt(g)+'</span>'+baitBadge(g)+blowBadge(g)+warnIcon(g)}
 function pickChance(g){if(!g||g.pPick==null||isNaN(g.pPick))return '';return '<div class="pick-pct'+(g.pick==='UNDER'?' u':'')+'" title="Model chance that this pick hits. This is the same number the letter uses.">'+esc(g.pick)+' '+pc1(g.pPick)+'</div>'}
 function glabel(m){return GLABEL[m.grade]+' · '+m.pick+' '+pc1(m.pPick)+(m.reasons&&m.reasons.length?' · ⚑ '+m.reasons.join('; '):'')}
 function oldG(lk){return !lk?'':(lk.model==='v2'||lk.model==='v1be'||lk.model==='v1e')?lk.grade:lk.grade+' (old)'} // pre-v2 letters meant something else; v2, v1be, and current v1e locks keep their stored letter
@@ -644,7 +645,7 @@ function evLogsFor(team){var out=[];if(!team)return out;DB.forEach(function(p){i
 var TEAM_MAP_ROWS=null,TEAM_MAP_N=-1;function teamMapRows(){if(TEAM_MAP_ROWS&&TEAM_MAP_N===DB.length)return TEAM_MAP_ROWS;var rows=[];DB.forEach(function(p){(p.logs||[]).forEach(function(l){if(!l.date||!l.map||l.n==null)return;rows.push({team:p.team,date:l.date,map:l.map,n:l.n})})});TEAM_MAP_ROWS=rows;TEAM_MAP_N=DB.length;return rows}
 function insightOpts(g){var p=g&&!isCombo(g.player)?find(g.player,g.team):null,evLogs=[];if(g&&g.team)evLogs=evLogs.concat(evLogsFor(g.team));if(g&&g.opp)evLogs=evLogs.concat(evLogsFor(g.opp));return{logs:p&&p.logs||null,evLogs:evLogs,teamRows:teamMapRows(),strength:STRENGTH,ranks:RANK,games:GAMES,tn:tn,start:sel.start||'',today:cday(),before:'9999',esc:esc}}
 function gradeCard(g){var tab=sel.gtab||'insights';
- var head='<div class="muted">'+esc(g.player)+' · '+esc(g.team)+(g.opp?' vs '+esc(g.opp):'')+' · '+sname(g.stat,g.period)+' · line '+g.line+'</div><div class="grade'+gclass(g.grade)+'">'+g.grade+'</div>'+baitBadge(g)+warnIcon(g)+'<div><span class="pill '+(g.pick==='UNDER'?'u':'')+'">'+esc(g.label)+'</span>'+(g.lan?' <span class="pill lan" title="LAN match: the grade uses this player\'s LAN games only (blended with overall when thin)">LAN data</span>':'')+'</div>'+blowPropLine(g);
+ var head='<div class="muted">'+esc(g.player)+' · '+esc(g.team)+(g.opp?' vs '+esc(g.opp):'')+' · '+sname(g.stat,g.period)+' · line '+g.line+'</div><div class="grade'+gclass(g.grade)+'">'+g.grade+'</div>'+baitBadge(g)+blowBadge(g)+warnIcon(g)+'<div><span class="pill '+(g.pick==='UNDER'?'u':'')+'">'+esc(g.label)+'</span>'+(g.lan?' <span class="pill lan" title="LAN match: the grade uses this player\'s LAN games only (blended with overall when thin)">LAN data</span>':'')+'</div>'+blowPropLine(g);
  var tabs='<div class="gtabs" role="tablist"><button type="button" class="g'+(tab==='insights'?' on':'')+'" role="tab" aria-selected="'+(tab==='insights'?'true':'false')+'" data-act="gtab" data-tab="insights">Insights</button><button type="button" class="g'+(tab==='grade'?' on':'')+'" role="tab" aria-selected="'+(tab==='grade'?'true':'false')+'" data-act="gtab" data-tab="grade">Grade</button></div>';
  var ins=window.GPInsights?GPInsights.html(g,insightOpts(g)):'';
  var gradeView='<div class="stats"><div class="st"><b>'+g.over+'/'+g.of+'</b><span>Over, this season</span></div></div>'+

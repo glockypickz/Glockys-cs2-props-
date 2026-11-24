@@ -32,6 +32,7 @@ button.g{background:transparent;color:var(--silver);border:1px solid var(--line)
 .pill{display:inline-block;padding:3px 9px;border-radius:99px;font-size:12px;font-weight:800;background:var(--green);color:#000}
 .pill.u{background:var(--red);color:#fff}
 .pill.bait{background:var(--amber);color:#000;margin-left:4px;letter-spacing:.06em}
+.pill.blow{background:#ff7a3d;color:#000;margin-left:4px;letter-spacing:.06em}
 .warn-icon{display:inline-block;margin-left:4px;font-size:16px;line-height:1;vertical-align:middle;cursor:help;animation:warnPulse 1.6s ease-in-out infinite}
 .blow-line{color:var(--muted);font-size:12px;margin:4px 0 0;line-height:1.35}.blow-line.hot{color:var(--amber)}
 @keyframes warnPulse{0%,100%{opacity:1;transform:scale(1)}50%{opacity:.55;transform:scale(1.12)}}
