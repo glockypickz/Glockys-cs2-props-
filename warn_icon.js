@@ -163,7 +163,15 @@
     return ' <span class="pill blow" title="' + t + '">BLOWOUT</span>';
   }
 
-  function lineHtml(p, withIcon) {
+  // Yes/no tag for the Games tab: BLOWOUT EXPECTED at the threshold, NO BLOWOUT EXPECTED below it. Display only.
+  function verdict(p) {
+    if (!p || p.risk == null || isNaN(p.risk)) return "";
+    var yes = !!p.flagged;
+    var t = esc(p.text + ". A blowout is a map won 13-5 or wider. This reads BLOWOUT EXPECTED at " + Math.round(100 * BLOWOUT_RISK_THRESHOLD) + "% or more per map. It never changes a grade or pick.");
+    return '<span class="pill blow-verdict ' + (yes ? "blow" : "calm") + '" title="' + t + '">' + (yes ? "BLOWOUT EXPECTED" : "NO BLOWOUT EXPECTED") + "</span> ";
+  }
+
+  function lineHtml(p, withIcon, withVerdict) {
     if (!p || !p.text) return "";
     var cls = "blow-line" + (p.flagged ? " hot" : "");
     var ic = "";
@@ -171,10 +179,10 @@
       var t = esc(p.text);
       ic = ' <span class="warn-icon" title="' + t + '" role="img" aria-label="' + t + '">⚠️</span>';
     }
-    return '<div class="' + cls + '">' + esc(p.text) + ic + '</div>';
+    return '<div class="' + cls + '">' + (withVerdict ? verdict(p) : "") + esc(p.text) + ic + '</div>';
   }
 
-  function gameLine(p) { return lineHtml(p, true); }
+  function gameLine(p) { return lineHtml(p, true, true); }
   function propLine(p) { return lineHtml(p, false); }
 
   var api = {
@@ -192,6 +200,7 @@
     tooltip: tooltip,
     icon: icon,
     badge: badge,
+    verdict: verdict,
     gameLine: gameLine,
     propLine: propLine
   };

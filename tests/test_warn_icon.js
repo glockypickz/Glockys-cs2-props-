@@ -49,6 +49,21 @@ var propHot = W.propLine(p80);
 check("prop line shows the chance and no extra icon (icon stays on the pill)", propHot.indexOf("Blowout risk 37%") > -1 && propHot.indexOf("⚠️") < 0);
 check("shadow chance is preferred and still gets visible text", W.predict({ shadow: { p_win: 0.40, p_loss: 0.05 }, winp: 0.5, team: "FaZe", opp: "G2" }).text.indexOf("Blowout risk 45% per map") === 0);
 
+console.log("Games tab verdict (BLOWOUT EXPECTED or NO BLOWOUT EXPECTED)");
+check("game line says BLOWOUT EXPECTED at >=30%", /class="pill blow-verdict blow"[^>]*>BLOWOUT EXPECTED</.test(gameHot));
+check("game line says NO BLOWOUT EXPECTED below 30%", /class="pill blow-verdict calm"[^>]*>NO BLOWOUT EXPECTED</.test(gameEven) && gameEven.indexOf(">BLOWOUT EXPECTED<") < 0);
+check("verdict sits right before the risk text", gameHot.indexOf(">BLOWOUT EXPECTED</span> Blowout risk 37% per map") > -1);
+check("exactly at the threshold counts as expected", W.gameLine(W.predict({ shadow: { p_win: 0.20, p_loss: 0.10 }, team: "A", opp: "B" })).indexOf(">BLOWOUT EXPECTED<") > -1);
+check("just under the threshold is not expected", W.gameLine(W.predict({ shadow: { p_win: 0.20, p_loss: 0.09 }, team: "A", opp: "B" })).indexOf(">NO BLOWOUT EXPECTED<") > -1);
+check("no verdict when the chance cannot be computed", W.verdict(W.predict({})) === "" && W.verdict(null) === "");
+check("prop line has no verdict (props use the BLOWOUT tag)", W.propLine(p80).indexOf("blow-verdict") < 0);
+check("verdict tooltip explains the rule and escapes", /title="[^"<>]*13-5 or wider[^"<>]*never changes a grade or pick/.test(gameHot));
+check("verdict does not change the flags or icon rules", W.flags({}, { winp: 0.5 }).show === false && W.flags({}, { winp: 0.8, team: "A", opp: "B" }).blowout === true);
+var cssV = fs.readFileSync(path.join(__dirname, "..", "styles.css"), "utf8").replace(/\s+/g, "");
+check("verdict styles exist", /\.pill\.blow-verdict\{/.test(cssV) && /\.pill\.calm\{/.test(cssV));
+var appSrcV = fs.readFileSync(path.join(__dirname, "..", "app.js"), "utf8");
+check("every game card line goes through blowGameLine", (appSrcV.match(/blowGameLine\(/g) || []).length >= 4);
+
 console.log("flags and tooltip (icon still only at bait or >=30%)");
 check("no icon when neither flag applies", W.icon({ bait: false }, { winp: 0.5 }) === "");
 check("no blowout flag without risk or bait", W.flags({ bait: false }).show === false);
