@@ -83,9 +83,16 @@ export function loadGPModelFromSource(src) {
   return api;
 }
 
+// Hostname is ignored by the ASSETS binding (only the pathname is matched).
+// Do not use the public Worker origin here: with run_worker_first, some
+// runtimes would send that request back through the login gate and fail.
+function assetRequest(path) {
+  return new Request("https://assets.local" + path);
+}
+
 async function ensureModel(env, origin) {
   if (modelReady && globalThis.GPModel && globalThis.GPModel.grade) return globalThis.GPModel;
-  const r = await env.ASSETS.fetch(new Request(origin + "/model.js"));
+  const r = await env.ASSETS.fetch(assetRequest("/model.js"));
   if (!r.ok) throw new Error("model.js missing");
   return loadGPModelFromSource(await r.text());
 }
@@ -94,7 +101,7 @@ export async function loadStore(env, origin) {
   if (dataCache.store && Date.now() - dataCache.at < 60000) return dataCache.store;
   await ensureModel(env, origin);
   const get = async (path) => {
-    const r = await env.ASSETS.fetch(new Request(origin + path));
+    const r = await env.ASSETS.fetch(assetRequest(path));
     if (!r.ok) return null;
     return r.json();
   };

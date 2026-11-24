@@ -223,3 +223,18 @@ test("UI source has Upload slip on the Grader path and never mentions keys", () 
   const worker = readFileSync(join(root, "worker.js"), "utf8");
   assert.match(worker, /isSlipPath/);
 });
+
+test("slip read drops the image and only then loads our data; assets are not fetched via the public origin", () => {
+  const slip = readFileSync(join(root, "slip_ai.js"), "utf8");
+  const ask = readFileSync(join(root, "ask_ai.js"), "utf8");
+  const readAt = slip.indexOf("const img = await readImage(request)");
+  const dropAt = slip.indexOf("img.bytes = null");
+  const loadAt = slip.lastIndexOf("store = await loadStore(env, url.origin)");
+  assert.ok(readAt >= 0 && dropAt > readAt, "image is dropped after it is read");
+  assert.ok(loadAt > dropAt, "loadStore on the read path runs after the image is dropped");
+  const gradeFn = slip.indexOf('if (path === "/ai/slip/grade")');
+  const gradeLoad = slip.indexOf("store = await loadStore(env, url.origin)", gradeFn);
+  assert.ok(gradeFn >= 0 && gradeLoad > gradeFn && gradeLoad < readAt, "grade path still loads data without an image");
+  assert.match(ask, /https:\/\/assets\.local/);
+  assert.doesNotMatch(ask, /ASSETS\.fetch\(new Request\(origin \+/);
+});

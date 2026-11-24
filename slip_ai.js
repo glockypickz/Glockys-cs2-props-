@@ -170,11 +170,10 @@ export async function handleSlip(request, env, url, keyHash) {
   if (gate === "on" && !who) return json({ error: "login required", login: "/login" }, 401);
   if (!hasGeminiKey(env)) return json({ error: SETUP_MSG, setup: false }, 503);
 
-  let store;
-  try { store = await loadStore(env, url.origin); }
-  catch (e) { return json({ error: "Glocky couldn't load our data just now. Try again in a moment." }, 503); }
-
   if (path === "/ai/slip/grade") {
+    let store;
+    try { store = await loadStore(env, url.origin); }
+    catch (e) { return json({ error: "Glocky couldn't load our data just now. Try again in a moment." }, 503); }
     let body;
     try { body = await request.json(); } catch (e) { return json({ error: "Bad request" }, 400); }
     const rawPicks = Array.isArray(body && body.picks) ? body.picks : [];
@@ -192,18 +191,21 @@ export async function handleSlip(request, env, url, keyHash) {
   if (img.error) return json({ error: img.error }, 400);
 
   const b64 = bytesToB64(img.bytes);
+  const mime = img.mime;
+  // Drop the raw bytes before calling Gemini. loadStore is deferred until
+  // after the image is also dropped, so we never hold a 5 MB upload and the
+  // 8 MB players.json in the Worker's 128 MB isolate at the same time.
+  img.bytes = null;
   const g = await geminiRequest(env, {
     system: extractPrompt(),
     parts: [
       { text: "Extract the CS2 slip in this image as JSON." },
-      { inlineData: { mimeType: img.mime, data: b64 } }
+      { inlineData: { mimeType: mime, data: b64 } }
     ],
     timeoutMs: 25000,
     temperature: 0,
     maxOutputTokens: 2048
   });
-  // Drop image buffers; never attach them to the response or logs.
-  img.bytes = null;
 
   if (!g.ok) return json({ error: "Glocky couldn't read that slip just now. Try again in a moment." }, 502);
   const parsed = parseGeminiJson(g.text);
@@ -228,6 +230,10 @@ export async function handleSlip(request, env, url, keyHash) {
       picks: []
     }, 422);
   }
+
+  let store;
+  try { store = await loadStore(env, url.origin); }
+  catch (e) { return json({ error: "Glocky couldn't load our data just now. Try again in a moment." }, 503); }
 
   const picks = extracted.picks.map((p) => matchPick(store, p));
   if (!picks.length) {
