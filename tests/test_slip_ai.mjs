@@ -7,7 +7,7 @@ import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 import * as A from "../beta_auth.js";
 import { handleSlip, isSlipPath, extractPrompt, _test as T } from "../slip_ai.js";
-import { handleAsk, isAskPath } from "../ask_ai.js";
+import { handleAsk, isAskPath, setRetryDelaysForTest, _test as AT } from "../ask_ai.js";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 const require = createRequire(import.meta.url);
@@ -413,6 +413,84 @@ test("404 NOT_FOUND on a retired model id is retried on gemini-3.8-flash", async
     assert.ok(seen.every((s) => !s.url.includes("not-a-real-key")));
   } finally {
     globalThis.fetch = orig;
+  }
+});
+
+function busy503() {
+  return new Response(JSON.stringify({
+    error: { code: 503, message: "This model is currently experiencing high demand. Please try again later.", status: "UNAVAILABLE" }
+  }), { status: 503, headers: { "content-type": "application/json" } });
+}
+
+function slipOk() {
+  return new Response(JSON.stringify({
+    candidates: [{ content: { parts: [{ text: JSON.stringify({
+      readable: true, cs2: true, book: "PrizePicks", picks: [
+        { player: "EliGE", stat: "kills", line: 35.5, period: "Maps 1-2", side: "over" }
+      ]
+    }) }] } }]
+  }), { status: 200, headers: { "content-type": "application/json" } });
+}
+
+test("503 UNAVAILABLE retries the same model twice, then falls back to gemini-3.5-flash-lite", async () => {
+  setRetryDelaysForTest([0, 0]);
+  const env = mkEnv({ GEMINI_API_KEY: "not-a-real-key" });
+  const orig = globalThis.fetch;
+  const seen = [];
+  globalThis.fetch = async (url, opts) => {
+    seen.push(String(url));
+    if (String(url).includes("gemini-3.8-flash")) return busy503();
+    if (String(url).includes("gemini-3.5-flash-lite")) return slipOk();
+    return busy503();
+  };
+  try {
+    const r = await handleSlip(req("/ai/slip/read", { body: { image: pngB64(), mime: "image/png" }, ip: "4.4.4.4" }), env, new URL(ORIGIN + "/ai/slip/read"), KEY_HASH);
+    const j = await r.json();
+    assert.equal(r.status, 200);
+    assert.equal(j.picks.length, 1);
+    const flash = seen.filter((u) => u.includes("gemini-3.8-flash"));
+    assert.equal(flash.length, 3, "initial attempt plus two busy retries");
+    assert.ok(seen.some((u) => u.includes("gemini-3.5-flash-lite")));
+    assert.ok(seen.every((u) => !u.includes("not-a-real-key")));
+    assert.equal(AT.thinkingConfigFor("gemini-3.5-flash-lite").thinkingLevel, "minimal");
+    assert.equal(AT.thinkingConfigFor("gemini-3.6-flash").thinkingLevel, "minimal");
+  } finally {
+    globalThis.fetch = orig;
+    setRetryDelaysForTest(null);
+  }
+});
+
+test("when every model stays busy, customers get a busy message and admins see the models tried", async () => {
+  setRetryDelaysForTest([0, 0]);
+  const env = mkEnv({ GEMINI_API_KEY: "not-a-real-key" });
+  const orig = globalThis.fetch;
+  globalThis.fetch = async () => busy503();
+  try {
+    const r = await handleSlip(req("/ai/slip/read", { body: { image: pngB64(), mime: "image/png" }, ip: "4.4.4.5" }), env, new URL(ORIGIN + "/ai/slip/read"), KEY_HASH);
+    const j = await r.json();
+    assert.equal(r.status, 502);
+    assert.match(j.error, /a bit busy/i);
+    assert.equal(j.detail, undefined);
+    assert.equal(JSON.stringify(j).includes("not-a-real-key"), false);
+  } finally {
+    globalThis.fetch = orig;
+  }
+
+  T.lastHit.clear();
+  globalThis.fetch = async () => busy503();
+  try {
+    const r = await handleSlip(req("/ai/slip/read", { body: { image: pngB64(), mime: "image/png" }, adminKey: KEY, ip: "4.4.4.6" }), env, new URL(ORIGIN + "/ai/slip/read"), KEY_HASH);
+    const j = await r.json();
+    assert.equal(r.status, 502);
+    assert.match(j.error, /a bit busy/i);
+    assert.match(j.detail, /HTTP 503/);
+    assert.match(j.detail, /UNAVAILABLE/);
+    assert.match(j.detail, /tried=gemini-3\.8-flash, gemini-3\.5-flash-lite, gemini-3\.6-flash/);
+    assert.match(j.detail, /retried on busy/);
+    assert.equal(String(j.detail).includes("not-a-real-key"), false);
+  } finally {
+    globalThis.fetch = orig;
+    setRetryDelaysForTest(null);
   }
 });
 

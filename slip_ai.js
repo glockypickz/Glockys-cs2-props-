@@ -219,7 +219,11 @@ export async function handleSlip(request, env, url, keyHash) {
   });
 
   if (!g.ok) {
-    const payload = { error: "Glocky couldn't read that slip just now. Try again in a moment." };
+    const payload = {
+      error: g.busy
+        ? "Glocky is a bit busy right now and couldn't read that slip. Try again in a moment."
+        : "Glocky couldn't read that slip just now. Try again in a moment."
+    };
     if (who && who.admin) payload.detail = sanitizeDetail(formatGeminiDetail(Object.assign({ imageBytes: imageBytes, mime: mime }, g)), env.GEMINI_API_KEY);
     return json(payload, 502);
   }

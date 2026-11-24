@@ -109,7 +109,7 @@ Ask Glocky stays dark until a Gemini API key is stored as a **Worker secret** na
    - In the Cloudflare dashboard: Workers & Pages → `glockys-cs2-props` → Settings → Variables and Secrets → Add a **Secret** named `GEMINI_API_KEY`.
 3. Deploy once after the secret is in place (a push to `main` auto-deploys). Until the secret is set, signed-in users see "Ask Glocky isn't set up yet."
 
-The default model is `gemini-3.8-flash`. Retired names such as `gemini-2.5-flash` are mapped to that default. To use another Flash model, set a plain Worker variable `GEMINI_MODEL` (not a secret). If a model returns 404 NOT_FOUND, the Worker retries `gemini-3.8-flash` (then `gemini-3.5-flash-lite`). Google's free-tier limits and terms apply (free prompts may be used to improve their models). The Worker also caps each signed-in user at 20 questions per UTC day.
+The default model is `gemini-3.8-flash`. Retired names such as `gemini-2.5-flash` are mapped to that default. To use another Flash model, set a plain Worker variable `GEMINI_MODEL` (not a secret). If a model returns 404 NOT_FOUND, or stays busy (503/429/500/504) after two short retries, the Worker tries `gemini-3.8-flash`, then `gemini-3.5-flash-lite`, then `gemini-3.6-flash`. Google's free-tier limits and terms apply (free prompts may be used to improve their models). The Worker also caps each signed-in user at 20 questions per UTC day.
 
 Tests: `node --test tests/test_ask_lookup.mjs tests/test_ask_ai.mjs`.
 

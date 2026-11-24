@@ -6,7 +6,7 @@ import { createRequire } from "node:module";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 import * as A from "../beta_auth.js";
-import { handleAsk, isAskPath, loadGPModelFromSource, systemPrompt, fallbackPhrase, scrubProviders, _test as T } from "../ask_ai.js";
+import { handleAsk, isAskPath, loadGPModelFromSource, systemPrompt, fallbackPhrase, scrubProviders, setRetryDelaysForTest, _test as T } from "../ask_ai.js";
 import * as L from "../ask_lookup.js";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
@@ -211,6 +211,10 @@ test("thinkingConfigFor disables thinking on 2.5 and uses a low level on 3.x", (
   assert.deepEqual(T.thinkingConfigFor("gemini-2.5-flash", 0), { thinkingBudget: 0 });
   assert.deepEqual(T.thinkingConfigFor("gemini-3.8-flash"), { thinkingLevel: "low" });
   assert.deepEqual(T.thinkingConfigFor("gemini-3.5-flash-lite"), { thinkingLevel: "minimal" });
+  assert.deepEqual(T.thinkingConfigFor("gemini-3.6-flash"), { thinkingLevel: "minimal" });
+  assert.ok(T.FALLBACK_MODELS.includes("gemini-3.5-flash-lite"));
+  assert.ok(T.FALLBACK_MODELS.includes("gemini-3.6-flash"));
+  assert.deepEqual(T.RETRY_DELAYS_MS, [1000, 2500]);
   assert.equal(T.thinkingConfigFor("some-other-model"), null);
 });
 
@@ -247,6 +251,57 @@ test("404 NOT_FOUND on an unknown model retries gemini-3.8-flash", async () => {
     assert.ok(seen.every((u) => !u.includes("not-a-real-key") && !/key=/i.test(u)));
   } finally {
     globalThis.fetch = orig;
+  }
+});
+
+test("Ask Glocky retries a 503 and falls back to another Flash model", async () => {
+  setRetryDelaysForTest([0, 0]);
+  const env = mkEnv({ GEMINI_API_KEY: "not-a-real-key" });
+  const orig = globalThis.fetch;
+  const seen = [];
+  globalThis.fetch = async (url) => {
+    seen.push(String(url));
+    if (String(url).includes("gemini-3.8-flash")) {
+      return new Response(JSON.stringify({
+        error: { code: 503, message: "This model is currently experiencing high demand.", status: "UNAVAILABLE" }
+      }), { status: 503, headers: { "content-type": "application/json" } });
+    }
+    return new Response(JSON.stringify({
+      candidates: [{ content: { parts: [{ text: "EliGE's headshot percentage on LAN is 56.97%." }] } }]
+    }), { status: 200, headers: { "content-type": "application/json" } });
+  };
+  try {
+    const r = await handleAsk(req("/ai/ask", { body: { question: "what's EliGE's headshot percentage on LAN" }, ip: "6.6.6.6" }), env, new URL(ORIGIN + "/ai/ask"), KEY_HASH);
+    const j = await r.json();
+    assert.equal(r.status, 200);
+    assert.match(j.answer, /56\.97/);
+    assert.equal(j.busy, false);
+    assert.equal(seen.filter((u) => u.includes("gemini-3.8-flash")).length, 3);
+    assert.ok(seen.some((u) => u.includes("gemini-3.5-flash-lite")));
+    assert.ok(seen.every((u) => !u.includes("not-a-real-key")));
+  } finally {
+    globalThis.fetch = orig;
+    setRetryDelaysForTest(null);
+  }
+});
+
+test("Ask Glocky tells the user it is busy when every model stays unavailable", async () => {
+  setRetryDelaysForTest([0, 0]);
+  const env = mkEnv({ GEMINI_API_KEY: "not-a-real-key" });
+  const orig = globalThis.fetch;
+  globalThis.fetch = async () => new Response(JSON.stringify({
+    error: { code: 503, message: "This model is currently experiencing high demand.", status: "UNAVAILABLE" }
+  }), { status: 503, headers: { "content-type": "application/json" } });
+  try {
+    const r = await handleAsk(req("/ai/ask", { body: { question: "what's EliGE's headshot percentage on LAN" }, ip: "6.6.6.7" }), env, new URL(ORIGIN + "/ai/ask"), KEY_HASH);
+    const j = await r.json();
+    assert.equal(r.status, 200);
+    assert.equal(j.busy, true);
+    assert.match(j.answer, /a bit busy/i);
+    assert.doesNotMatch(j.answer, /not-a-real-key/);
+  } finally {
+    globalThis.fetch = orig;
+    setRetryDelaysForTest(null);
   }
 });
 

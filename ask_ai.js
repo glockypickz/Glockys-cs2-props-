@@ -5,7 +5,11 @@ import { identify, gateState } from "./beta_auth.js";
 import { parseQuestion, mergeParsedIntent, answerQuestion, makeStore } from "./ask_lookup.js";
 
 const DEFAULT_MODEL = "gemini-3.8-flash";
-const FALLBACK_MODELS = ["gemini-3.8-flash", "gemini-3.5-flash-lite"];
+const FALLBACK_MODELS = ["gemini-3.8-flash", "gemini-3.5-flash-lite", "gemini-3.6-flash"];
+// After a 503/429/500/504, retry the same model twice with these delays.
+const RETRY_DELAYS_MS = [1000, 2500];
+// Leave a little headroom under the typical 30s Worker wall-clock limit.
+const WORKER_BUDGET_MS = 28000;
 // These names 404 for new API keys ("no longer available to new users").
 const RETIRED_MODELS = new Set([
   "gemini-2.5-flash", "gemini-2.5-pro", "gemini-2.5-flash-lite",
@@ -242,7 +246,9 @@ export function formatGeminiDetail(g) {
   if (g.imageBytes != null) bits.push("image=" + g.imageBytes + "B");
   if (g.mime) bits.push("mime=" + g.mime);
   if (g.model) bits.push("model=" + g.model);
+  if (g.tried && g.tried.length) bits.push("tried=" + g.tried.join(", "));
   if (g.retried) bits.push("retried without thinking/json-mime");
+  if (g.retriedBusy) bits.push("retried on busy");
   if (g.fallback) bits.push("fell back from " + g.fallback);
   if (g.firstError) bits.push("first=" + g.firstError);
   return sanitizeDetail(bits.join(", ") || "unknown Gemini failure");
@@ -265,10 +271,29 @@ function fallbackModels(primary) {
   return out;
 }
 
-function isNotFound(result) {
+export function isNotFound(result) {
   if (!result || result.ok) return false;
   if (result.status === 404) return true;
   return /NOT_FOUND/i.test(String(result.error || ""));
+}
+
+export function isTransient(result) {
+  if (!result || result.ok) return false;
+  if (result.status === 429 || result.status === 500 || result.status === 503 || result.status === 504) return true;
+  return /UNAVAILABLE|RESOURCE_EXHAUSTED|DEADLINE_EXCEEDED/i.test(String(result.error || ""));
+}
+
+function defaultSleep(ms) {
+  return new Promise(function (resolve) { setTimeout(resolve, ms); });
+}
+let sleepFn = defaultSleep;
+let testRetryDelays = null;
+export function setRetryDelaysForTest(delays) {
+  testRetryDelays = delays;
+  if (delays === null) sleepFn = defaultSleep;
+}
+export function setSleepForTest(fn) {
+  sleepFn = fn || defaultSleep;
 }
 
 export async function geminiRequest(env, opts) {
@@ -276,6 +301,15 @@ export async function geminiRequest(env, opts) {
   const key = String(env.GEMINI_API_KEY || "").trim();
   const parts = opts.parts || [{ text: opts.user || "" }];
   const timeoutMs = opts.timeoutMs || 15000;
+  const started = Date.now();
+  const delays = testRetryDelays || opts.retryDelaysMs || RETRY_DELAYS_MS;
+  const deadline = started + Math.min(WORKER_BUDGET_MS, timeoutMs + 1000 + 2500 + 2000);
+  const tried = [];
+
+  function remainingTimeout() {
+    const left = deadline - Date.now();
+    return Math.max(2000, Math.min(timeoutMs, left));
+  }
 
   function buildBody(modelName, relaxed) {
     const gen = {
@@ -297,9 +331,10 @@ export async function geminiRequest(env, opts) {
   }
 
   async function once(modelName, body) {
+    const attemptMs = remainingTimeout();
     const url = geminiGenerateUrl(modelName);
     const ctrl = typeof AbortController !== "undefined" ? new AbortController() : null;
-    const t = ctrl ? setTimeout(function () { ctrl.abort(); }, timeoutMs) : null;
+    const t = ctrl ? setTimeout(function () { ctrl.abort(); }, attemptMs) : null;
     try {
       const r = await fetch(url, {
         method: "POST",
@@ -320,7 +355,7 @@ export async function geminiRequest(env, opts) {
       return { ok: !!text, status: r.status, text, error: text ? "" : "empty text", finishReason: meta.finishReason, blockReason: meta.blockReason, thoughts: meta.thoughts, model: modelName };
     } catch (e) {
       const aborted = !!(e && (e.name === "AbortError" || String(e && e.message || e).includes("AbortError")));
-      return { ok: false, status: 0, aborted: aborted, error: aborted ? ("timeout after " + timeoutMs + "ms") : "network error", text: "", model: modelName };
+      return { ok: false, status: 0, aborted: aborted, error: aborted ? ("timeout after " + attemptMs + "ms") : "network error", text: "", model: modelName };
     } finally {
       if (t) clearTimeout(t);
     }
@@ -338,21 +373,43 @@ export async function geminiRequest(env, opts) {
     return result;
   }
 
+  async function callModelWithBackoff(modelName) {
+    let result = await callModel(modelName);
+    if (tried.indexOf(modelName) < 0) tried.push(modelName);
+    if (result.ok || !isTransient(result)) return result;
+    for (let i = 0; i < delays.length; i++) {
+      const wait = delays[i] || 0;
+      if (Date.now() + wait >= deadline - 1500) break;
+      if (wait > 0) await sleepFn(wait);
+      if (Date.now() >= deadline - 1500) break;
+      const retry = await callModel(modelName);
+      retry.retriedBusy = true;
+      retry.firstError = result.error || ("HTTP " + result.status);
+      result = retry;
+      if (result.ok || !isTransient(result)) return result;
+    }
+    return result;
+  }
+
   let modelName = geminiModel(env);
-  let result = await callModel(modelName);
-  // Retired or unknown model IDs 404 with NOT_FOUND. Retry current Flash models.
-  if (!result.ok && isNotFound(result)) {
+  let result = await callModelWithBackoff(modelName);
+  // 404 on a retired/unknown id, or a model that stays busy after retries:
+  // try the other current Flash models (each with the same short backoff).
+  if (!result.ok && (isNotFound(result) || isTransient(result))) {
     const alts = fallbackModels(modelName);
     const firstError = result.error || ("HTTP " + result.status);
     const from = modelName;
     for (let i = 0; i < alts.length; i++) {
-      const retry = await callModel(alts[i]);
+      if (Date.now() >= deadline - 1500) break;
+      const retry = await callModelWithBackoff(alts[i]);
       retry.fallback = from;
       retry.firstError = firstError;
       result = retry;
-      if (result.ok || !isNotFound(result)) break;
+      if (result.ok || (!isNotFound(result) && !isTransient(result))) break;
     }
   }
+  result.tried = tried.slice();
+  result.busy = !result.ok && isTransient(result);
   return result;
 }
 
@@ -459,15 +516,19 @@ export async function handleAsk(request, env, url, keyHash) {
   let answer;
   const g = await geminiGenerate(env, systemPrompt(), userMsg, 15000);
   if (g.ok) answer = scrubProviders(stripGlockySays(g.text));
-  else answer = fallbackPhrase(result);
+  else if (g.busy) {
+    answer = "Glocky is a bit busy right now, so here's the short version from our data. " + fallbackPhrase(result);
+    if (who && who.admin) answer += " — " + sanitizeDetail(formatGeminiDetail(g), env.GEMINI_API_KEY);
+  } else answer = fallbackPhrase(result);
 
   return json({
     answer,
     grade: result.grade,
     missing: result.missing,
-    setup: true
+    setup: true,
+    busy: !!(g && g.busy)
   });
 }
 
 // test helpers (no secrets)
-export const _test = { hasGeminiKey, geminiModel, DEFAULT_MODEL, FALLBACK_MODELS, RETIRED_MODELS, USER_DAILY, SETUP_MSG, stripGlockySays, extractText, scrubProviders, PROVIDER_RE, thinkingConfigFor, sanitizeDetail, formatGeminiDetail };
+export const _test = { hasGeminiKey, geminiModel, DEFAULT_MODEL, FALLBACK_MODELS, RETIRED_MODELS, RETRY_DELAYS_MS, USER_DAILY, SETUP_MSG, stripGlockySays, extractText, scrubProviders, PROVIDER_RE, thinkingConfigFor, sanitizeDetail, formatGeminiDetail, isTransient, isNotFound, setRetryDelaysForTest, setSleepForTest };
