@@ -71,6 +71,12 @@ class ScoutData:
             out.sort(key=lambda r: (r["date"], r["mid"], r["n"]))
             self.rows[id(p)] = out
             self.dates[id(p)] = [r["date"] for r in out]
+        self._maxn = {}
+        for p in players:
+            for l in p.get("logs") or []:
+                if l.get("mid") is not None and isinstance(l.get("n"), int):
+                    k = str(l["mid"])
+                    self._maxn[k] = max(self._maxn.get(k, 0), l["n"])
         self.team = {}
         for t, d in team_maps.items():
             lst = sorted(d.values(), key=lambda g: g["date"])
@@ -85,6 +91,11 @@ class ScoutData:
         dd = sum(g["dsum"] for lst, _ in self.team.values() for g in lst)
         pr = sum(g["rd"] * g["np"] for lst, _ in self.team.values() for g in lst)
         self.league_dpr = dd / pr if pr else LEAGUE_KPR
+
+    def bo_of(self, mid):
+        """Format of a past match from the maps it logged: a 4th or 5th map means best-of-5, else best-of-3.
+        (A Bo5 won 3-0 looks like a Bo3 here; live grades read the format from games.json.)"""
+        return 5 if self._maxn.get(str(mid), 0) >= 4 else 3
 
     def prior(self, p, D):
         i = bisect.bisect_left(self.dates[id(p)], D)
@@ -185,7 +196,7 @@ def _ord_to_iso(o):
     return datetime.date.fromordinal(o).isoformat()
 
 
-def features(S, p, team, opp, D, period=None, ev=None, P=None):
+def features(S, p, team, opp, D, period=None, ev=None, P=None, bo=3):
     """Every candidate input for one player / match, strictly before day D. None if he has no usable maps."""
     P = dict(DEF, **(P or {}))
     t, o = tn(team or p.get("team")), tn(opp)
@@ -233,9 +244,10 @@ def features(S, p, team, opp, D, period=None, ev=None, P=None):
     ro, rom, no = S.team_rd(o, D, P) if o else (rt, rtm, 0)
     rbase = (rt + ro) / 2.0
     rd_hat = P["rd_a"] + P["rd_b"] * rbase + P["rd_c"] * pw * (1 - pw)
-    # MAPS (simulated veto over the active pool)
+    # MAPS (simulated veto). Owner rule: best-of-3 -> only the 3 most likely maps (best-of-5 -> 5), renormalized.
     vw = S.veto(t, o, D, P)
-    x_maps = x_mapr = 0.0
+    vt = veto_top(vw, bo)
+    x_maps = x_mapr = x_maps_pool = x_mapr_pool = 0.0
     if vw:
         per = {}
         for r in szn:
@@ -243,9 +255,11 @@ def features(S, p, team, opp, D, period=None, ev=None, P=None):
             a[0] += r["k"]
             a[1] += r["rd"]
         kpm = {m: (per.get(m, [0, 0])[0] + P["k_map"] * kpr_szn) / (per.get(m, [0, 0])[1] + P["k_map"]) for m in vw}
-        x_maps = math.log(sum(vw[m] * kpm[m] for m in vw) / kpr_szn)
         rdm = {m: (rtm.get(m, rt) + rom.get(m, ro)) / 2.0 for m in vw}
-        x_mapr = math.log(sum(vw[m] * rdm[m] for m in vw) / rbase)
+        x_maps_pool = math.log(sum(vw[m] * kpm[m] for m in vw) / kpr_szn)
+        x_mapr_pool = math.log(sum(vw[m] * rdm[m] for m in vw) / rbase)
+        x_maps = math.log(sum(vt[m] * kpm[m] for m in vt) / kpr_szn)
+        x_mapr = math.log(sum(vt[m] * rdm[m] for m in vt) / rbase)
     # HEADSHOTS per kill
     hrows = [r for r in pr if r["hs"] is not None and r["k"]]
     hk = kk = 0.0
@@ -260,10 +274,10 @@ def features(S, p, team, opp, D, period=None, ev=None, P=None):
     return {"kpr": kpr, "kpr_dec": kpr_dec, "kpr_szn": kpr_szn, "kpr_h2h": kpr_h2h, "n_h2h_maps": len(h),
             "rd_hat": rd_hat, "rbase": rbase, "pw": pw, "nmaps": nmaps, "hspk": hspk,
             "x_lan": x_lan, "x_opp": x_opp, "x_maps": x_maps, "x_mapr": x_mapr, "x_elo": pw - 0.5,
-            "veto": vw, "ev": ev, "n_maps_sample": len(szn), "conc_opp": c_o, "sos": sos}
+            "veto": vw, "veto_top": vt, "bo": bo, "x_maps_pool": x_maps_pool, "x_mapr_pool": x_mapr_pool, "ev": ev, "n_maps_sample": len(szn), "conc_opp": c_o, "sos": sos}
 
 
-FACTORS = ("lan", "opp", "maps", "mapr", "elo")
+FACTORS = ("lan", "opp", "maps", "mapr", "elo", "maps_pool", "mapr_pool")
 MODEL = "shadow-scout-v1"
 PARAMS_FILE = "scout_params.json"
 
@@ -294,12 +308,20 @@ def infer_ev(S, team, opp, start_day, days=3):
     return best[1] if best else None
 
 
-def likely_maps(f, top=4):
-    """[map, chance %] for the most likely maps (Maps 1-2: chance the map is one of the two; Map 1: chance it is Map 1)."""
-    vw = f.get("veto") or {}
-    n = f.get("nmaps", 2)
-    rows = sorted(vw.items(), key=lambda x: -x[1])[:top]
-    return [[m, round(100 * min(1.0, w * n))] for m, w in rows]
+def veto_top(vw, bo=3):
+    """Owner rule (Nov 24): best-of-3 (and Bo1) -> keep the 3 most likely maps from the veto estimate; best-of-5 -> 5.
+    Their weights are renormalized to sum to 1."""
+    k = 5 if (bo or 3) >= 5 else 3
+    top = sorted(vw.items(), key=lambda x: (-x[1], x[0]))[:k]
+    tw = sum(w for _, w in top) or 1.0
+    return {m: w / tw for m, w in top}
+
+
+def likely_maps(f):
+    """[map, share %] of the top-3 (Bo5: top-5) veto maps; the shares sum to 100."""
+    vt = f.get("veto_top") or {}
+    rows = sorted(vt.items(), key=lambda x: -x[1])
+    return [[m, round(100 * w)] for m, w in rows]
 
 
 class ScoutGrader:
@@ -315,10 +337,24 @@ class ScoutGrader:
         P.update((c.get("coefs") or {}).get("%s|%s" % (per, st)) or {})
         return P
 
-    def project(self, p, st, team, opp, day, period=None, ev=None):
+    def best_of(self, team, opp):
+        """Match format from games.json (bo field) for this pair; 3 when unknown."""
+        if not hasattr(self, "_games"):
+            import json
+            try:
+                self._games = json.load(open("games.json", encoding="utf-8")).get("games") or []
+            except Exception:
+                self._games = []
+        for g in self._games:
+            if (teq(g.get("team1"), team) and teq(g.get("team2"), opp)) or (teq(g.get("team2"), team) and teq(g.get("team1"), opp)):
+                if isinstance(g.get("bo"), int):
+                    return g["bo"]
+        return 3
+
+    def project(self, p, st, team, opp, day, period=None, ev=None, bo=3):
         per = "Map 1" if is_map1(period) else "Maps 1-2"
         P = self.P(per, st)
-        f = features(self.S, p, team, opp, day, per, ev, P)
+        f = features(self.S, p, team, opp, day, per, ev, P, bo)
         if not f:
             return None, None, None
         mu, steps = project(f, st, P)
@@ -336,6 +372,7 @@ class ScoutGrader:
         day = day or str(e.get("start", ""))[:10]
         team, opp = e.get("team"), e.get("opponent") or ""
         ev = infer_ev(self.S, team, opp, day)
+        bo = self.best_of(team, opp)
         names = [x.strip() for x in str(e["player"]).split("+") if x.strip()]
         mu, f0, steps0 = 0.0, None, None
         for n in names:
@@ -345,7 +382,7 @@ class ScoutGrader:
             cs = [c for c in self.gr.series(p, e.get("period")) if c["date"] < day]
             if len(cs) < 5:
                 return {"skipped": "%s: only %d earlier %s (need 5)" % (n, len(cs), "Map 1 maps" if is_map1(e) else "series")}
-            m, f, steps = self.project(p, st, team, opp, day, e.get("period"), ev)
+            m, f, steps = self.project(p, st, team, opp, day, e.get("period"), ev, bo)
             if m is None:
                 return {"skipped": "no usable maps for " + n}
             mu += m
@@ -366,6 +403,7 @@ class ScoutGrader:
                              "opps_faced": None if f["sos"] is None else round(f["sos"], 3),
                              "maps_in_sample": f["n_maps_sample"], "team_win_elo": round(f["pw"], 3)}
             out["likely_maps"] = likely_maps(f)
+            out["bo"] = bo
         else:
             out["combo"] = True
         return out

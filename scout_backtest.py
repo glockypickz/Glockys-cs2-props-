@@ -52,11 +52,11 @@ def build():
                 import bisect
                 if bisect.bisect_left(dates, D) < MIN_PRIOR:
                     continue
-                f = SM.features(S, p, p.get("team"), c["opp"], D, per, S.ev_of(p, mid=c["mid"]))
+                f = SM.features(S, p, p.get("team"), c["opp"], D, per, S.ev_of(p, mid=c["mid"]), bo=S.bo_of(c["mid"]))
                 if not f:
                     continue
                 row = {"player": p["name"], "team": p.get("team"), "opp": c["opp"], "date": D, "period": per, "mid": c["mid"],
-                       "act": {"kills": c["kills"], "hs": c.get("hs")}, "act_rd": c.get("rd"), "f": {k: v for k, v in f.items() if k != "veto"},
+                       "act": {"kills": c["kills"], "hs": c.get("hs")}, "act_rd": c.get("rd"), "bo": S.bo_of(c["mid"]), "f": {k: v for k, v in f.items() if k not in ("veto", "veto_top")},
                        "v1": {}}
                 for st in ("kills", "hs"):
                     if c.get(st) is None:
@@ -80,7 +80,7 @@ def build():
         D = str(e["start"])[:10]
         per = "Map 1" if is_map1(e) else "Maps 1-2"
         evs = S.ev_of(p, mid=rs.get("mid")) or S.ev_of(p, D=rs.get("date"))
-        f = SM.features(S, p, e.get("team"), e.get("opponent") or "", D, per, evs)
+        f = SM.features(S, p, e.get("team"), e.get("opponent") or "", D, per, evs, bo=S.bo_of(rs.get("mid")))
         if not f:
             continue
         v1 = gr.v1_project(p, st, e.get("opponent") or "", D, period=per)
@@ -88,7 +88,7 @@ def build():
                       "book": e.get("book"), "odds": e.get("odds"), "line": float(lk["line"]), "close": e.get("line"),
                       "lock_proj": lk.get("proj"), "lock_grade": lk.get("grade"), "lock_pick": lk.get("pick"),
                       "act": float(rs["act"]), "mid": rs.get("mid"), "period": per, "v1": v1,
-                      "f": {k: v for k, v in f.items() if k != "veto"}, "veto": f["veto"]})
+                      "f": {k: v for k, v in f.items() if k not in ("veto", "veto_top")}, "veto": f["veto_top"]})
     pickle.dump({"events": ev_rows, "lines": lines}, open(CACHE, "wb"))
     print("events", len(ev_rows), "lines", len(lines))
 

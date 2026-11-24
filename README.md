@@ -67,6 +67,8 @@ Tests: `node --test tests/test_push.mjs` (includes the RFC 8291 test vector).
 - Letters use the live v1 cutoffs and the Under break-even rule.
 - The Shadow tab shows its record next to the live grader. The Grader card shows a "What moved the projection" table and the likely maps (veto estimate, context only) when the prop is on the board.
 
-Tested and dropped (no holdout gain): LAN/online KPR, veto-weighted per-map KPR (even with the real maps known it added nothing), per-map rounds and Elo as a kills-per-round factor.
+Likely maps: each team's share of every active-pool map among its Maps 1-2 over the last 180 days (smoothed), averaged for the two teams; the top 3 are kept and renormalized (best-of-5: top 5, format from games.json). On Oct 20+ Bo3 matches 64% of the maps actually played were in our top 3 (a random top 3 of 7 gets 43%).
+
+Tested and dropped (no holdout gain): LAN/online KPR, per-map KPR and per-map rounds weighted by the top-3 maps (or by the whole pool; even with the real maps known it added nothing), and Elo as a kills-per-round factor.
 
 Backtest: `python scout_backtest.py build` (features, cached in /tmp), `report` (staged factor selection), `factors` (per-factor table), `final` (holdout + real locked lines), `fit` (writes `scout_params.json`; Apr 1 - Oct 19 fit window). Tests: `python tests/test_scout.py`.
