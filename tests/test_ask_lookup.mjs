@@ -248,4 +248,27 @@ test("fl1ts / FL1T x LUKOIL resolves, and LAN kills-per-map uses our data", () =
   assert.equal(s._ctx, undefined);
 });
 
-
+test("Ask Glocky answers a map prediction for a scheduled matchup", () => {
+  const slate = games.games || [];
+  const g = slate.find((x) => x.team1 && x.team2);
+  assert.ok(g, "games.json has a match");
+  const q = "what maps will " + g.team1 + " vs " + g.team2 + " play";
+  const intent = L.parseQuestion(q, store);
+  assert.equal(intent.intent, "map_pred");
+  assert.ok(intent.team);
+  assert.ok(intent.opp);
+  const ans = L.answerQuestion(q, store, intent);
+  assert.equal(ans.missing, false);
+  assert.equal(ans.facts.kind, "map_pred");
+  assert.doesNotMatch(ans.factText, /cito/i);
+  if (ans.facts.confirmed && ans.facts.confirmed.length) {
+    assert.match(ans.factText, /confirmed/i);
+  } else {
+    assert.match(ans.factText, /Glocky's map prediction/);
+    assert.match(ans.factText, /Map 1:/);
+    assert.match(ans.factText, /prediction from Glocky's veto math/);
+    assert.ok(ans.facts.pred && (ans.facts.pred.pred[1] || ans.facts.pred.pred["1"]));
+  }
+  const fb = fallbackPhrase(ans);
+  assert.doesNotMatch(fb, /cito/i);
+});

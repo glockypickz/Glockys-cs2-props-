@@ -66,7 +66,7 @@ class ScoutData:
                 out.append(r)
                 t = tn(p.get("team"))
                 if t and r["rd"]:
-                    g = team_maps.setdefault(t, {}).setdefault((mid, r["n"]), {"date": r["date"], "map": r["map"], "rd": r["rd"],
+                    g = team_maps.setdefault(t, {}).setdefault((mid, r["n"]), {"date": r["date"], "map": r["map"], "n": r["n"], "rd": r["rd"],
                                                                                 "opp": r["opp"], "ev": r["ev"], "dsum": 0.0, "np": 0,
                                                                                 "rw": r["rw"] if isinstance(r["rw"], (int, float)) else None})
                     if r["d"] is not None:

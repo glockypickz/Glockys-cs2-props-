@@ -47,12 +47,13 @@ PARAMS = {"m": 100, "half_life": 8, "n_max": 200, "m_team": 1500, "elo_k": 16, "
 #   L10 / L3: the n LAN series fill n of the 10 / 3 slots, overall fills the rest: (n * LAN + (N - n) * overall) / N.
 #   season / h2h / same tier: (n * LAN + lan_k * overall) / (n + lan_k), lan_k = 5 series. A part with no LAN series = overall.
 #   ADR nudge: LAN rows when the last-5 LAN window has >= lan_adr_min ADR values, else overall. lan_data 0 = off.
-# Per-map factor (owner, Nov 24): after the v1 mix + ADR nudge, shrink toward the player's average on the map(s)
-#   being played, all games on that map (not LAN-only), only logs dated strictly before the match day, k = map_k (5):
-#   proj = (n * map_avg + map_k * proj) / (n + map_k). If the maps are already known (completed veto / listed map
-#   names, TBA ignored), use those. Otherwise the expected map average uses scout veto full-pool weights (both teams'
-#   recent map shares). Map 1 uses one map average; Maps 1-2 is the sum of two (known maps) or 2 x the expected
-#   per-map average (veto). map_data 0 = off. Letters stay the v1e edge scale; LAN kills and bait caps unchanged.
+# Per-map factor (owner, Nov 24; map prediction Nov 24): after the v1 mix + ADR nudge, shrink toward the player's
+#   average on the map(s) being played, all games on that map (not LAN-only), only logs dated strictly before the
+#   match day, k = map_k (5): proj = (n * map_avg + map_k * proj) / (n + map_k). If the maps are already known
+#   (completed veto / listed map names, TBA ignored), use those. Otherwise the expected map average uses Glocky's
+#   simulated veto (LAN-only or online-only pick/ban history, falling back to all matches when a side is thin).
+#   Map 1 uses the Map 1 slot weights; Maps 1-2 is the sum of two known maps, or E[avg(Map 1)] + E[avg(Map 2)].
+#   map_data 0 = off. Letters stay the v1e edge scale; LAN kills and bait caps unchanged.
 # Kill-model form inputs (kills props only; series before the match only; tuned by backtest.py --tune-form):
 #   w_l5 / w_l10 / w_l20 / w_szn: the per-round kill rate moves toward the player's raw rate over his last 5 / 10 / 20
 #           series / this season: rate += w * (window rate - rate). 0 = not used.
@@ -1160,7 +1161,7 @@ class Grader:
         out["n"] = len(cs)
         return out
 
-    def v1_project_parts(self, p, st, opp, before="9999", period=None, ev=None, maps=None):
+    def v1_project_parts(self, p, st, opp, before="9999", period=None, ev=None, maps=None, bo=None, veto_mode=None):
         """v1 projection pieces (same math as v1_project) for the breakdown display.
         period="Map 1" uses Map 1 history only. The season window always keeps its 0.20 weight
         when any Map 1 (or series) data exists; head-to-head is used from a single prior meeting.
@@ -1213,7 +1214,7 @@ class Grader:
         if adr_used:
             adr_mult = max(0.95, min(1.05, 1 + 0.5 * (adr5 / adrc - 1)))
             proj *= adr_mult
-        mb = self.map_blend(p, st, opp, before, period, maps) if self.P.get("map_data") else None
+        mb = self.map_blend(p, st, opp, before, period, maps, ev=ev, bo=bo, veto_mode=veto_mode) if self.P.get("map_data") else None
         if mb and mb.get("avg") is not None and mb.get("n"):
             k = float(self.P.get("map_k") or 5.0)
             mb = dict(mb)
@@ -1315,6 +1316,70 @@ class Grader:
                 best, best_dt = maps, dt
         return best
 
+    def match_bo(self, team, opp, start=None, games=None):
+        """Best-of from games.json for this pair (within a day of start). 3 when unknown."""
+        import datetime as _dt
+        day = str(start or "")[:10]
+        if games is None:
+            if not hasattr(self, "_games"):
+                try:
+                    import json as _j
+                    self._games = _j.load(open("games.json", encoding="utf-8")).get("games") or []
+                except Exception:
+                    self._games = []
+            games = self._games
+        best, best_dt = None, None
+        try:
+            d0 = _dt.date.fromisoformat(day) if day else None
+        except Exception:
+            d0 = None
+        for g in games or []:
+            if not ((teq(g.get("team1"), team) and teq(g.get("team2"), opp)) or (teq(g.get("team2"), team) and teq(g.get("team1"), opp))):
+                continue
+            bo = g.get("bo")
+            try:
+                bo = int(bo)
+            except (TypeError, ValueError):
+                continue
+            if not bo:
+                continue
+            if not day:
+                return bo
+            try:
+                d = _dt.date.fromisoformat(str(g.get("start") or "")[:10])
+            except Exception:
+                continue
+            if d0 is None:
+                continue
+            dt = abs((d - d0).days)
+            if dt > 1:
+                continue
+            if best_dt is None or dt < best_dt:
+                best, best_dt = bo, dt
+        return best if best else 3
+
+    def predict_maps(self, team, opp, before="9999", ev=None, bo=None, confirmed=None):
+        """Glocky's map prediction for a match (setting-split veto). See map_pred.predict_match."""
+        from map_pred import predict_match
+        day = str(before or "9999")[:10] or "9999"
+        if ev not in ("lan", "online"):
+            ev, _ = self.match_ev(team, opp, before)
+        if bo is None:
+            bo = self.match_bo(team, opp, before)
+        if confirmed is None:
+            known = self.confirmed_maps(team, opp, before)
+        else:
+            known = [norm_map(x) for x in confirmed if norm_map(x)]
+        key = (tn(team), tn(opp) if opp else None, day, ev if ev in ("lan", "online") else None, int(bo or 3), tuple(known))
+        cache = getattr(self, "_map_pred_cache", None)
+        if cache is None:
+            cache = self._map_pred_cache = {}
+        if key in cache:
+            return cache[key]
+        out = predict_match(self._scout(), tn(team), tn(opp) if opp else None, day, bo=bo, ev=ev, confirmed=known)
+        cache[key] = out
+        return out
+
     def player_map_avg(self, p, st, map_name, before="9999"):
         """Mean of `st` on this map, every game dated strictly before `before` (LAN and online together)."""
         want = norm_map(map_name)
@@ -1359,18 +1424,19 @@ class Grader:
             return None, 0, 0
         return num / den, int(round(nsum / used)), used
 
-    def map_blend(self, p, st, opp, before="9999", period=None, maps=None):
-        """Target average the v1 projection shrinks toward, plus the source (known maps or veto weights)."""
+    def map_blend(self, p, st, opp, before="9999", period=None, maps=None, ev=None, bo=None, veto_mode=None):
+        """Target average the v1 projection shrinks toward, plus the source (known maps or predicted veto weights)."""
         team = p.get("team")
         known = [norm_map(x) for x in (maps or []) if norm_map(x)]
         if not known:
             known = self.confirmed_maps(team, opp, before)
         map1 = is_map1(period)
+        mode = veto_mode or "pred"
         if known:
             if map1:
                 a, n = self.player_map_avg(p, st, known[0], before)
                 return {"avg": a, "n": n, "src": "known", "maps": known[:1], "weights": {known[0]: 1.0}}
-            # Maps 1-2: sum of the first two known maps; if only one is known, add the veto expected per-map average.
+            # Maps 1-2: sum of the first two known maps; if only one is known, add the expected per-map average.
             pieces, ns = [], []
             for m in known[:2]:
                 a, n = self.player_map_avg(p, st, m, before)
@@ -1379,9 +1445,9 @@ class Grader:
                 pieces.append(a)
                 ns.append(n)
             if len(pieces) == 1:
-                ev, en, _ = self.expected_map_avg(p, st, self.veto_weights(team, opp, before), before)
-                if ev is not None:
-                    pieces.append(ev)
+                evw, en, _ = self.expected_map_avg(p, st, self._blend_weights(team, opp, before, ev, bo, mode, True), before)
+                if evw is not None:
+                    pieces.append(evw)
                     ns.append(en or ns[0])
             if len(pieces) >= 2:
                 return {"avg": pieces[0] + pieces[1], "n": min(ns[0], ns[1]), "src": "known",
@@ -1389,16 +1455,27 @@ class Grader:
             if len(pieces) == 1:
                 return {"avg": pieces[0] * 2, "n": ns[0], "src": "known", "maps": known[:1], "weights": None}
             return {"avg": None, "n": 0, "src": "known", "maps": known, "weights": None}
-        w = self.veto_weights(team, opp, before)
+        w = self._blend_weights(team, opp, before, ev, bo, mode, map1)
         per, n, used = self.expected_map_avg(p, st, w, before)
         if per is None:
             return {"avg": None, "n": 0, "src": "veto", "maps": [], "weights": w}
         avg = per if map1 else 2 * per
-        return {"avg": avg, "n": n, "src": "veto", "maps": [], "weights": w, "n_maps": used}
+        return {"avg": avg, "n": n, "src": "veto", "maps": [], "weights": w, "n_maps": used,
+                "veto_mode": mode, "ev": ev if ev in ("lan", "online") else None}
 
-    def v1_project(self, p, st, opp, before="9999", period=None, ev=None, maps=None):
+    def _blend_weights(self, team, opp, before, ev, bo, mode, map1):
+        """Weights the per-map shrink uses when the veto is not yet confirmed."""
+        if mode == "full_pool":
+            return self.veto_weights(team, opp, before)
+        pred = self.predict_maps(team, opp, before, ev=ev, bo=bo, confirmed=[])
+        if map1:
+            w = pred.get("slot_w") or {}
+            return dict(w.get(1) or {})
+        return dict(pred.get("w12") or {})
+
+    def v1_project(self, p, st, opp, before="9999", period=None, ev=None, maps=None, bo=None, veto_mode=None):
         """v1 projection (grader_legacy.Grader.grade), using only series dated strictly before `before`."""
-        d = self.v1_project_parts(p, st, opp, before, period=period, ev=ev, maps=maps)
+        d = self.v1_project_parts(p, st, opp, before, period=period, ev=ev, maps=maps, bo=bo, veto_mode=veto_mode)
         return None if d is None else d["proj"]
 
     def _v1_result(self, mu, line, st, book, odds, reasons=None, period=None, n_players=1):
@@ -1426,12 +1503,12 @@ class Grader:
                 "under_be": {"applied": False, "pu": None, "be": None, "epp": None, "pre_grade": None},
                 "grade_cap": {"applied": False, "reason": None, "pre_grade": None}}
 
-    def grade(self, p, st, line, opp, team=None, book=None, odds=None, before="9999", period=None, ev=None, maps=None):
+    def grade(self, p, st, line, opp, team=None, book=None, odds=None, before="9999", period=None, ev=None, maps=None, bo=None, veto_mode=None):
         if line is None or (isinstance(line, float) and math.isnan(line)):
             return None
         if maps is None:
             maps = self.confirmed_maps(team or p.get("team"), opp, before)
-        det = self.v1_project_parts(p, st, opp, before, period=period, ev=ev, maps=maps)
+        det = self.v1_project_parts(p, st, opp, before, period=period, ev=ev, maps=maps, bo=bo, veto_mode=veto_mode)
         if det is None:
             return None
         n = len([c for c in self.series(p, period) if c["date"] < before])
