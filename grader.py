@@ -92,6 +92,33 @@ ALIASES = {"4Z": "EP.-4Z", "Ag1l": "agl"}
 # Book / bo3.gg team-name variants (keys and values are tn() keys). Same table in model.js.
 TEAM_ALIASES = {"betm33": "33", "wraithpcific": "pcific", "lowcortisolbr": "lowcortisol", "lifesagame": "lag"}
 
+PERIOD_12 = "Maps 1-2"
+PERIOD_MAP1 = "Map 1"
+
+
+def period_of(val, default=PERIOD_12):
+    """Canonical period label. A missing period (all historical lines) is Maps 1-2.
+    'maps1-2' is never treated as Map 1."""
+    if isinstance(val, dict):
+        val = val.get("period")
+    raw = default if val is None or val == "" else val
+    compact = "".join(str(raw).lower().replace("_", " ").split())
+    if "1-2" in compact or "maps12" in compact:
+        return PERIOD_12
+    if compact == "map1" or (compact.startswith("map1") and not compact.startswith("maps")):
+        return PERIOD_MAP1
+    return default
+
+
+def is_map1(val):
+    return period_of(val) == PERIOD_MAP1
+
+
+def hist_key(e, start=None):
+    """History identity: book / player / stat / start / period. Period defaults to Maps 1-2."""
+    return (e["book"], e["player"], e["stat"], start if start is not None else e.get("start") or e.get("starts_at") or "",
+            period_of(e))
+
 
 def norm(s):
     return re.sub(r"[^a-z0-9]", "", str(s or "").lower())
@@ -492,8 +519,26 @@ class Grader:
         self._memo[mk] = r
         return r
 
-    # ---- one row per series where both Map 1 and Map 2 were logged, newest first (same as app.js combos)
-    def combos(self, p, logs=None):
+    # ---- one row per series (Maps 1-2, both maps logged) or one row per Map 1 (period="Map 1"), newest first
+    def combos(self, p, logs=None, period=None):
+        if is_map1(period):
+            by = {}
+            for l in (p.get("logs") if logs is None else logs) or []:
+                if l.get("n") != 1 or l.get("mid") is None:
+                    continue
+                mid = l["mid"]
+                if mid in by:
+                    continue
+                by[mid] = {"mid": str(mid), "date": l.get("date") or "", "opp": l.get("opp"),
+                           "maps": l.get("map") or "Map 1",
+                           "kills": None if l.get("kills") is None else float(l.get("kills") or 0),
+                           "hs": None if l.get("hs") is None else float(l.get("hs") or 0),
+                           "rd": None if l.get("rd") is None or l["rd"] < 13 else float(l["rd"]),
+                           "deaths": None if l.get("d") is None else float(l["d"]),
+                           "adr": None if l.get("adr") is None else float(l["adr"])}
+            out = list(by.values())
+            out.sort(key=lambda c: (c["date"], str(c["mid"])), reverse=True)
+            return out
         by = {}
         for l in (p.get("logs") if logs is None else logs) or []:
             if l.get("n") in (1, 2) and l.get("mid") is not None:
@@ -539,10 +584,11 @@ class Grader:
             if r.get("name") and r.get("log"):
                 self._xh.setdefault(canon(r["name"]), []).append((r.get("team"), r["log"]))
 
-    def xh_rows(self, p, before="9999"):
+    def xh_rows(self, p, before="9999", period=None):
         """Series rows (same shape as combos) from h2h.json for this player. A map already in his own logs, or saved twice
         (Cito and bo3.gg give the same meeting different ids), is counted once: same opponent, map number and date +/- 1 day."""
-        k = id(p)
+        per = period_of(period)
+        k = (id(p), per)
         if k not in self._xh_rows:
             import datetime as _dt
 
@@ -564,24 +610,26 @@ class Grader:
                     continue
                 logs.append(l)
                 seen.append((day(l.get("date")), l.get("n"), l.get("opp")))
-            self._xh_rows[k] = self.combos(p, logs) if logs else []
+            self._xh_rows[k] = self.combos(p, logs, period=per) if logs else []
         return [c for c in self._xh_rows[k] if c["date"] < before]
 
-    def h2h_series(self, p, opp, before="9999", exact=False, extra=True):
-        """Head-to-head series vs `opp`, newest first: the player's own logs plus h2h.json meetings."""
+    def h2h_series(self, p, opp, before="9999", exact=False, extra=True, period=None):
+        """Head-to-head series vs `opp`, newest first: the player's own logs plus h2h.json meetings.
+        One prior meeting is enough. period="Map 1" uses Map 1 stats only."""
         if not opp:
             return []
         same = (lambda c: norm(c["opp"]) == norm(opp)) if exact else (lambda c: teq(c["opp"], opp))
-        rows = [c for c in self.series(p) if c["date"] < before and same(c)]
+        rows = [c for c in self.series(p, period) if c["date"] < before and same(c)]
         if extra:
-            rows += [c for c in self.xh_rows(p, before) if same(c)]
+            rows += [c for c in self.xh_rows(p, before, period) if same(c)]
         rows.sort(key=lambda c: (c["date"], str(c["mid"])), reverse=True)
         return rows
 
-    def series(self, p):
-        k = id(p)
+    def series(self, p, period=None):
+        per = period_of(period)
+        k = (id(p), per)
         if k not in self._series:
-            self._series[k] = self.combos(p)
+            self._series[k] = self.combos(p, period=per)
         return self._series[k]
 
     # ---- Elo per map from every logged map result, plus team pooled rates (both as dated histories)
@@ -807,17 +855,17 @@ class Grader:
         out["kd_s"] = (K + self.P["k_kd"]) / (D + self.P["k_kd"]) if sz else None
         return out
 
-    def hitrates(self, p, st, line, opp=None, before="9999"):
-        """Series that went OVER this exact line (equal = not over), Maps 1-2, only series dated before `before`.
+    def hitrates(self, p, st, line, opp=None, before="9999", period=None):
+        """Series that went OVER this exact line (equal = not over), only series dated before `before`.
         l5 / l10 / l15 / l20 = last 5 / 10 / 15 / 20 (l5-l15: Players-tab research only, not graded); szn = this calendar year (the match's year, else the newest series' year);
         h2h = vs this opponent. Each is [over, series]. p = decayed, shrunk hit rate used when w_hr > 0."""
         P = self.P
-        cs = [c for c in self.series(p) if c["date"] < before and c.get(st) is not None]
+        cs = [c for c in self.series(p, period) if c["date"] < before and c.get(st) is not None]
         yr = str(before)[:4] if before != "9999" else (cs[0]["date"][:4] if cs else "")
         hx = lambda rows: [sum(1 for c in rows if c[st] > line), len(rows)]
         out = {"l5": hx(cs[:5]), "l10": hx(cs[:10]), "l15": hx(cs[:15]), "l20": hx(cs[:20]),
                "szn": hx([c for c in cs if c["date"][:4] == yr]),
-               "h2h": hx([c for c in self.h2h_series(p, opp, before) if c.get(st) is not None])}
+               "h2h": hx([c for c in self.h2h_series(p, opp, before, period=period) if c.get(st) is not None])}
         sw = sh = 0.0
         for i, c in enumerate(cs[:P["n_max"]]):
             if c[st] == line:
@@ -828,20 +876,21 @@ class Grader:
         out["p"] = (sh + P["k_hr"] * 0.5) / (sw + P["k_hr"])
         return out
 
-    def bait(self, p, st, line, before="9999"):
-        """True if the last 5 Maps 1-2 series before `before` all met or beat this line (actual >= line). Needs 5 series."""
-        cs = [c for c in self.series(p) if c["date"] < before and c.get(st) is not None][:5]
+    def bait(self, p, st, line, before="9999", period=None):
+        """True if the last 5 series (or Map 1 maps) before `before` all met or beat this line (actual >= line). Needs 5."""
+        cs = [c for c in self.series(p, period) if c["date"] < before and c.get(st) is not None][:5]
         return len(cs) == 5 and all(c[st] >= line for c in cs)
 
-    def filters(self, p, team, n, before="9999"):
+    def filters(self, p, team, n, before="9999", period=None):
         P = self.P
         out = []
         if team and not teq(p.get("team"), team):
             out.append("player is not on " + str(team) + " in the data")
         if n < P["min_series"]:
-            out.append("only %d earlier Map 1+2 series (need %d)" % (n, P["min_series"]))
+            unit = "earlier Map 1 maps" if is_map1(period) else "earlier Map 1+2 series"
+            out.append("only %d %s (need %d)" % (n, unit, P["min_series"]))
         last = self.team_last_mids(p.get("team"), before)
-        mine = {c["mid"] for c in self.series(p) if c["date"] < before}
+        mine = {c["mid"] for c in self.series(p, period) if c["date"] < before}
         if len(last) >= 3 and sum(1 for m in last if m in mine) < 2:
             out.append("missed 2+ of the team's last 3 series (stand-in or roster change)")
         return out
@@ -891,9 +940,11 @@ class Grader:
     def tier(r):
         return "t5" if r <= 5 else "t15" if r <= 15 else "t30" if r <= 30 else "t31"
 
-    def v1_project_parts(self, p, st, opp, before="9999"):
-        """v1 projection pieces (same math as v1_project) for the breakdown display."""
-        cs = [c for c in self.series(p) if c["date"] < before]
+    def v1_project_parts(self, p, st, opp, before="9999", period=None):
+        """v1 projection pieces (same math as v1_project) for the breakdown display.
+        period="Map 1" uses Map 1 history only. The season window always keeps its 0.20 weight
+        when any Map 1 (or series) data exists; head-to-head is used from a single prior meeting."""
+        cs = [c for c in self.series(p, period) if c["date"] < before]
         nums = lambda rows: [c[st] for c in rows if c.get(st) is not None]
         v = nums(cs)
         if not v:
@@ -901,19 +952,20 @@ class Grader:
         opp_rank = self.rank_of(opp) if opp else None
         on = norm(opp)
         l10r, l3r = cs[:10], cs[:3]
-        h = self.h2h_series(p, opp, before, exact=True, extra=H2H_EXTRA_LIVE) if opp else []
+        h = self.h2h_series(p, opp, before, exact=True, extra=H2H_EXTRA_LIVE, period=period) if opp else []
         same = []
         if opp_rank is not None:
             for c in cs:
                 rnk = self.rank_of(c["opp"])
                 if rnk is not None and self.tier(rnk) == self.tier(opp_rank):
                     same.append(c)
+        unit = "Map 1 maps" if is_map1(period) else "series"
         parts = [
-            {"key": "l10", "label": "Last 10 series", "w": 0.35, "v": mean(nums(l10r)), "n": len(nums(l10r))},
-            {"key": "szn", "label": "Season (all series)", "w": 0.20, "v": mean(v), "n": len(v)},
+            {"key": "l10", "label": "Last 10 " + unit, "w": 0.35, "v": mean(nums(l10r)), "n": len(nums(l10r))},
+            {"key": "szn", "label": "Season (all " + unit + ")", "w": 0.20, "v": mean(v), "n": len(v)},
             {"key": "h2h", "label": "Head-to-head" + ((" vs " + opp) if opp else ""), "w": 0.20, "v": mean(nums(h)), "n": len(nums(h))},
             {"key": "tier", "label": "Same rank tier" + ((" as " + opp) if opp else ""), "w": 0.15, "v": mean(nums(same)), "n": len(nums(same))},
-            {"key": "l3", "label": "Last 3 series", "w": 0.10, "v": mean(nums(l3r)), "n": len(nums(l3r))},
+            {"key": "l3", "label": "Last 3 " + unit, "w": 0.10, "v": mean(nums(l3r)), "n": len(nums(l3r))},
         ]
         use = [x for x in parts if x["v"] is not None]
         tw = sum(x["w"] for x in use)
@@ -933,9 +985,9 @@ class Grader:
         return {"proj": proj, "pre": pre, "parts": parts, "adr5": adr5, "adrc": adrc,
                 "adr_mult": adr_mult, "adr_used": adr_used, "adr_n5": adr_n5, "adr_n": adr_n, "weight_sum": tw}
 
-    def v1_project(self, p, st, opp, before="9999"):
+    def v1_project(self, p, st, opp, before="9999", period=None):
         """v1 projection (grader_legacy.Grader.grade), using only series dated strictly before `before`."""
-        d = self.v1_project_parts(p, st, opp, before)
+        d = self.v1_project_parts(p, st, opp, before, period=period)
         return None if d is None else d["proj"]
 
     def _v1_result(self, mu, line, st, book, odds, reasons=None):
@@ -966,24 +1018,25 @@ class Grader:
                 "hr_blend": None, "hr_upgrade": None, "model_grade": g, "model_pick": pick,
                 "under_be": {"applied": epp_u is not None, "pu": pu_u, "be": be_u, "epp": epp_u, "pre_grade": pre_grade}}
 
-    def grade(self, p, st, line, opp, team=None, book=None, odds=None, before="9999"):
+    def grade(self, p, st, line, opp, team=None, book=None, odds=None, before="9999", period=None):
         if line is None or (isinstance(line, float) and math.isnan(line)):
             return None
-        det = self.v1_project_parts(p, st, opp, before)
+        det = self.v1_project_parts(p, st, opp, before, period=period)
         if det is None:
             return None
-        n = len([c for c in self.series(p) if c["date"] < before])
-        reasons = self.filters(p, team, n, before)
+        n = len([c for c in self.series(p, period) if c["date"] < before])
+        reasons = self.filters(p, team, n, before, period=period)
         r = self._v1_result(det["proj"], float(line), st, book, odds, reasons)
         if not r:
             return None
         r["v1"] = det
-        hits = self.hitrates(p, st, float(line), opp, before)
+        r["period"] = period_of(period)
+        hits = self.hitrates(p, st, float(line), opp, before, period=period)
         r["hits"] = {k: hits[k] for k in ("l5", "l10", "l15", "l20", "szn", "h2h")}
         r["p_hr"] = round(hits["p"], 4)
         empty_kpm = {k: None for k in ("l5", "l10", "l15", "l20", "szn")}
         empty_hsp = {k: None for k in ("l5", "l10", "l15", "l20", "szn")}
-        cs = [c for c in self.series(p) if c["date"] < before]
+        cs = [c for c in self.series(p, period) if c["date"] < before]
         rows = [c for c in cs if c.get("rd") and c.get(st) is not None][: self.P["n_max"]]
         r.update({"h2h_n": 0, "h2h_rate": None, "n": n, "rounds": None, "pwin": None, "rate": None,
                   "p_rank": None, "rounds_maps": None})
@@ -995,10 +1048,10 @@ class Grader:
                       "hsp": {("szn" if k == "szn" else "l" + k): (None if v is None else round(v, 4)) for k, v in hsf["raw"].items()}})
         else:
             r.update({"kd": None, "kpm": empty_kpm, "hsp": empty_hsp})
-        r["bait"] = self.bait(p, st, float(line), before)
+        r["bait"] = self.bait(p, st, float(line), before, period=period)
         return r
 
-    def grade_combo(self, name, team, st, line, opp, book=None, odds=None, before="9999"):
+    def grade_combo(self, name, team, st, line, opp, book=None, odds=None, before="9999", period=None):
         """Combo prop: sum of each player's v1 projection vs the combined line, then the same letters / Under rule."""
         names = [n.strip() for n in str(name).split("+") if n.strip()]
         if len(names) < 2:
@@ -1008,16 +1061,17 @@ class Grader:
             p = self.find(n, team)
             if not p:
                 return None
-            pj = self.v1_project(p, st, opp, before)
+            pj = self.v1_project(p, st, opp, before, period=period)
             if pj is None:
                 return None
             mu += pj
-            nser = len([c for c in self.series(p) if c["date"] < before])
+            nser = len([c for c in self.series(p, period) if c["date"] < before])
             nmin = min(nmin, nser)
-            reasons += [n + ": " + x for x in self.filters(p, team, nser, before)]
+            reasons += [n + ": " + x for x in self.filters(p, team, nser, before, period=period)]
         r = self._v1_result(mu, float(line), st, book, odds, reasons)
         if not r:
             return None
         r["n"] = nmin
+        r["period"] = period_of(period)
         r["bait"] = False
         return r

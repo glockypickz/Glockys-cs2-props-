@@ -77,6 +77,10 @@ def main():
     show("prizepicks Maps 1-2 headshots", {"board": "dfs", "book": "prizepicks", "market": "CS2_HEADSHOTS_MAPS_1_2", "limit": 3}, samples=1)
     show("underdog Maps 1-2 kills", {"board": "dfs", "book": "underdog", "market": "CS2_KILLS_MAPS_1_2", "limit": 3}, samples=1)
     show("prizepicks everything (market names)", {"board": "dfs", "book": "prizepicks", "limit": 100}, samples=0)
+    show("underdog everything (market names)", {"board": "dfs", "book": "underdog", "limit": 100}, samples=0)
+    show("prizepicks Map 1 kills", {"board": "dfs", "book": "prizepicks", "market": "CS2_KILLS_MAP_1", "limit": 5})
+    show("prizepicks Map 1 headshots", {"board": "dfs", "book": "prizepicks", "market": "CS2_HEADSHOTS_MAP_1", "limit": 3}, samples=1)
+    show("underdog Map 1 kills", {"board": "dfs", "book": "underdog", "market": "CS2_KILLS_MAP_1", "limit": 3}, samples=1)
     show("prizepicks, slim off", {"board": "dfs", "book": "prizepicks", "market": "CS2_KILLS_MAPS_1_2", "limit": 2, "slim": "false"}, samples=1)
 
 

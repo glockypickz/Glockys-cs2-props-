@@ -1,4 +1,7 @@
-"""Settles saved lines (lines_history.json) against real Map 1+2 results in players.json.
+"""Settles saved lines (lines_history.json) against real results in players.json.
+
+Maps 1-2 props (the default, including history entries with no period) use Map 1+2 totals.
+Map 1 props (period="Map 1") settle against Map 1 stats only; Map 2 is not required.
 
 Result saved on the entry as e["result"]:
   act        real Maps 1-2 total (combo props: the players added up)
@@ -10,7 +13,7 @@ Backup: when players.json (bo3.gg) has no result, saved Cito per-map stats (cito
 the daily cito_update.py) are tried before voiding. This reads a file only; settling never calls the Cito API.
 Such results carry "src": "cito"."""
 import datetime, json, os
-from grader import teq, norm, canon
+from grader import teq, norm, canon, period_of, is_map1
 
 CITO_INDEX = os.environ.get("CITO_RESULTS_INDEX", os.path.join("cito_cache", "_results_index.json"))
 _CITO = None
@@ -28,11 +31,13 @@ def _cito_matches():
 
 
 def cito_result(e):
-    """(stat, actual, mid, date) from saved Cito data, or None. Both Map 1 and Map 2 must be played (no forfeit);
-    players are matched by name on the line's team only."""
+    """(stat, actual, mid, date) from saved Cito data, or None.
+    Maps 1-2: both Map 1 and Map 2 must be played (no forfeit).
+    Map 1: only Map 1 must be completed (no forfeit). Players matched by name on the line's team only."""
     st = "hs" if "head" in e["stat"].lower() else "kills" if "kill" in e["stat"].lower() else None
     if not st or not e.get("team") or not e.get("opponent"):
         return None
+    need = (1,) if is_map1(e) else (1, 2)
     day = datetime.date.fromisoformat(e["start"][:10])
     for m in _cito_matches():
         try:
@@ -43,12 +48,12 @@ def cito_result(e):
                           (teq(m.get("t2"), e["team"]) and teq(m.get("t1"), e["opponent"]))):
             continue
         maps = {g.get("n"): g for g in m.get("maps") or []}
-        if any(n not in maps or maps[n].get("status") != "completed" or maps[n].get("forfeit") for n in (1, 2)):
+        if any(n not in maps or maps[n].get("status") != "completed" or maps[n].get("forfeit") for n in need):
             return None
         tot = 0.0
         for name in [x.strip() for x in str(e["player"]).split("+") if x.strip()]:
             got = None
-            for n in (1, 2):
+            for n in need:
                 rows = [p for p in maps[n].get("players") or [] if teq(p[1], e["team"]) and
                         (norm(p[0]) == norm(name) or canon(p[0]) == canon(name))]
                 v = rows[0][2 if st == "kills" else 3] if len(rows) == 1 else None
@@ -82,7 +87,8 @@ def find_result(gr, e):
         if not p:
             return None, "player not in data"
         best = None
-        for c in gr.series(p):
+        per = period_of(e)
+        for c in gr.series(p, per):
             if not c["date"] or not teq(c["opp"], e.get("opponent")):
                 continue
             dd = abs((datetime.date.fromisoformat(c["date"]) - day).days)
@@ -91,6 +97,8 @@ def find_result(gr, e):
         if not best or best[0][st] is None:
             one_map = any(teq(l.get("opp"), e.get("opponent")) and l.get("n") == 1 and l.get("date") and
                           abs((datetime.date.fromisoformat(l["date"]) - day).days) <= 1 for l in p.get("logs") or [])
+            if is_map1(e):
+                return None, "no Map 1 stats for this match"
             return None, ("only one map played (Bo1 or forfeit)" if one_map else "no stats for this match")
         tot += best[0][st]
         mid, date = best[0]["mid"], best[0]["date"]
