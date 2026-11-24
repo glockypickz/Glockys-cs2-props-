@@ -4,7 +4,14 @@
 import { identify, gateState } from "./beta_auth.js";
 import { parseQuestion, mergeParsedIntent, answerQuestion, makeStore } from "./ask_lookup.js";
 
-const DEFAULT_MODEL = "gemini-2.5-flash";
+const DEFAULT_MODEL = "gemini-3.8-flash";
+const FALLBACK_MODELS = ["gemini-3.8-flash", "gemini-3.5-flash-lite"];
+// These names 404 for new API keys ("no longer available to new users").
+const RETIRED_MODELS = new Set([
+  "gemini-2.5-flash", "gemini-2.5-pro", "gemini-2.5-flash-lite",
+  "gemini-2.0-flash", "gemini-2.0-flash-lite",
+  "gemini-1.5-flash", "gemini-1.5-pro", "gemini-1.5-flash-8b"
+]);
 const USER_DAILY = 20;
 const COOLDOWN_MS = 2000;
 const Q_MAX = 400;
@@ -32,7 +39,8 @@ export function hasGeminiKey(env) {
 
 export function geminiModel(env) {
   const m = env && env.GEMINI_MODEL ? String(env.GEMINI_MODEL).trim() : "";
-  return m || DEFAULT_MODEL;
+  if (!m || RETIRED_MODELS.has(m.toLowerCase())) return DEFAULT_MODEL;
+  return m;
 }
 
 function clientIp(request) {
@@ -164,13 +172,17 @@ function extractText(data) {
   }
 }
 
-// 2.5 Flash accepts thinkingBudget 0 (thinking off). Gemini 3.x, and the
-// Dec 2026 reroute of 2.5-flash to 3.5-flash-lite, reject thinkingBudget 0
-// with HTTP 400. Prefer a low thinking level on 3.x; omit on unknown models.
+// 2.5 Flash accepts thinkingBudget 0 (thinking off). Gemini 3.x rejects
+// thinkingBudget 0. 3.8 Flash also rejects thinkingLevel "minimal" (only
+// low / medium / high). Use the lowest valid thinking setting; omit on
+// unknown models.
 export function thinkingConfigFor(model, budget) {
   const m = String(model || "").toLowerCase();
   if (m.includes("gemini-2.5")) {
     return { thinkingBudget: budget != null ? budget : 0 };
+  }
+  if (m.includes("gemini-3.8")) {
+    return { thinkingLevel: "low" };
   }
   if (m.includes("gemini-3")) {
     return { thinkingLevel: "minimal" };
@@ -229,20 +241,43 @@ export function formatGeminiDetail(g) {
   if (g.thoughts != null && g.thoughts !== "") bits.push("thoughtTokens=" + g.thoughts);
   if (g.imageBytes != null) bits.push("image=" + g.imageBytes + "B");
   if (g.mime) bits.push("mime=" + g.mime);
+  if (g.model) bits.push("model=" + g.model);
   if (g.retried) bits.push("retried without thinking/json-mime");
+  if (g.fallback) bits.push("fell back from " + g.fallback);
   if (g.firstError) bits.push("first=" + g.firstError);
   return sanitizeDetail(bits.join(", ") || "unknown Gemini failure");
+}
+
+function geminiGenerateUrl(modelName) {
+  return "https://generativelanguage.googleapis.com/v1beta/models/" + encodeURIComponent(modelName) + ":generateContent";
+}
+
+function fallbackModels(primary) {
+  const seen = new Set([String(primary || "")]);
+  const out = [];
+  for (let i = 0; i < FALLBACK_MODELS.length; i++) {
+    const m = FALLBACK_MODELS[i];
+    if (!seen.has(m)) {
+      out.push(m);
+      seen.add(m);
+    }
+  }
+  return out;
+}
+
+function isNotFound(result) {
+  if (!result || result.ok) return false;
+  if (result.status === 404) return true;
+  return /NOT_FOUND/i.test(String(result.error || ""));
 }
 
 export async function geminiRequest(env, opts) {
   opts = opts || {};
   const key = String(env.GEMINI_API_KEY || "").trim();
-  const modelName = geminiModel(env);
-  const url = "https://generativelanguage.googleapis.com/v1beta/models/" + encodeURIComponent(modelName) + ":generateContent";
   const parts = opts.parts || [{ text: opts.user || "" }];
   const timeoutMs = opts.timeoutMs || 15000;
 
-  function buildBody(relaxed) {
+  function buildBody(modelName, relaxed) {
     const gen = {
       temperature: opts.temperature != null ? opts.temperature : 0.2,
       maxOutputTokens: opts.maxOutputTokens || 512
@@ -261,7 +296,8 @@ export async function geminiRequest(env, opts) {
     return body;
   }
 
-  async function once(body) {
+  async function once(modelName, body) {
+    const url = geminiGenerateUrl(modelName);
     const ctrl = typeof AbortController !== "undefined" ? new AbortController() : null;
     const t = ctrl ? setTimeout(function () { ctrl.abort(); }, timeoutMs) : null;
     try {
@@ -274,30 +310,48 @@ export async function geminiRequest(env, opts) {
       let data = null;
       try { data = await r.json(); }
       catch (e) {
-        return { ok: false, status: r.status, error: r.ok ? "could not parse Gemini response" : ("HTTP " + r.status), text: "" };
+        return { ok: false, status: r.status, error: r.ok ? "could not parse Gemini response" : ("HTTP " + r.status), text: "", model: modelName };
       }
       const meta = geminiMeta(data);
       if (!r.ok) {
-        return { ok: false, status: r.status, error: geminiErrorMessage(data) || ("HTTP " + r.status), text: "", finishReason: meta.finishReason, blockReason: meta.blockReason, thoughts: meta.thoughts };
+        return { ok: false, status: r.status, error: geminiErrorMessage(data) || ("HTTP " + r.status), text: "", finishReason: meta.finishReason, blockReason: meta.blockReason, thoughts: meta.thoughts, model: modelName };
       }
       const text = extractText(data);
-      return { ok: !!text, status: r.status, text, error: text ? "" : "empty text", finishReason: meta.finishReason, blockReason: meta.blockReason, thoughts: meta.thoughts };
+      return { ok: !!text, status: r.status, text, error: text ? "" : "empty text", finishReason: meta.finishReason, blockReason: meta.blockReason, thoughts: meta.thoughts, model: modelName };
     } catch (e) {
       const aborted = !!(e && (e.name === "AbortError" || String(e && e.message || e).includes("AbortError")));
-      return { ok: false, status: 0, aborted: aborted, error: aborted ? ("timeout after " + timeoutMs + "ms") : "network error", text: "" };
+      return { ok: false, status: 0, aborted: aborted, error: aborted ? ("timeout after " + timeoutMs + "ms") : "network error", text: "", model: modelName };
     } finally {
       if (t) clearTimeout(t);
     }
   }
 
-  let result = await once(buildBody(false));
-  // If thinkingBudget / responseMimeType is rejected (or already rerouted to a
-  // 3.x model that does not allow thinkingBudget 0), try once in a plain config.
-  if (!result.ok && result.status === 400) {
-    const retry = await once(buildBody(true));
-    retry.retried = true;
-    retry.firstError = result.error || ("HTTP " + result.status);
-    result = retry;
+  async function callModel(modelName) {
+    let result = await once(modelName, buildBody(modelName, false));
+    // If thinking / responseMimeType is rejected for this model, try once plain.
+    if (!result.ok && result.status === 400) {
+      const retry = await once(modelName, buildBody(modelName, true));
+      retry.retried = true;
+      retry.firstError = result.error || ("HTTP " + result.status);
+      result = retry;
+    }
+    return result;
+  }
+
+  let modelName = geminiModel(env);
+  let result = await callModel(modelName);
+  // Retired or unknown model IDs 404 with NOT_FOUND. Retry current Flash models.
+  if (!result.ok && isNotFound(result)) {
+    const alts = fallbackModels(modelName);
+    const firstError = result.error || ("HTTP " + result.status);
+    const from = modelName;
+    for (let i = 0; i < alts.length; i++) {
+      const retry = await callModel(alts[i]);
+      retry.fallback = from;
+      retry.firstError = firstError;
+      result = retry;
+      if (result.ok || !isNotFound(result)) break;
+    }
   }
   return result;
 }
@@ -416,4 +470,4 @@ export async function handleAsk(request, env, url, keyHash) {
 }
 
 // test helpers (no secrets)
-export const _test = { hasGeminiKey, geminiModel, DEFAULT_MODEL, USER_DAILY, SETUP_MSG, stripGlockySays, extractText, scrubProviders, PROVIDER_RE, thinkingConfigFor, sanitizeDetail, formatGeminiDetail };
+export const _test = { hasGeminiKey, geminiModel, DEFAULT_MODEL, FALLBACK_MODELS, RETIRED_MODELS, USER_DAILY, SETUP_MSG, stripGlockySays, extractText, scrubProviders, PROVIDER_RE, thinkingConfigFor, sanitizeDetail, formatGeminiDetail };

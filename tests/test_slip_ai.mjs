@@ -147,8 +147,10 @@ test("vision request uses the header for the secret and only extracts, then our 
     }
     const body = JSON.parse(seen[0].body);
     assert.ok(body.contents[0].parts.some((p) => p.inlineData && p.inlineData.mimeType === "image/png"));
-    assert.equal(body.generationConfig.thinkingConfig.thinkingBudget, 0);
+    assert.equal(body.generationConfig.thinkingConfig.thinkingLevel, "low");
+    assert.equal(body.generationConfig.thinkingConfig.thinkingBudget, undefined);
     assert.equal(body.generationConfig.responseMimeType, "application/json");
+    assert.match(seen[0].url, /models\/gemini-3\.8-flash:generateContent/);
     assert.ok(body.generationConfig.maxOutputTokens >= 2048);
   } finally {
     globalThis.fetch = orig;
@@ -370,11 +372,45 @@ test("a 400 from thinking or json-mime is retried once without those options", a
     assert.equal(r.status, 200);
     assert.equal(j.picks.length, 1);
     assert.equal(seen.length, 2);
-    assert.equal(seen[0].generationConfig.thinkingConfig.thinkingBudget, 0);
+    assert.equal(seen[0].generationConfig.thinkingConfig.thinkingLevel, "low");
+    assert.equal(seen[0].generationConfig.thinkingConfig.thinkingBudget, undefined);
     assert.equal(seen[0].generationConfig.responseMimeType, "application/json");
     assert.equal(seen[1].generationConfig.thinkingConfig, undefined);
     assert.equal(seen[1].generationConfig.responseMimeType, undefined);
     assert.ok((seen[0].safetySettings || []).length >= 1);
+  } finally {
+    globalThis.fetch = orig;
+  }
+});
+
+test("404 NOT_FOUND on a retired model id is retried on gemini-3.8-flash", async () => {
+  const env = mkEnv({ GEMINI_API_KEY: "not-a-real-key", GEMINI_MODEL: "models-not-real" });
+  const orig = globalThis.fetch;
+  const seen = [];
+  globalThis.fetch = async (url, opts) => {
+    seen.push({ url: String(url), body: JSON.parse(opts.body) });
+    if (String(url).includes("models-not-real")) {
+      return new Response(JSON.stringify({
+        error: { code: 404, message: "This model models/models-not-real is no longer available to new users. Please update your code to use models/gemini-3.8-flash.", status: "NOT_FOUND" }
+      }), { status: 404, headers: { "content-type": "application/json" } });
+    }
+    return new Response(JSON.stringify({
+      candidates: [{ content: { parts: [{ text: JSON.stringify({
+        readable: true, cs2: true, book: "PrizePicks", picks: [
+          { player: "EliGE", stat: "kills", line: 35.5, period: "Maps 1-2", side: "over" }
+        ]
+      }) }] } }]
+    }), { status: 200, headers: { "content-type": "application/json" } });
+  };
+  try {
+    const r = await handleSlip(req("/ai/slip/read", { body: { image: pngB64(), mime: "image/png" }, adminKey: KEY }), env, new URL(ORIGIN + "/ai/slip/read"), KEY_HASH);
+    const j = await r.json();
+    assert.equal(r.status, 200);
+    assert.equal(j.picks.length, 1);
+    assert.ok(seen[0].url.includes("models-not-real"));
+    assert.match(seen[1].url, /models\/gemini-3\.8-flash:generateContent/);
+    assert.equal(seen[1].body.generationConfig.thinkingConfig.thinkingLevel, "low");
+    assert.ok(seen.every((s) => !s.url.includes("not-a-real-key")));
   } finally {
     globalThis.fetch = orig;
   }
