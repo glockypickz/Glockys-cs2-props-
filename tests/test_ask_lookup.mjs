@@ -1,4 +1,4 @@
-// Ask Glocky lookup tests: numbers come from our data / v1be grader, not from a model.
+// Ask Glocky lookup tests: numbers come from our data / v1e grader, not from a model.
 import test from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
@@ -77,7 +77,7 @@ test("parses EliGE HS% on LAN and a kills over/under question", () => {
   assert.equal(c.intent, "grade");
 });
 
-test("over/under grade matches GPModel.grade (v1be) for EliGE 35.5 kills Maps 1-2", () => {
+test("over/under grade matches GPModel.grade (v1e) for EliGE 35.5 kills Maps 1-2", () => {
   const p = L.findPlayer(store, "EliGE", "");
   const direct = globalThis.GPModel.grade(store.ctx, p, "kills", 35.5, "", { team: p.team, period: "Maps 1-2" });
   assert.ok(direct);
@@ -92,8 +92,8 @@ test("over/under grade matches GPModel.grade (v1be) for EliGE 35.5 kills Maps 1-
   assert.equal(ans.grade.grade, direct.grade);
   assert.equal(ans.grade.proj, +direct.proj.toFixed(1));
   assert.equal(ans.grade.bait, !!direct.bait);
-  assert.equal(ans.grade.model, "v1be");
-  assert.match(ans.factText, /v1be/);
+  assert.equal(ans.grade.model, "v1e");
+  assert.match(ans.factText, /v1e/);
   assert.match(ans.factText, new RegExp("Letter grade: " + direct.grade));
   assert.match(ans.factText, new RegExp("Pick: " + direct.pick));
 });

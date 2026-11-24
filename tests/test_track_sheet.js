@@ -121,6 +121,23 @@ check("empty does not include a 0-0 record block as the headline", emptyHtml.ind
 console.log("current Track Record is a separate card");
 check("module does not export recordCard", S.recordCard == null && S.recordData == null);
 
+console.log("edge letters v1e split");
+check("EDGE_MODEL is v1e", S.EDGE_MODEL === "v1e");
+check("EDGE_LIVE_AT is 3:00 AM CT (09:00 UTC)", S.EDGE_LIVE_AT === "2026-11-24T09:00:00+00:00");
+var v1be = entry({ player: "OldLetter", lock: { model: "v1be", grade: "B", at: "2026-11-24T09:10:00+00:00" }, result: { act: 34, outcome: "hit" } });
+var v1eHit = entry({ player: "EdgeHit", lock: { model: "v1e", grade: "A", at: "2026-11-24T09:20:00+00:00", proj: 33 }, result: { act: 36, outcome: "hit" } });
+var v1eEarly = entry({ player: "TooEarly", lock: { model: "v1e", grade: "B+", at: "2026-11-24T08:50:00+00:00" }, result: { act: 34, outcome: "hit" } });
+check("v1be after EDGE_LIVE_AT is not an edge lock", !S.isEdgeLock(v1be) && S.isPostUpdateLock(v1be));
+check("v1e after EDGE_LIVE_AT is an edge lock", S.isEdgeLock(v1eHit));
+check("v1e before EDGE_LIVE_AT is not an edge lock", !S.isEdgeLock(v1eEarly));
+var mixedE = S.fromEntries([v1be, v1eHit, v1eEarly, entry()], NOW);
+var spE = S.splits(mixedE.live);
+check("edge split only counts v1e after cutoff", spE.edge.length === 1 && spE.edge[0].player === "EdgeHit" && spE.edge[0].model === "v1e");
+check("prior split keeps earlier post-update models", spE.prior.some(function (r) { return r.model === "v1be"; }));
+var edgeHtml = S.html(mixedE);
+check("sheet has Edge letters heading", edgeHtml.indexOf("Edge letters (v1e) since Nov 24, 2026, 3:00 AM CT") > -1);
+check("sheet shows the v1e record", edgeHtml.indexOf("By model version") > -1);
+
 if (failed) {
   console.log("\n" + failed + " failed");
   process.exit(1);

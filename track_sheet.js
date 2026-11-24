@@ -4,9 +4,9 @@
  *
  *  Inclusion rule: a prop counts only when it has a locked grade AND lock.at is
  *  on or after UPDATE_LIVE_AT (Nov 24, 2026, 2:09 AM America/Chicago = 08:09 UTC,
- *  the deploy of PRs 28-32). There is no dedicated lock version/tag for this
- *  deploy (lock.model is still "v1be"; lock.ev is "lan" only when that lock used
- *  LAN-data inputs). Old locked grades in lines_history.json are never rewritten.
+ *  the deploy of PRs 28-32). The sheet also splits out Edge letters (v1e) locked
+ *  on or after EDGE_LIVE_AT, using lock.model === "v1e". Old locked grades in
+ *  lines_history.json are never rewritten.
  *
  *  Settlement uses the stored e.result (act / outcome) against the locked line
  *  and pick. Pushes and voids are left out of the hit rate, same as the Track
@@ -18,9 +18,12 @@
 (function (root) {
   // Nov 24, 2026, 2:09 AM CT (CST, UTC-6)
   var UPDATE_LIVE_AT = "2026-11-24T08:09:00+00:00";
+  // 3:00 AM CT, before v1e went live. Combined with lock.model === "v1e" so earlier v1be locks are excluded.
+  var EDGE_LIVE_AT = "2026-11-24T09:00:00+00:00";
+  var EDGE_MODEL = "v1e";
   var EMPTY = "No picks settled since the update yet";
   var WAIT_MS = 3600000;
-  var LETTERS = ["A+", "B", "C", "D", "F"];
+  var LETTERS = ["A+", "A", "B+", "B", "C+", "C", "D", "F"];
 
   function parseIso(s) {
     if (s == null || s === "") return NaN;
@@ -32,6 +35,13 @@
     var lk = e && e.lock;
     if (!lk || !lk.grade || lk.at == null || lk.at === "") return false;
     var t = parseIso(lk.at), cut = parseIso(UPDATE_LIVE_AT);
+    return !isNaN(t) && !isNaN(cut) && t >= cut;
+  }
+  function isEdgeLock(e) {
+    var lk = e && e.lock;
+    if (!lk || !lk.grade || String(lk.model || "") !== EDGE_MODEL) return false;
+    if (lk.at == null || lk.at === "") return false;
+    var t = parseIso(lk.at), cut = parseIso(EDGE_LIVE_AT);
     return !isNaN(t) && !isNaN(cut) && t >= cut;
   }
   function isLan(e) {
@@ -100,7 +110,8 @@
       var row = {
         player: e.player, team: e.team, opp: e.opponent, stat: st, period: periodOf(e),
         line: line, act: act, pick: pick, grade: letterOf(lk.grade), proj: isNaN(proj) ? null : proj,
-        hit: hit, lat: lk.at || "", start: e.start, lan: isLan(e)
+        hit: hit, lat: lk.at || "", start: e.start, lan: isLan(e),
+        model: lk.model || "", cap: lk.cap || null, edge: isEdgeLock(e)
       };
       live.push(row);
       var s = e.shadow_s;
@@ -150,6 +161,8 @@
       hs: rows.filter(function (r) { return r.stat === "hs"; }),
       lan: rows.filter(function (r) { return r.lan; }),
       notLan: rows.filter(function (r) { return !r.lan; }),
+      edge: rows.filter(function (r) { return r.edge; }),
+      prior: rows.filter(function (r) { return !r.edge; }),
       byLetter: byLetter
     };
   }
@@ -191,7 +204,7 @@
     var live = (data && data.live) || [];
     var shadow = (data && data.shadow) || [];
     var h = "<div class=\"card\" style=\"margin-top:12px\"><h2>Track record since the update</h2>";
-    h += "<div class=\"muted\" style=\"margin-bottom:8px\">Only props locked after Nov 24, 2026, 2:09 AM CT, when the new grader changes went live. A pick is included by its lock timestamp (lock.at). There is no separate version tag on locks. The Track Record above is unchanged and still counts every settled pick.</div>";
+    h += "<div class=\"muted\" style=\"margin-bottom:8px\">Only props locked after Nov 24, 2026, 2:09 AM CT, when the new grader changes went live. A pick is included by its lock timestamp (lock.at). The Track Record above is unchanged and still counts every settled pick. Edge letters (v1e) are also split out below so you can judge that version on its own.</div>";
     if (!live.length) {
       return h + "<div class=\"muted\">" + esc(EMPTY) + "</div></div>";
     }
@@ -200,7 +213,23 @@
     h += splitTable("Maps 1-2 vs Map 1", [rowLine("Maps 1-2", sp.maps12), rowLine("Map 1", sp.map1)], esc);
     h += splitTable("Kills vs Headshots", [rowLine("Kills", sp.kills), rowLine("Headshots", sp.hs)], esc);
     h += splitTable("LAN data vs not", [rowLine("LAN data", sp.lan), rowLine("Not LAN data", sp.notLan)], esc);
+    h += splitTable("By model version", [rowLine("Edge letters (v1e)", sp.edge), rowLine("Earlier post-update locks", sp.prior)], esc);
     h += letterTable(live, esc);
+    if (sp.edge.length) {
+      h += "<h2 style=\"margin-top:16px\">Edge letters (v1e) since Nov 24, 2026, 3:00 AM CT</h2>";
+      h += "<div class=\"muted\" style=\"margin-bottom:6px\">Only locks stored with model v1e. Letters come from edge versus the book\'s break-even. LAN kills and bait props are capped at C+ and never count as A/B plays.</div>";
+      var evs = splits(sp.edge);
+      h += statCells(summary(sp.edge));
+      h += splitTable("Edge letters splits", [
+        rowLine("Maps 1-2", evs.maps12), rowLine("Map 1", evs.map1),
+        rowLine("Kills", evs.kills), rowLine("Headshots", evs.hs),
+        rowLine("LAN data", evs.lan), rowLine("Not LAN data", evs.notLan)
+      ], esc);
+      h += letterTable(sp.edge, esc);
+    } else {
+      h += "<h2 style=\"margin-top:16px\">Edge letters (v1e) since Nov 24, 2026, 3:00 AM CT</h2>";
+      h += "<div class=\"muted\">No v1e locks have settled yet.</div>";
+    }
     h += "<h2 style=\"margin-top:16px\">Scout shadow · same period</h2>";
     h += "<div class=\"muted\" style=\"margin-bottom:6px\">Shadow S projections saved on the same post-update locks, scored against the same results. The live grade is unchanged.</div>";
     if (!shadow.length) {
@@ -224,8 +253,8 @@
   }
 
   var api = {
-    UPDATE_LIVE_AT: UPDATE_LIVE_AT, EMPTY: EMPTY,
-    parseIso: parseIso, isPostUpdateLock: isPostUpdateLock, isLan: isLan,
+    UPDATE_LIVE_AT: UPDATE_LIVE_AT, EDGE_LIVE_AT: EDGE_LIVE_AT, EDGE_MODEL: EDGE_MODEL, EMPTY: EMPTY,
+    parseIso: parseIso, isPostUpdateLock: isPostUpdateLock, isEdgeLock: isEdgeLock, isLan: isLan,
     periodOf: periodOf, normStat: normStat, fromEntries: fromEntries,
     summary: summary, splits: splits, html: html
   };

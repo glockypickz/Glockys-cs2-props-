@@ -65,7 +65,7 @@ Tests: `node --test tests/test_push.mjs` (includes the RFC 8291 test vector).
 
 ## Ask Glocky (Cloudflare Worker only)
 
-The **Ask Glocky** button opens a chat. Answers use only our existing data (`players.json`, `team_strength.json`, the live `lines.json` board, and `games.json`). The Worker looks up the numbers first (including the same v1be grader math the site uses for over/under questions) and then phrases a "Glocky says" reply. It does not read `lines_history.json` or the Track Record. Replies and the chat UI never name data providers; they say "our data" or "Glocky's data".
+The **Ask Glocky** button opens a chat. Answers use only our existing data (`players.json`, `team_strength.json`, the live `lines.json` board, and `games.json`). The Worker looks up the numbers first (including the same v1e grader math the site uses for over/under questions) and then phrases a "Glocky says" reply. It does not read `lines_history.json` or the Track Record. Replies and the chat UI never name data providers; they say "our data" or "Glocky's data".
 
 When someone asks over or under on a line (for example "EliGE over 35.5 kills maps 1-2?"), Glocky runs our grader (Map 1 vs Maps 1-2, LAN rule, head-to-head, bait flag) and the chat shows the current Grader trading card under the reply. If that line is on the board, the board line, book, and opponent are used; otherwise the line in the question is graded.
 

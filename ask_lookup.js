@@ -1,5 +1,5 @@
 // Ask Glocky: parse a question and compute answers from our data only (players.json + team_strength.json + live board lines + games). Numbers never come from the language model.
-// GPModel (model.js, same v1be code the site uses) must be loaded onto globalThis.GPModel first.
+// GPModel (model.js, same v1e code the site uses) must be loaded onto globalThis.GPModel first.
 
 const MAPS = ["ancient", "anubis", "inferno", "mirage", "nuke", "dust2", "vertigo", "overpass", "train", "cache", "italy", "office", "cobblestone"];
 const MAP_RE = new RegExp("\\b(dust\\s*2|cobblestone|" + MAPS.filter((m) => m !== "dust2").join("|") + ")\\b", "i");
@@ -462,7 +462,9 @@ export function gradeIntent(intent, store) {
     lan,
     hits,
     parts,
-    model: m.model || "v1be"
+    cap: m.gradeCap || null,
+    stake: m.stake,
+    model: m.model || "v1e"
   };
 }
 
@@ -474,10 +476,10 @@ function methodFacts() {
   return {
     kind: "method",
     text:
-      "Our grader (model v1be) builds a projection as 35% last 10 series, 20% all logged series, 20% head-to-head vs the opponent, 15% vs teams of a similar rank tier, and 10% last 3 series, then a small ADR adjustment capped at 5%. " +
-      "The letter is from (projection − line) / line: A+ is 15%+ above the line, B is 5–15% above, C is within about 2% below to 5% above, D is 2–10% below, F is more than 10% below. " +
-      "The pick is Over if the projection is at or above the line, otherwise Under. When the pick is Under and the letter is D or F, F is kept only if P(under) is at least +3 percentage points over the book's break-even; otherwise it is D. " +
-      "The bait flag (hit the line in each of the last 5 series) and other filters do not change the letter or the pick. " +
+      "Our grader (model v1e) builds a projection as 35% last 10 series, 20% all logged series, 20% head-to-head vs the opponent, 15% vs teams of a similar rank tier, and 10% last 3 series, then a small ADR adjustment capped at 5%. " +
+      "The pick is the side with the higher calibrated chance (Over if the projection is at or above the line on a tie). " +
+      "The letter comes from the edge versus the book's break-even (American odds when we have them, else PrizePicks 57.7% / Underdog 53%): A+ is +18 points or more, A is +15, B+ is +12, B is +8, C+ is +5, C is +2, D is at or just above break-even, F is below break-even. The same letters are used on Overs and Unders. " +
+      "LAN kills props and bait-flagged props (hit the line in each of the last 5 series) are capped at C+ and never get an A or B. Other filters do not change the letter or the pick. " +
       "Map 1 lines are graded on Map 1 only; Maps 1-2 lines are graded on the two-map series. " +
       "LAN matches use the player's LAN games for every input, blended with overall numbers when the LAN sample is thin. " +
       "Head-to-head counts from even one prior meeting (pulled toward the player's normal average when there are few meetings)."
@@ -562,7 +564,7 @@ function formatFacts(bundle) {
   }
   if (bundle.kind === "grade") {
     const g = bundle.grade;
-    lines.push("These numbers come from our v1be grader, not from the language model.");
+    lines.push("These numbers come from our v1e grader, not from the language model.");
     lines.push("Player: " + g.player + " (" + g.team + ")." + (g.opp ? " Opponent: " + g.opp + "." : ""));
     lines.push("Prop: " + (g.stat === "hs" ? "Headshots" : "Kills") + " " + g.period + ", line " + g.line + (g.book ? " (" + g.book + ")" : "") + ".");
     lines.push("Source of the line: " + (g.source === "board" ? "the live board" : "the line the user asked about") + ".");
@@ -572,8 +574,9 @@ function formatFacts(bundle) {
     lines.push("Letter grade: " + g.grade + ".");
     lines.push("Edge vs line: " + (g.edge >= 0 ? "+" : "") + g.edge + " (" + (g.edgePP >= 0 ? "+" : "") + (+g.edgePP).toFixed(1) + " pp vs break-even " + pct(g.be) + ").");
     lines.push("P(over): " + pct(g.pOver) + ". P(pick): " + pct(g.pPick) + ".");
-    if (g.bait) lines.push("Bait flag: yes. He met or beat this line in each of the last 5 " + (g.period === "Map 1" ? "Map 1 maps" : "Maps 1-2 series") + ". The bait flag does not change the letter or the pick.");
+    if (g.bait) lines.push("Bait flag: yes. He met or beat this line in each of the last 5 " + (g.period === "Map 1" ? "Map 1 maps" : "Maps 1-2 series") + ". Bait props are capped at C+ and never get an A or B.");
     else lines.push("Bait flag: no.");
+    if (g.cap && g.cap.applied) lines.push("Letter cap: this grade was capped at " + g.grade + " from " + g.cap.preGrade + " because of " + String(g.cap.reason || "").replace("lan_kills", "a LAN kills prop").replace("bait", "the bait flag") + ".");
     if (g.lan) lines.push("LAN data rule is on: this is graded as a LAN match, using " + g.player + "'s LAN " + (g.period === "Map 1" ? "Map 1s" : "series") + " (" + g.lan.n + " in sample), blended with overall when thin.");
     if (g.parts && g.parts.length) {
       lines.push("Projection mix: " + g.parts.filter((x) => x.v != null).map((x) => x.label + " " + Number(x.v).toFixed(1) + " × " + Number(x.w).toFixed(2)).join("; ") + ".");
@@ -700,6 +703,7 @@ export function answerQuestion(question, store, parsed) {
       pPick: grade.pPick,
       bait: grade.bait,
       lan: !!grade.lan,
+      cap: grade.cap || null,
       source: grade.source,
       model: grade.model
     } : null

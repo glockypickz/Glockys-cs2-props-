@@ -85,10 +85,10 @@ test("gate on: signed-out users cannot ask", async () => {
   assert.equal(j.login, "/login");
 });
 
-test("loadGPModelFromSource installs the same v1be API", () => {
+test("loadGPModelFromSource installs the same v1e API", () => {
   const src = readFileSync(join(root, "model.js"), "utf8");
   const api = loadGPModelFromSource(src);
-  assert.equal(api.VERSION, "v1be");
+  assert.equal(api.VERSION, "v1e");
   assert.equal(typeof api.grade, "function");
   assert.equal(typeof api.decodePlayers, "function");
 });

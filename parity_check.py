@@ -3,7 +3,7 @@
    Runs without team_strength data (exactly the pre-Cito grader) and with the MOCK Cito file
    tests/fixtures/team_strength_mock.json (ranking win chance + map-stat rounds switched on)."""
 import json, re, subprocess, sys, random, os
-from grader import Grader, PARAMS, TEAM_ALIASES, load_strength, load_players
+from grader import Grader, PARAMS, TEAM_ALIASES, CALIB, GRADE_SCALE, MODEL_VERSION, load_strength, load_players
 
 MOCK = os.path.join("tests", "fixtures", "team_strength_mock.json")
 
@@ -13,8 +13,8 @@ const d=M.decodePlayers(JSON.parse(fs.readFileSync('players.json','utf8')));cons
 const S=process.env.STRENGTH?JSON.parse(fs.readFileSync(process.env.STRENGTH,'utf8')):null;
 const ctx=M.build(d.players,cases.length&&cases[0].params||null,S,d.ranks||{});
 const out=cases.map(c=>{const p=d.players[c.i];const g=M.grade(ctx,p,c.st,c.line,c.opp,{team:c.team,book:c.book,odds:c.odds,before:c.before,ev:c.ev});
- const ev=M.matchEv(ctx,c.team,c.opp,c.start,[]);return g?{mev:ev,lan:!!(g.v1&&g.v1.lan&&g.v1.lan.used),proj:g.proj,p_over:g.pOver,grade:g.grade,pick:g.pick,edge_pp:g.edgePP,reasons:g.reasons,flag:g.flag,hits:g.hits,p_hr:g.pHr,kd:g.kd,kpm:g.kpm,hsp:g.hsp,bait:!!g.bait}:null});
-process.stdout.write(JSON.stringify({params:M.PARAMS,ctxp:ctx.P,aliases:M.TEAM_ALIASES,out:out}));
+ const ev=M.matchEv(ctx,c.team,c.opp,c.start,[]);return g?{mev:ev,lan:!!(g.v1&&g.v1.lan&&g.v1.lan.used),proj:g.proj,p_over:g.pOver,grade:g.grade,pick:g.pick,stake:g.stake,edge_pp:g.edgePP,reasons:g.reasons,flag:g.flag,hits:g.hits,p_hr:g.pHr,kd:g.kd,kpm:g.kpm,hsp:g.hsp,bait:!!g.bait,cap:g.gradeCap||null}:null});
+process.stdout.write(JSON.stringify({params:M.PARAMS,ctxp:ctx.P,aliases:M.TEAM_ALIASES,calib:M.CALIB,scale:M.GRADE_SCALE,version:M.VERSION,out:out}));
 """
 
 
@@ -74,6 +74,8 @@ def run(d, extra, strength=None):
         print("PARAMS differ:", js["params"], PARAMS); bad += 1
     if js["aliases"] != TEAM_ALIASES:
         print("TEAM_ALIASES differ"); bad += 1
+    if js.get("version") != MODEL_VERSION:
+        print("VERSION differ:", js.get("version"), MODEL_VERSION); bad += 1
     for c, j in zip(cases, js["out"]):
         p = d["players"][c["i"]]
         g = G.grade(p, c["st"], c["line"], c["opp"], c["team"], c["book"], c["odds"], c["before"], ev=c["ev"])
@@ -83,7 +85,7 @@ def run(d, extra, strength=None):
             bad += 1; print("one side None", c, g, j); continue
         if g is None:
             continue
-        if abs(g["mu_model"] - j["proj"]) > 0.01 or abs(g["p_over"] - j["p_over"]) > 1e-3 or g["grade"] != j["grade"] or g["pick"] != j["pick"] or g["reasons"] != j["reasons"] or g["flag"] != j["flag"] \
+        if abs(g["mu_model"] - j["proj"]) > 0.01 or abs(g["p_over"] - j["p_over"]) > 1e-3 or g["grade"] != j["grade"] or g["pick"] != j["pick"] or abs((g.get("stake") or 0) - (j.get("stake") or 0)) > 1e-9 or g["reasons"] != j["reasons"] or g["flag"] != j["flag"] \
                 or g["hits"] != j["hits"] or abs(g["p_hr"] - j["p_hr"]) > 1e-4 or bool(g.get("bait")) != bool(j.get("bait")) \
                 or (g["kd"] is None) != (j["kd"] is None) or (g["kd"] is not None and abs(g["kd"] - j["kd"]) > 1e-3) \
                 or any((g["kpm"][k] is None) != (j["kpm"][k] is None) or (g["kpm"][k] is not None and abs(g["kpm"][k] - j["kpm"][k]) > 0.01) for k in g["kpm"]) \
