@@ -157,7 +157,8 @@ export function parsePrompt() {
 function extractText(data) {
   try {
     const parts = ((((data || {}).candidates || [])[0] || {}).content || {}).parts || [];
-    return parts.map((p) => p && p.text ? p.text : "").join("").trim();
+    // Skip thought parts from thinking models; only the visible text is the answer.
+    return parts.map((p) => (p && p.text && !p.thought) ? p.text : "").join("").trim();
   } catch (e) {
     return "";
   }
@@ -171,6 +172,16 @@ export async function geminiRequest(env, opts) {
   const ctrl = typeof AbortController !== "undefined" ? new AbortController() : null;
   const t = ctrl ? setTimeout(() => ctrl.abort(), opts.timeoutMs || 15000) : null;
   const parts = opts.parts || [{ text: opts.user || "" }];
+  // Gemini 2.5 Flash thinks by default, and thought tokens count against
+  // maxOutputTokens. A vision/JSON call can spend the whole budget thinking
+  // and come back with empty text (finishReason MAX_TOKENS). Turn thinking
+  // off unless a caller asks for a budget.
+  const gen = {
+    temperature: opts.temperature != null ? opts.temperature : 0.2,
+    maxOutputTokens: opts.maxOutputTokens || 512,
+    thinkingConfig: { thinkingBudget: opts.thinkingBudget != null ? opts.thinkingBudget : 0 }
+  };
+  if (opts.responseMimeType) gen.responseMimeType = opts.responseMimeType;
   try {
     const r = await fetch(url, {
       method: "POST",
@@ -178,10 +189,7 @@ export async function geminiRequest(env, opts) {
       body: JSON.stringify({
         systemInstruction: { parts: [{ text: opts.system || "" }] },
         contents: [{ role: "user", parts }],
-        generationConfig: {
-          temperature: opts.temperature != null ? opts.temperature : 0.2,
-          maxOutputTokens: opts.maxOutputTokens || 512
-        }
+        generationConfig: gen
       }),
       signal: ctrl ? ctrl.signal : undefined
     });

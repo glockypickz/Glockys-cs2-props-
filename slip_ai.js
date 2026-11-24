@@ -204,7 +204,9 @@ export async function handleSlip(request, env, url, keyHash) {
     ],
     timeoutMs: 25000,
     temperature: 0,
-    maxOutputTokens: 2048
+    maxOutputTokens: 4096,
+    responseMimeType: "application/json",
+    thinkingBudget: 0
   });
 
   if (!g.ok) return json({ error: "Glocky couldn't read that slip just now. Try again in a moment." }, 502);

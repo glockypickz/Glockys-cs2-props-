@@ -524,17 +524,51 @@ function slipApplyRead(d){
  slipUI.step=slipUI.picks.length?'review':'error';
  if(!slipUI.picks.length&&!slipUI.error)slipUI.error=(d&&d.error)||'We couldn\'t find any CS2 kills or headshots picks on that slip.';
 }
+function prepareSlipImage(file, cb){
+ var typ=String(file.type||'').toLowerCase();
+ var ok=typ==='image/png'||typ==='image/jpeg'||typ==='image/jpg'||typ==='image/webp'||typ==='image/heic'||typ==='image/heif'||/\.(png|jpe?g|webp|heic|heif)$/i.test(file.name||'');
+ if(!ok){cb('Please upload a PNG, JPG, or WebP image of your slip.');return}
+ // iPhone photos can be larger than the 5 MB Worker cap. We shrink first and only
+ // fail if the compressed JPEG is still too big.
+ if(file.size>20*1024*1024){cb('Please use an image under 20 MB.');return}
+ var fr=new FileReader();
+ fr.onerror=function(){cb('Could not read that file.')};
+ fr.onload=function(){
+  var src=String(fr.result||'');
+  if(!src){cb('Could not read that file.');return}
+  var img=new Image();
+  img.onload=function(){
+   try{
+    var max=1600,w=img.naturalWidth||img.width||0,h=img.naturalHeight||img.height||0;
+    var scale=(w>max||h>max)?(max/Math.max(w,h)):1;
+    var cw=Math.max(1,Math.round(w*scale)||1),ch=Math.max(1,Math.round(h*scale)||1);
+    var c=document.createElement('canvas');c.width=cw;c.height=ch;
+    var ctx=c.getContext('2d');
+    if(!ctx){cb(null,{dataUrl:src,mime:typ==='image/jpg'?'image/jpeg':(typ||'image/jpeg')});return}
+    ctx.drawImage(img,0,0,cw,ch);
+    var q=0.82,out='',mime='image/jpeg';
+    function encode(qq){try{return c.toDataURL(mime,qq)}catch(e){return ''}}
+    out=encode(q);
+    var i=0;
+    while(out&&out.length>1400000&&q>0.5&&i<5){q-=0.08;out=encode(q);i++}
+    if(!out){cb(null,{dataUrl:src,mime:typ==='image/jpg'?'image/jpeg':(typ||'image/jpeg')});return}
+    // ~1.4M chars of data URL is about 1 MB of JPEG, well under the 5 MB cap.
+    if(out.length>6.5*1024*1024){cb('Please use an image under 5 MB.');return}
+    cb(null,{dataUrl:out,mime:mime});
+   }catch(e){cb(null,{dataUrl:src,mime:typ==='image/jpg'?'image/jpeg':(typ||'image/jpeg')})}
+  };
+  img.onerror=function(){cb(null,{dataUrl:src,mime:typ==='image/jpg'?'image/jpeg':(typ||'image/jpeg')})};
+  img.src=src;
+ };
+ fr.readAsDataURL(file);
+}
 function slipReadFile(file){
  if(!file||slipUI.busy)return;
  slipUI.fileName=file.name||'image';
- if(file.size>5*1024*1024){slipUI.error='Please use an image under 5 MB.';slipUI.step='error';render();toast('Image is too large');return}
- var typ=String(file.type||'').toLowerCase(),ok=typ==='image/png'||typ==='image/jpeg'||typ==='image/jpg'||typ==='image/webp'||/\.(png|jpe?g|webp)$/i.test(file.name||'');
- if(!ok){slipUI.error='Please upload a PNG, JPG, or WebP image of your slip.';slipUI.step='error';render();return}
  slipUI.busy=true;slipUI.step='reading';slipUI.error='';slipUI.results=null;slipUI.picks=[];render();
- var fr=new FileReader();
- fr.onerror=function(){slipUI.busy=false;slipUI.step='error';slipUI.error='Could not read that file.';render()};
- fr.onload=function(){
-  fetch('/ai/slip/read',{method:'POST',credentials:'include',headers:{'Content-Type':'application/json'},body:JSON.stringify({image:String(fr.result||''),mime:typ==='image/jpg'?'image/jpeg':typ})})
+ prepareSlipImage(file,function(err,out){
+  if(err||!out||!out.dataUrl){slipUI.busy=false;slipUI.step='error';slipUI.error=err||'Could not read that file.';render();if(/too large|5 MB|20 MB/i.test(slipUI.error))toast('Image is too large');return}
+  fetch('/ai/slip/read',{method:'POST',credentials:'include',headers:{'Content-Type':'application/json'},body:JSON.stringify({image:out.dataUrl,mime:out.mime||'image/jpeg'})})
    .then(function(r){return r.json().catch(function(){return{}}).then(function(d){return{ok:r.ok,status:r.status,d:d}})})
    .then(function(x){
      slipUI.busy=false;
@@ -546,8 +580,7 @@ function slipReadFile(file){
      render();var el=$('slipreader');if(el)el.scrollIntoView({block:'start'})
    })
    .catch(function(){slipUI.busy=false;slipUI.step='error';slipUI.error='Could not reach Glocky. Check your connection and try again.';render()});
- };
- fr.readAsDataURL(file);
+ });
 }
 function slipGradeNow(){
  if(slipUI.busy)return;
@@ -864,13 +897,10 @@ setInterval(function(){if(document.hidden||!DB.length)return;var ae=document.act
 var chatLog=[],chatBusy=false;
 function chatSlipFile(file){
  if(chatBusy||!file)return;
- if(file.size>5*1024*1024){addMsg('a','Please use an image under 5 MB.');return}
  chatBusy=true;var wait=addMsg('a','Reading your slip...');
- var typ=String(file.type||'').toLowerCase();
- var fr=new FileReader();
- fr.onerror=function(){chatBusy=false;fillAssistant(wait,'Could not read that file.',null)};
- fr.onload=function(){
-  fetch('/ai/slip/read',{method:'POST',credentials:'include',headers:{'Content-Type':'application/json'},body:JSON.stringify({image:String(fr.result||''),mime:typ==='image/jpg'?'image/jpeg':typ})})
+ prepareSlipImage(file,function(err,out){
+  if(err||!out||!out.dataUrl){chatBusy=false;fillAssistant(wait,err||'Could not read that file.',null);return}
+  fetch('/ai/slip/read',{method:'POST',credentials:'include',headers:{'Content-Type':'application/json'},body:JSON.stringify({image:out.dataUrl,mime:out.mime||'image/jpeg'})})
    .then(function(r){return r.json().catch(function(){return{}}).then(function(d){return{ok:r.ok,status:r.status,d:d}})})
    .then(function(x){
      var a;
@@ -889,8 +919,7 @@ function chatSlipFile(file){
    })
    .catch(function(){fillAssistant(wait,'Could not reach Glocky. Check your connection and try again.',null)})
    .then(function(){chatBusy=false;scrollChat(wait)});
- };
- fr.readAsDataURL(file);
+ });
 }
 
 function chatUI(){if($('aibtn'))return;

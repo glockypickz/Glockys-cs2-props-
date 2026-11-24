@@ -98,7 +98,7 @@ test("Gemini URL must not include the secret (header only); phrasing is stripped
   const orig = globalThis.fetch;
   const seen = [];
   globalThis.fetch = async (url, opts) => {
-    seen.push({ url: String(url), headers: opts && opts.headers });
+    seen.push({ url: String(url), headers: opts && opts.headers, body: opts && opts.body });
     return new Response(JSON.stringify({
       candidates: [{ content: { parts: [{ text: "Glocky says EliGE's headshot percentage on LAN is 56.97%." }] } }]
     }), { status: 200, headers: { "content-type": "application/json" } });
@@ -113,10 +113,25 @@ test("Gemini URL must not include the secret (header only); phrasing is stripped
     for (const s of seen) {
       assert.equal(s.url.includes("not-a-real-key"), false);
       assert.doesNotMatch(s.url, /key=/i);
+      if (s.body) {
+        const body = JSON.parse(s.body);
+        assert.equal(body.generationConfig.thinkingConfig.thinkingBudget, 0);
+      }
     }
   } finally {
     globalThis.fetch = orig;
   }
+});
+
+test("extractText ignores thought parts and keeps visible text", () => {
+  const emptyThought = T.extractText({
+    candidates: [{ content: { parts: [{ thought: true, text: "secret reasoning" }] }, finishReason: "MAX_TOKENS" }]
+  });
+  assert.equal(emptyThought, "");
+  const mixed = T.extractText({
+    candidates: [{ content: { parts: [{ thought: true, text: "hmm" }, { text: "EliGE 56.97%" }] } }]
+  });
+  assert.equal(mixed, "EliGE 56.97%");
 });
 
 test("per-user daily limit returns a friendly 429", async () => {
