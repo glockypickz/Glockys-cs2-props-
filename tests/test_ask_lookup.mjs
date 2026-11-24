@@ -215,3 +215,37 @@ test("replies, fact text, source labels, and Ask Glocky UI never name data provi
   assert.doesNotMatch(scrubProviders("Cito win chance 60% vs FaZe according to bo3.gg and KashRock. Gemini and Google AI Studio agree."), PROVIDER);
   assert.match(scrubProviders("Cito win chance 60%"), /our data|win chance/);
 });
+
+test("makeStore keeps compact fmt-2 rows instead of decoding every player", () => {
+  const s = L.makeStore({ players: playersRaw, strength, games, lines });
+  assert.ok(s._compact && s._compact.fmt === 2);
+  assert.equal(s._ctx, undefined);
+  const decoded = s.players.filter((p) => p.logs);
+  assert.equal(decoded.length, 0);
+  assert.ok(s.players.some((p) => p.name === "FL1T x LUKOIL"));
+});
+
+test("fl1ts / FL1T x LUKOIL resolves, and LAN kills-per-map uses our data", () => {
+  const s = L.makeStore({ players: playersRaw, strength, games, lines });
+  const p = L.findPlayer(s, "fl1ts", "") || L.findPlayer(s, "FL1T", "");
+  assert.ok(p, "FL1T is in players.json");
+  assert.equal(p.name, "FL1T x LUKOIL");
+  const q = "What's fl1ts avg kills per map on LAN";
+  const intent = L.parseQuestion(q, s);
+  assert.ok(intent.player, "question finds FL1T");
+  assert.equal(intent.player.name, "FL1T x LUKOIL");
+  assert.equal(intent.stat, "kpm");
+  assert.equal(intent.ev, "lan");
+  const ans = L.answerQuestion(q, s, intent);
+  assert.equal(ans.missing, false);
+  assert.equal(ans.facts.player, "FL1T x LUKOIL");
+  assert.ok(ans.facts.kills && ans.facts.kills.avg != null);
+  assert.match(ans.factText, /Average kills per map: /);
+  assert.match(ans.factText, /FL1T x LUKOIL/);
+  // a simple stat question must not decode the whole roster or build Elo
+  const decoded = s.players.filter((p) => p.logs);
+  assert.equal(decoded.length, 0);
+  assert.equal(s._ctx, undefined);
+});
+
+

@@ -11,6 +11,138 @@ function M() {
   return m;
 }
 
+// "FL1T x LUKOIL" also indexes as "fl1t", so a question like "fl1ts" can still match.
+function playerNameKeys(name) {
+  const GM = M();
+  const keys = [];
+  const seen = new Set();
+  function add(s) {
+    const k = GM.norm(s);
+    if (k && k.length >= 3 && !seen.has(k)) { seen.add(k); keys.push(k); }
+  }
+  add(name);
+  const core = String(name || "").split(/\s+[x×]\s+/i)[0].trim();
+  if (core && core !== String(name || "").trim()) add(core);
+  return keys;
+}
+
+function playerWeight(p) {
+  return (p.logs || p.rows || (p._src && p._src.rows) || []).length;
+}
+
+// Decode one compact (fmt 2) player. Does not attach the result to the shared store.
+function decodeStub(store, stub) {
+  if (!stub) return null;
+  if (stub.logs) return stub;
+  if (!store || !store._compact || !stub._src) return stub;
+  const one = M().decodePlayers({
+    fmt: 2,
+    s: store._compact.s,
+    cols: store._compact.cols,
+    xcols: store._compact.xcols,
+    players: [stub._src]
+  });
+  return (one && one.players && one.players[0]) || stub;
+}
+
+export function hydratePlayer(store, p) {
+  if (!p) return null;
+  if (p.logs) return p;
+  if (p._decoded && p._decoded.logs) return p._decoded;
+  const d = decodeStub(store, p);
+  if (d && d.logs && p !== d) p._decoded = d;
+  return d;
+}
+
+// Elo / team context from compact rows, one player at a time, so the Worker stays under 128 MB.
+// Same math as GPModel.build, but it does not keep every player's decoded logs or series cache.
+function buildCtx(store) {
+  const GM = M();
+  if (!store._compact) return GM.build(store.players, null, store.strength, store.ranks);
+  const P = {};
+  const srcP = GM.PARAMS || {};
+  for (const k in srcP) P[k] = srcP[k];
+  const ctx = {
+    P, players: store.players, ranks: store.ranks || {},
+    ser: new Map(), ser1: new Map(), eloHist: {}, teamCum: {}, teamMids: {},
+    S: GM.prepStrength(store.strength)
+  };
+  const S = store._compact.s || [];
+  const cols = store._compact.cols || [];
+  const idx = {};
+  for (let i = 0; i < cols.length; i++) idx[cols[i]] = i;
+  const maps = [];
+  const seen = {};
+  const teamRows = {};
+  const tmp = { P, ser: new Map(), ser1: new Map() };
+  for (const stub of store.players) {
+    const t = GM.tn(stub.team);
+    const rows = (stub._src && stub._src.rows) || [];
+    for (const r of rows) {
+      const rd = idx.rd != null ? r[idx.rd] : null;
+      const rw = idx.rw != null ? r[idx.rw] : null;
+      const mid = idx.mid != null ? r[idx.mid] : null;
+      const n = idx.n != null ? r[idx.n] : null;
+      const date = idx.date != null && r[idx.date] != null ? S[r[idx.date]] : "";
+      const opp = idx.opp != null && r[idx.opp] != null ? S[r[idx.opp]] : "";
+      const key = String(mid) + "|" + String(n);
+      if (typeof rd === "number" && typeof rw === "number" && rd >= 13 && rw * 2 !== rd && !seen[key]) {
+        seen[key] = 1;
+        maps.push([date || "", Number(mid) || 0, Number(n) || 0, t, GM.tn(opp), rw * 2 > rd ? 1 : 0]);
+      }
+    }
+    const hyd = decodeStub(store, stub);
+    if (hyd && hyd.logs) {
+      GM.series(tmp, hyd).forEach(function (c) {
+        (ctx.teamMids[t] = ctx.teamMids[t] || []).push([c.date, c.mid]);
+        if (c.rd) (teamRows[t] = teamRows[t] || []).push([c.date, c.kills, c.hs != null ? c.hs : 0, c.rd]);
+      });
+      tmp.ser.clear();
+      tmp.ser1.clear();
+    }
+  }
+  Object.keys(ctx.teamMids).forEach(function (t) {
+    ctx.teamMids[t].sort(function (a, b) {
+      if (a[0] !== b[0]) return a[0] < b[0] ? 1 : -1;
+      return a[1] === b[1] ? 0 : (a[1] < b[1] ? 1 : -1);
+    });
+  });
+  maps.sort(function (a, b) {
+    if (a[0] !== b[0]) return a[0] < b[0] ? -1 : 1;
+    if (a[1] !== b[1]) return a[1] - b[1];
+    return a[2] - b[2];
+  });
+  const R = {}, K = P.elo_k;
+  function winp(ra, rb) { return 1 / (1 + Math.pow(10, (rb - ra) / 400)); }
+  maps.forEach(function (m) {
+    const a = m[3], b = m[4];
+    const ra = Object.prototype.hasOwnProperty.call(R, a) ? R[a] : 1500;
+    const rb = Object.prototype.hasOwnProperty.call(R, b) ? R[b] : 1500;
+    const e = winp(ra, rb);
+    R[a] = ra + K * (m[5] - e);
+    R[b] = rb - K * (m[5] - e);
+    [[a, R[a]], [b, R[b]]].forEach(function (x) {
+      const h = ctx.eloHist[x[0]] = ctx.eloHist[x[0]] || [[], []];
+      h[0].push(m[0]);
+      h[1].push(x[1]);
+    });
+  });
+  Object.keys(teamRows).forEach(function (t) {
+    const rows = teamRows[t].sort(function (a, b) { return a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0; });
+    const ds = [], ck = [0], ch = [0], cr = [0];
+    rows.forEach(function (r) {
+      ds.push(r[0]); ck.push(ck[ck.length - 1] + r[1]); ch.push(ch[ch.length - 1] + r[2]); cr.push(cr[cr.length - 1] + r[3]);
+    });
+    ctx.teamCum[t] = [ds, ck, ch, cr];
+  });
+  return ctx;
+}
+
+export function ensureCtx(store) {
+  if (!store) throw new Error("store is missing");
+  return store.ctx;
+}
+
 function normMap(s) {
   return String(s || "").toLowerCase().replace(/[^a-z0-9]/g, "").replace(/dust2/g, "dust2");
 }
@@ -77,8 +209,8 @@ export function findPlayer(store, name, team) {
   const ix = store.index;
   let pool = ix.exact.get(k) || [];
   if (team) pool = pool.filter((p) => GM.teq(p.team, team));
-  if (pool.length === 1) return pool[0];
-  if (pool.length > 1) return pickBest(pool);
+  if (pool.length === 1) return hydratePlayer(store, pool[0]);
+  if (pool.length > 1) return hydratePlayer(store, pickBest(pool));
   if (k.length < 3) return null;
   const loose = [];
   for (const [nk, arr] of ix.exact) {
@@ -89,7 +221,7 @@ export function findPlayer(store, name, team) {
     }
   }
   const uniq = uniquePlayers(loose);
-  if (uniq.length === 1) return uniq[0];
+  if (uniq.length === 1) return hydratePlayer(store, uniq[0]);
   return null;
 }
 
@@ -105,7 +237,7 @@ function uniquePlayers(arr) {
 }
 
 function pickBest(arr) {
-  return arr.slice().sort((a, b) => (b.logs || []).length - (a.logs || []).length)[0] || null;
+  return arr.slice().sort((a, b) => playerWeight(b) - playerWeight(a))[0] || null;
 }
 
 export function findTeam(store, name) {
@@ -135,7 +267,7 @@ function playersInQuestion(store, q) {
     if (used.has(h.nk)) continue;
     // skip if this name is a subset of a longer already-picked name
     if (picked.some((p) => p.nk.includes(h.nk) && p.nk !== h.nk)) continue;
-    const p = pickBest(h.arr);
+    const p = hydratePlayer(store, pickBest(h.arr));
     if (p) {
       picked.push({ nk: h.nk, player: p });
       used.add(h.nk);
@@ -272,7 +404,7 @@ function sortLogs(logs) {
 }
 
 function filterLogs(p, intent, seasonStart) {
-  let logs = sortLogs(p.logs || []);
+  let logs = sortLogs((p && p.logs) || []);
   if (intent.ev === "lan" || intent.ev === "online") logs = logs.filter((l) => l.ev === intent.ev);
   if (intent.map) logs = logs.filter((l) => normMap(l.map) === normMap(intent.map));
   if (intent.period === "Map 1") logs = logs.filter((l) => l.n === 1);
@@ -313,7 +445,7 @@ function avgStat(logs, key) {
 }
 
 function seriesOf(store, p, period) {
-  return M().series(store.ctx, p, period || "Maps 1-2");
+  return M().series(ensureCtx(store), p, period || "Maps 1-2");
 }
 
 function latestRanking(strength, kind) {
@@ -400,11 +532,11 @@ export function findBoardLine(store, player, stat, period, opp) {
 
 function evFor(store, team, opp, start) {
   if (!opp) return [null, null];
-  return M().matchEv(store.ctx, team, opp, start || new Date().toISOString(), store.games);
+  return M().matchEv(ensureCtx(store), team, opp, start || new Date().toISOString(), store.games);
 }
 
 export function gradeIntent(intent, store) {
-  const p = intent.player;
+  const p = hydratePlayer(store, intent.player);
   if (!p) return { missing: true, reason: "no player" };
   let stat = intent.stat === "hs" ? "hs" : "kills";
   if (intent.stat && intent.stat !== "hs" && intent.stat !== "kills" && intent.stat !== "hsp") {
@@ -427,7 +559,7 @@ export function gradeIntent(intent, store) {
   }
   if (line == null || isNaN(line)) return { missing: true, reason: "no line" };
   const evr = evFor(store, p.team, opp, start || intent.start);
-  const m = M().grade(store.ctx, p, stat, line, opp, {
+  const m = M().grade(ensureCtx(store), p, stat, line, opp, {
     team: p.team, book, odds, period, ev: evr[0]
   });
   if (!m) return { missing: true, reason: "could not grade" };
@@ -487,7 +619,7 @@ function methodFacts() {
 }
 
 function playerStatFacts(intent, store) {
-  const p = intent.player;
+  const p = hydratePlayer(store, intent.player);
   if (!p) return { missing: true, reason: "no player in our data" };
   const logs = filterLogs(p, intent, store.seasonStart);
   if (!logs.length) return { missing: true, reason: "no matching maps in our data", player: p.name, team: p.team, ev: intent.ev, map: intent.map, window: intent.window };
@@ -712,19 +844,35 @@ export function answerQuestion(question, store, parsed) {
 
 export function makeStore(raw) {
   const GM = M();
-  const decoded = GM.decodePlayers(raw.players) || raw.players || {};
-  const players = decoded.players || [];
-  const ranks = decoded.ranks || {};
   const strength = raw.strength || null;
   const games = (raw.games && raw.games.games) ? raw.games.games : (raw.games || []);
   const lines = (raw.lines && raw.lines.lines) ? raw.lines.lines : (raw.lines || []);
-  const ctx = GM.build(players, null, strength, ranks);
+  const src = raw.players || {};
+  const compact = src && src.fmt === 2 ? src : null;
+  let players, ranks, seasonStart, updated;
+  if (compact) {
+    // Keep the compact fmt-2 rows as-is. Decoding all 1,800+ players at once
+    // blows the Worker's 128 MB memory limit and Ask Glocky fails to load data.
+    players = (compact.players || []).map(function (p) {
+      return { name: p.name, team: p.team, _src: p };
+    });
+    ranks = compact.ranks || {};
+    seasonStart = compact.season_start || "2026-01-01";
+    updated = compact.updated || null;
+  } else {
+    const decoded = GM.decodePlayers(src) || src || {};
+    players = decoded.players || [];
+    ranks = decoded.ranks || {};
+    seasonStart = decoded.season_start || "2026-01-01";
+    updated = decoded.updated || null;
+  }
   const exact = new Map();
   const teams = new Map();
   for (const p of players) {
-    const k = GM.norm(p.name);
-    if (!exact.has(k)) exact.set(k, []);
-    exact.get(k).push(p);
+    for (const k of playerNameKeys(p.name)) {
+      if (!exact.has(k)) exact.set(k, []);
+      exact.get(k).push(p);
+    }
     if (p.team) {
       const tk = GM.tn(p.team);
       if (tk && !teams.has(tk)) teams.set(tk, p.team);
@@ -742,13 +890,25 @@ export function makeStore(raw) {
       if (tk && !teams.has(tk)) teams.set(tk, t);
     }
   }
-  return {
-    players, ranks, strength, ctx, games, lines,
-    seasonStart: decoded.season_start || "2026-01-01",
-    updated: decoded.updated || null,
+  const store = {
+    players, ranks, strength, games, lines,
+    seasonStart, updated,
     index: { exact },
     teams
   };
+  if (compact) store._compact = compact;
+  // ctx is built lazily so a simple stat question does not walk every
+  // player's logs. Tests and graders can still read store.ctx as usual.
+  Object.defineProperty(store, "ctx", {
+    configurable: true,
+    enumerable: true,
+    get() {
+      if (!this._ctx) this._ctx = buildCtx(this);
+      return this._ctx;
+    },
+    set(v) { this._ctx = v; }
+  });
+  return store;
 }
 
-export const _test = { parseLine, parseWindow, parseEv, parseStat, periodOf, hsPct, filterLogs, findBoardLine, formatFacts, methodFacts, MAPS };
+export const _test = { parseLine, parseWindow, parseEv, parseStat, periodOf, hsPct, filterLogs, findBoardLine, formatFacts, methodFacts, MAPS, playerNameKeys };
