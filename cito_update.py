@@ -247,9 +247,61 @@ def results_index(c):
         if not (t1 and t2):
             ts = sorted({p[1] for g in maps for p in g["players"] if p[1]})
             t1, t2 = (ts + [None, None])[:2]
-        out.append({"id": mid, "date": str(m.get("startsAt") or "")[:10], "t1": t1, "t2": t2, "maps": maps})
+        row = {"id": mid, "date": str(m.get("startsAt") or "")[:10], "t1": t1, "t2": t2, "maps": maps}
+        bo = m.get("bestOf")
+        if bo is not None:
+            row["bo"] = bo
+        out.append(row)
     out.sort(key=lambda x: (x["date"], x["id"]))
     return {"source": "cito", "matches": out}
+
+
+def _bo_num(bo):
+    try:
+        n = int("".join(ch for ch in str(bo) if ch.isdigit()))
+        return n if n in (1, 3, 5) else None
+    except Exception:
+        return None
+
+
+def formats_index(c):
+    """Scheduled best-of for saved Cito matches (recent, upcoming, and any match body with bestOf).
+    Used by settle.py so Bo1 vs Bo3 is known even when /maps was never fetched. File only, no network."""
+    out = {}
+
+    def take(m, src):
+        if not isinstance(m, dict):
+            return
+        t1, t2 = m.get("team1Name") or m.get("t1"), m.get("team2Name") or m.get("t2")
+        date = str(m.get("startsAt") or m.get("date") or "")[:10]
+        bo = _bo_num(m.get("bestOf") if m.get("bestOf") is not None else m.get("bo"))
+        mid = m.get("id")
+        if not (t1 and t2 and date):
+            return
+        key = mid or (date, t1, t2)
+        row = out.get(key) or {"id": mid, "date": date, "t1": t1, "t2": t2, "src": src}
+        if bo and not row.get("bo"):
+            row["bo"] = bo
+            row["src"] = src
+        elif bo:
+            row["bo"] = bo
+        out[key] = row
+
+    for r in c.saved("/cs2/matches/recent") + c.saved("/cs2/matches/upcoming"):
+        if r.get("status") != 200:
+            continue
+        for m in data(r.get("body")) or []:
+            take(m, "cito")
+    for r in c.saved("/cs2/matches/"):
+        body = r.get("body")
+        if r.get("status") != 200 or not isinstance(body, dict):
+            continue
+        m = data(body)
+        if isinstance(m, dict) and (m.get("team1Name") or m.get("bestOf") is not None):
+            take(m, "cito")
+    rows = list(out.values())
+    rows.sort(key=lambda x: (x.get("date") or "", str(x.get("id") or "")))
+    return {"source": "cito", "matches": rows}
 
 
 def settle_candidates(now):
@@ -367,6 +419,9 @@ def main():
     idx = results_index(c)
     if idx["matches"]:
         _dump(os.path.join(c.cache_dir, "_results_index.json"), idx)
+    fmt = formats_index(c)
+    if fmt["matches"]:
+        _dump(os.path.join(c.cache_dir, "_formats.json"), fmt)
     print("Cito calls this run: %d | today: %s | month remaining (header): %s%s" % (
         c.calls, c.usage.get("calls"), c.usage.get("monthly_remaining"), (" | stopped: " + c.stopped) if c.stopped else ""))
 
