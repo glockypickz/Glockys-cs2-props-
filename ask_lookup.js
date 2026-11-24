@@ -1,5 +1,4 @@
-// Ask Glocky: parse a question and compute answers from our data only (players.json + Cito
-// team_strength.json + live board lines + games). Numbers never come from the language model.
+// Ask Glocky: parse a question and compute answers from our data only (players.json + team_strength.json + live board lines + games). Numbers never come from the language model.
 // GPModel (model.js, same v1e code the site uses) must be loaded onto globalThis.GPModel first.
 
 const MAPS = ["ancient", "anubis", "inferno", "mirage", "nuke", "dust2", "vertigo", "overpass", "train", "cache", "italy", "office", "cobblestone"];
@@ -109,7 +108,7 @@ function pickBest(arr) {
   return arr.slice().sort((a, b) => (b.logs || []).length - (a.logs || []).length)[0] || null;
 }
 
-function findTeam(store, name) {
+export function findTeam(store, name) {
   const GM = M();
   const k = GM.tn(name);
   if (!k) return null;
@@ -368,7 +367,7 @@ export function matchOdds(store, team, opp) {
     team: flip ? o.n2 : o.n1,
     opp: flip ? o.n1 : o.n2,
     start: o.start || null,
-    src: o.src || "cito",
+    src: "our data",
     win: p[i] != null ? +p[i] : null,
     lose: p[j] != null ? +p[j] : null,
     decWin: dec[i] != null ? +dec[i] : null,
@@ -379,7 +378,7 @@ export function matchOdds(store, team, opp) {
   };
 }
 
-function findBoardLine(store, player, stat, period, opp) {
+export function findBoardLine(store, player, stat, period, opp) {
   const GM = M();
   const st = stat === "hs" ? "hs" : "kills";
   const per = period || "Maps 1-2";
@@ -559,8 +558,8 @@ function formatFacts(bundle) {
     if (f.series && f.series.n) {
       lines.push(f.series.period + " series in this filter: " + f.series.n + (f.series.avgKills != null ? ", avg kills " + f.series.avgKills : "") + (f.series.avgHs != null ? ", avg headshots " + f.series.avgHs : "") + ".");
     }
-    if (f.ranks && f.ranks.vrs) lines.push("Team VRS rank (Cito, as of " + f.ranks.vrs.date + "): #" + f.ranks.vrs.rank + " (" + f.ranks.vrs.points + " points, of " + f.ranks.vrs.of + ").");
-    if (f.ranks && f.ranks.world) lines.push("Team world rank (Cito, as of " + f.ranks.world.date + "): #" + f.ranks.world.rank + " (" + f.ranks.world.points + " points, of " + f.ranks.world.of + ").");
+    if (f.ranks && f.ranks.vrs) lines.push("Team VRS rank as of " + f.ranks.vrs.date + " (our data): #" + f.ranks.vrs.rank + " (" + f.ranks.vrs.points + " points, of " + f.ranks.vrs.of + ").");
+    if (f.ranks && f.ranks.world) lines.push("Team world rank as of " + f.ranks.world.date + " (our data): #" + f.ranks.world.rank + " (" + f.ranks.world.points + " points, of " + f.ranks.world.of + ").");
     return lines.join("\n");
   }
   if (bundle.kind === "grade") {
@@ -598,24 +597,24 @@ function formatFacts(bundle) {
     if (g.reasons && g.reasons.length) lines.push("Filters (do not change the letter): " + g.reasons.join("; ") + ".");
     if (bundle.context && bundle.context.odds) {
       const o = bundle.context.odds;
-      lines.push("Cito match context (not used in the letter): " + o.team + " win chance " + pct(o.win) + " vs " + o.opp + (o.map1Win != null ? ", map 1 chance " + pct(o.map1Win) : "") + (o.map2Win != null ? ", map 2 chance " + pct(o.map2Win) : "") + ".");
+      lines.push("Match context from our data (not used in the letter): " + o.team + " win chance " + pct(o.win) + " vs " + o.opp + (o.map1Win != null ? ", map 1 chance " + pct(o.map1Win) : "") + (o.map2Win != null ? ", map 2 chance " + pct(o.map2Win) : "") + ".");
     }
     if (bundle.context && bundle.context.maps) {
       const top = bundle.context.maps.maps.slice(0, 5).map((r) => r.map + " pick " + r.pickPct + "% (" + r.played + " played)").join("; ");
-      if (top) lines.push("Cito pick tendencies for " + bundle.context.maps.team + " (as of " + bundle.context.maps.asof + "): " + top + ".");
+      if (top) lines.push("Pick tendencies from our data for " + bundle.context.maps.team + " (as of " + bundle.context.maps.asof + "): " + top + ".");
     }
     return lines.join("\n");
   }
   if (bundle.kind === "team" || bundle.kind === "rank" || bundle.kind === "odds" || bundle.kind === "maps") {
     if (bundle.team) lines.push("Team: " + bundle.team + ".");
-    if (bundle.vrs) lines.push("VRS rank (Cito, as of " + bundle.vrs.date + "): #" + bundle.vrs.rank + " with " + bundle.vrs.points + " points (of " + bundle.vrs.of + " teams in this snapshot).");
-    if (bundle.world) lines.push("World rank (Cito, as of " + bundle.world.date + "): #" + bundle.world.rank + " with " + bundle.world.points + " points (of " + bundle.world.of + ").");
+    if (bundle.vrs) lines.push("VRS rank as of " + bundle.vrs.date + " (our data): #" + bundle.vrs.rank + " with " + bundle.vrs.points + " points (of " + bundle.vrs.of + " teams in this snapshot).");
+    if (bundle.world) lines.push("World rank as of " + bundle.world.date + " (our data): #" + bundle.world.rank + " with " + bundle.world.points + " points (of " + bundle.world.of + ").");
     if (bundle.odds) {
       const o = bundle.odds;
-      lines.push("Cito odds vs " + o.opp + " (start " + (o.start || "n/a") + "): win chance " + pct(o.win) + ", decimal " + (o.decWin != null ? o.decWin : "n/a") + ", map 1 " + pct(o.map1Win) + ", map 2 " + pct(o.map2Win) + ".");
+      lines.push("Odds from our data vs " + o.opp + " (start " + (o.start || "n/a") + "): win chance " + pct(o.win) + ", decimal " + (o.decWin != null ? o.decWin : "n/a") + ", map 1 " + pct(o.map1Win) + ", map 2 " + pct(o.map2Win) + ".");
     }
     if (bundle.maps && bundle.maps.maps) {
-      lines.push("Cito team map stats / pick tendencies as of " + bundle.maps.asof + ": " + bundle.maps.maps.map((r) => r.map + " " + r.played + " maps, pick " + r.pickPct + "%, " + r.rounds + " rounds").join("; ") + ".");
+      lines.push("Team map stats and pick tendencies from our data as of " + bundle.maps.asof + ": " + bundle.maps.maps.map((r) => r.map + " " + r.played + " maps, pick " + r.pickPct + "%, " + r.rounds + " rounds").join("; ") + ".");
     }
     if (bundle.games && bundle.games.length) {
       lines.push("Upcoming or live games in our slate: " + bundle.games.map((g) => g.team1 + " vs " + g.team2 + " (" + (g.ev || "setting unknown") + ", " + (g.status || "") + ", " + (g.start || "") + ")").join("; ") + ".");

@@ -89,7 +89,7 @@ Tests: `node --test tests/test_wins.mjs`.
 
 ## Ask Glocky (Cloudflare Worker only)
 
-The **Ask Glocky** button opens a chat. Answers use only our existing data (`players.json`, Cito-derived `team_strength.json`, the live `lines.json` board, and `games.json`). The Worker looks up the numbers first (including the same v1e grader math the site uses for over/under questions) and then asks Gemini only to phrase the "Glocky says" reply. It does not read `lines_history.json` or the Track Record.
+The **Ask Glocky** button opens a chat. Answers use only our existing data (`players.json`, `team_strength.json`, the live `lines.json` board, and `games.json`). The Worker looks up the numbers first (including the same v1e grader math the site uses for over/under questions) and then phrases a "Glocky says" reply. It does not read `lines_history.json` or the Track Record. Replies and the chat UI never name data providers; they say "our data" or "Glocky's data".
 
 When someone asks over or under on a line (for example "EliGE over 35.5 kills maps 1-2?"), Glocky runs our grader (Map 1 vs Maps 1-2, LAN rule, head-to-head, bait flag) and the chat shows the current Grader trading card under the reply. If that line is on the board, the board line, book, and opponent are used; otherwise the line in the question is graded.
 
@@ -106,6 +106,16 @@ Ask Glocky stays dark until a Gemini API key is stored as a **Worker secret** na
 The default model is `gemini-2.5-flash` (free tier). To use another Flash model later, set a plain Worker variable `GEMINI_MODEL` (not a secret). Google's free-tier limits and terms apply (free prompts may be used to improve their models). The Worker also caps each signed-in user at 20 questions per UTC day.
 
 Tests: `node --test tests/test_ask_lookup.mjs tests/test_ask_ai.mjs`.
+
+
+## Slip reader
+
+Signed-in users (when the beta gate is on) can upload a PrizePicks or Underdog CS2 slip screenshot from the **Upload slip** section on the Grader tab, or from the Slip button in Ask Glocky. Glocky only reads the picks off the image. After you fix any misreads, each leg is graded with the same math as the site (Map 1 vs Maps 1-2, LAN rule, head-to-head, bait flag, blowout warning). Images are not stored.
+
+Limits: PNG, JPG, or WebP, up to 5 MB; 10 slips per signed-in user per UTC day, plus a short cooldown. It uses the same Worker secret as Ask Glocky. Until that secret is set, the reader says it isn't set up yet.
+
+Tests: `node --test tests/test_slip_reader.mjs tests/test_slip_ai.mjs`.
+
 
 ## Shadow S: Scout-style factor projection (admin only, test)
 

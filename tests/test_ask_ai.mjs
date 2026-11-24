@@ -6,7 +6,7 @@ import { createRequire } from "node:module";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 import * as A from "../beta_auth.js";
-import { handleAsk, isAskPath, loadGPModelFromSource, systemPrompt, fallbackPhrase, _test as T } from "../ask_ai.js";
+import { handleAsk, isAskPath, loadGPModelFromSource, systemPrompt, fallbackPhrase, scrubProviders, _test as T } from "../ask_ai.js";
 import * as L from "../ask_lookup.js";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
@@ -161,3 +161,28 @@ test("UI source uses Ask Glocky labels and does not mention keys", () => {
   assert.doesNotMatch(css, /Ask AI/);
   assert.match(app, /GPCards\.html/);
 });
+
+test("scrubbers strip provider names, including from a model reply", async () => {
+  const dirty = "According to Cito and bo3.gg, EliGE is at 56.97%. Gemini agrees.";
+  const clean = scrubProviders(dirty);
+  assert.doesNotMatch(clean, /\b(cito|bo3(?:\.gg)?|kash\s*rock|hltv|gemini|google)\b/i);
+  const env = mkEnv({ GEMINI_API_KEY: "not-a-real-key" });
+  const orig = globalThis.fetch;
+  globalThis.fetch = async () => new Response(JSON.stringify({
+    candidates: [{ content: { parts: [{ text: dirty }] } }]
+  }), { status: 200, headers: { "content-type": "application/json" } });
+  try {
+    const r = await handleAsk(req("/ai/ask", { body: { question: "what's EliGE's headshot percentage on LAN" }, ip: "8.8.4.4" }), env, new URL(ORIGIN + "/ai/ask"), KEY_HASH);
+    const j = await r.json();
+    assert.equal(r.status, 200, j.error || j.answer);
+    assert.doesNotMatch(j.answer, /\b(cito|bo3(?:\.gg)?|kash\s*rock|hltv|gemini|google)\b/i);
+  } finally {
+    globalThis.fetch = orig;
+  }
+  const app = readFileSync(join(root, "app.js"), "utf8");
+  const welcome = app.match(/I only answer from[^"]+/);
+  assert.ok(welcome);
+  assert.doesNotMatch(welcome[0], /\b(cito|bo3(?:\.gg)?|kash\s*rock|hltv|gemini)\b/i);
+  assert.doesNotMatch(systemPrompt(), /\b(cito|bo3(?:\.gg)?|kash\s*rock|hltv|gemini|google)\b/i);
+});
+

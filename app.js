@@ -211,12 +211,14 @@ function streamBlock(g,emptyNote){var xs=gameStreams(g);
  if(open&&xs[idx]&&xs[idx].embed){var alts=xs.map(function(x,i){return x.embed?'<button class="g'+(i===idx?" on":"")+'" data-act="watch" data-i="'+g.id+'" data-s="'+i+'">'+esc(platName(x.platform)+(x.name?" · "+x.name:""))+"</button>":""}).join("");
   player='<div class="player"><div class="player-frame"><iframe src="'+esc(xs[idx].embed)+'" title="'+esc(xs[idx].label)+'" allow="autoplay; fullscreen; picture-in-picture" allowfullscreen loading="lazy" referrerpolicy="no-referrer-when-downgrade"></iframe></div>'+(alts?'<div class="slinks">'+alts+"</div>":"")+"</div>"}
  return '<div class="streams">'+links+"</div>"+wbtn+player}
-function gameCard(g,full){var a=roster(g.team1),b=roster(g.team2);return '<div class="card"><div class="muted">'+esc(g.tournament||'')+' · '+esc(fmt(g.start))+(g.bo?' · Bo'+esc(g.bo):'')+'</div><div class="big">'+esc(g.team1)+' <span class="vs">vs</span> '+esc(g.team2)+'</div>'+blowGameLine(g)+
+function evBadge(g){return typeof GPLan!=='undefined'?GPLan.badge(g,GAMES):''}
+function evBadgeLine(l){return typeof GPLan!=='undefined'?GPLan.badgeForLine(l,GAMES,{tn:tn,day:dayFn}):''}
+function gameCard(g,full){var a=roster(g.team1),b=roster(g.team2);return '<div class="card"><div class="muted">'+esc(g.tournament||'')+evBadge(g)+' · '+esc(fmt(g.start))+(g.bo?' · Bo'+esc(g.bo):'')+'</div><div class="big">'+esc(g.team1)+' <span class="vs">vs</span> '+esc(g.team2)+'</div>'+blowGameLine(g)+
  (full?'<div class="muted">'+esc(g.team1)+(rankOf(g.team1)?' #'+rankOf(g.team1):'')+': '+(a.join(', ')||'no roster data')+'</div><div class="muted">'+esc(g.team2)+(rankOf(g.team2)?' #'+rankOf(g.team2):'')+': '+(b.join(', ')||'no roster data')+'</div>':'')+(full?citoBlock(g):'')+'<div class="btns"><button class="g" data-act="gamegrade" data-i="'+g.id+'">See props</button></div>'+streamBlock(g,false)+'</div>'}
 function recents(){return load('gp_recent',[])}
 function viewDash(){var ls=allLines().filter(function(l){return l.g}).sort(function(a,b){return b.g.edgePP-a.g.edgePP}).slice(0,5),rc=recents(),dg=liveGames().concat(upGames());
  var h='<div class="card"><h2>Player search</h2><div class="row"><input id="ds" list="plist" placeholder="Search a player, e.g. donk"><button class="b" style="flex:0 0 auto;margin:0" data-act="dsearch">Stats</button></div>'+(rc.length?'<div class="btns" style="margin-top:6px"><span class="muted" style="align-self:center">Recent:</span>'+rc.map(function(n){return '<button class="g" data-act="plview" data-p="'+esc(n)+'">'+esc(n)+'</button>'}).join('')+'<button class="g" data-act="rclear">Clear</button></div>':'')+'</div>';
- h+='<div class="grid c2"><div class="card"><h2>Live + upcoming games · '+dg.length+'</h2>'+(dg.length?'<div class="scroll" style="max-height:560px;overflow-y:auto">'+dg.map(function(g){return '<div class="item"><div><b>'+esc(g.team1)+' <span class="vs">vs</span> '+esc(g.team2)+'</b>'+(g.status==='live'?' <span class="pill">LIVE</span>':'')+'<br><span class="muted">'+esc(g.tournament||'')+' · '+esc(fmt(g.start))+'</span></div><button class="g" style="margin:0" data-act="gamegrade" data-i="'+g.id+'">Props</button></div>'}).join('')+'</div>':(emptyBoardHtml()||(GAMES.length?'<div class="muted">No live or upcoming matches with PrizePicks or Underdog lines.</div>':'<div class="warn">No schedule loaded yet. Run the "Update CS2 games" workflow.</div>')))+'</div>';
+ h+='<div class="grid c2"><div class="card"><h2>Live + upcoming games · '+dg.length+'</h2>'+(dg.length?'<div class="scroll" style="max-height:560px;overflow-y:auto">'+dg.map(function(g){return '<div class="item"><div><b>'+esc(g.team1)+' <span class="vs">vs</span> '+esc(g.team2)+'</b>'+(g.status==='live'?' <span class="pill">LIVE</span>':'')+'<br><span class="muted">'+esc(g.tournament||'')+evBadge(g)+' · '+esc(fmt(g.start))+'</span></div><button class="g" style="margin:0" data-act="gamegrade" data-i="'+g.id+'">Props</button></div>'}).join('')+'</div>':(emptyBoardHtml()||(GAMES.length?'<div class="muted">No live or upcoming matches with PrizePicks or Underdog lines.</div>':'<div class="warn">No schedule loaded yet. Run the "Update CS2 games" workflow.</div>')))+'</div>';
  h+='<div><div class="card"><h2>Top graded lines</h2>'+(ls.length?ls.map(function(l){return '<div class="item"><div><b>'+esc(l.player)+'</b> <span class="muted">'+esc(l.team)+'</span><br><span class="muted">'+sname(l.stat,l.period)+' · line '+l.line+' · proj '+l.g.proj+'</span></div><div>'+gradePill(l.g)+'</div></div>'}).join(''):(emptyBoardHtml()||'<div class="warn">No lines yet. Add a PrizePicks line in the Lines tab.</div>'))+'</div>';
  h+='<div class="card"><h2>Quick actions</h2><div class="btns"><button class="b" data-act="go" data-t="grader">Grade a prop</button><button class="g" data-act="go" data-t="lines">Lines</button><button class="g" data-act="go" data-t="slip">Slip ('+slip.length+')</button><button class="g" data-act="reload">Reload data</button></div></div></div></div>';return h+recordCard()+updateSheetCard()+opts()}
 // ---- Cito panel on the Games tab (team_strength.json, built by cito_update.py; the site never calls Cito)
@@ -252,7 +254,7 @@ function citoBlock(g){if(!STRENGTH)return '<div class="cito muted">No Cito data 
  if(od&&od.p)src.push('odds: '+esc(String(od.src||'').replace(/_/g,' '))+', '+esc(ftime(od.at)));else src.push(STRENGTH.odds?'odds: n/a for this match':'odds: n/a (needs Cito Pro)');
  return h+'<div class="muted cs">'+notes.concat(src).join(' · ')+'</div></div>'}
 function liveCard(g){var sc=(g.s1!=null&&g.s2!=null)?' <span style="color:var(--green);margin-left:8px">'+g.s1+' – '+g.s2+'</span>':'';
- return '<div class="card"><div class="muted"><span class="pill">LIVE</span> '+esc(g.tournament||'')+' · started '+esc(ftime(g.start))+(g.bo?' · Bo'+esc(g.bo):'')+'</div><div class="big">'+esc(g.team1)+' <span class="vs">vs</span> '+esc(g.team2)+sc+'</div>'+blowGameLine(g)+citoBlock(g)+(function(){var m=matchFor(g);return m&&Object.keys(m.props).length?'<h3 style="margin:10px 0 4px">Prop tracker</h3>'+trackerBlock(m,true):''})()+'<div class="btns"><button class="g" data-act="gamegrade" data-i="'+g.id+'">See props</button><button class="g" data-act="gsub" data-v="started">Pre-game lines</button></div>'+streamBlock(g,true)+'</div>'}
+ return '<div class="card"><div class="muted"><span class="pill">LIVE</span> '+esc(g.tournament||'')+evBadge(g)+' · started '+esc(ftime(g.start))+(g.bo?' · Bo'+esc(g.bo):'')+'</div><div class="big">'+esc(g.team1)+' <span class="vs">vs</span> '+esc(g.team2)+sc+'</div>'+blowGameLine(g)+citoBlock(g)+(function(){var m=matchFor(g);return m&&Object.keys(m.props).length?'<h3 style="margin:10px 0 4px">Prop tracker</h3>'+trackerBlock(m,true):''})()+'<div class="btns"><button class="g" data-act="gamegrade" data-i="'+g.id+'">See props</button><button class="g" data-act="gsub" data-v="started">Pre-game lines</button></div>'+streamBlock(g,true)+'</div>'}
 // ---- Started games: pre-game line + live prop tracker (display only; nothing is saved).
 // Pre-game line = the last line the lines feed saw before the start (lines_history.json keeps updating a line only until
 // the match starts). Opening line = first seen. "Now" = the book\'s current line in lines.json when it differs.
@@ -312,7 +314,7 @@ function trackerBlock(m,compact){var rows=Object.keys(m.props).map(function(k){r
  return h+'</table></div>'+(compact?'':'<div class="muted cs">Pre-game line = last line seen before the start (opening line in brackets when it moved). Maps 1-2 so far comes from bo3.gg per finished map (it posts a map\'s stats only after the map ends, sometimes late), checked about every minute; there is no round-by-round feed.</div>')}
 function startedCard(m){var g=m.game,live=g&&isLive(g),sc=g&&g.s1!=null&&g.s2!=null?' <span style="color:var(--green);margin-left:8px">'+g.s1+' – '+g.s2+'</span>':'';
  var L=g&&LIVE[g.id],maps=L&&L.maps?L.maps.map(function(x){return 'Map '+x.n+(x.map?' '+esc(String(x.map).replace(/^de_/,'')):'')+': '+esc(x.status||'?')+(x.score&&x.score[0]!=null?' '+x.score[0]+'-'+x.score[1]:'')}).join(' · '):'';
- return '<div class="card">'+'<div class="muted">'+(live?'<span class="pill">LIVE</span> ':'')+'started '+esc(ftime(m.start))+(g&&g.tournament?' · '+esc(g.tournament):'')+'</div><div class="big">'+esc(m.t1)+' <span class="vs">vs</span> '+esc(m.t2)+sc+'</div>'+blowGameLine(g||{team1:m.t1,team2:m.t2,start:m.start})+(maps?'<div class="muted">'+maps+'</div>':'')+trackerBlock(m)+'</div>'}
+ return '<div class="card">'+'<div class="muted">'+(live?'<span class="pill">LIVE</span> ':'')+'started '+esc(ftime(m.start))+(g&&g.tournament?' · '+esc(g.tournament):'')+evBadge(g)+'</div><div class="big">'+esc(m.t1)+' <span class="vs">vs</span> '+esc(m.t2)+sc+'</div>'+blowGameLine(g||{team1:m.t1,team2:m.t2,start:m.start})+(maps?'<div class="muted">'+maps+'</div>':'')+trackerBlock(m)+'</div>'}
 function liveView(){var v=sel.gv||(liveGames().length?'live':'up');return tab==='games'&&(v==='live'||v==='started')&&!(typeof document!=='undefined'&&document.hidden)}
 function pollLive(force){if(LIVE_OK===false||!liveView())return;if(typeof location!=='undefined'&&/github\.io$|^$/.test(location.hostname||''))return;if(!force&&NOW()-LIVE_T<55000)return;LIVE_T=NOW();
  var ids=startedMatches().filter(function(m){return m.game&&isLive(m.game)&&Object.keys(m.props).length}).map(function(m){return m.game.id});if(!ids.length)return;var changed=false;
@@ -351,7 +353,7 @@ function viewLines(){var ls=allLines();
  vis.sort(function(a,b){var x=a[0].start||'9',y=b[0].start||'9';if(x!==y)return x<y?-1:1;var ea=a[0].g?a[0].g.edgePP:-999,eb=b[0].g?b[0].g.edgePP:-999;return eb-ea});
  var perLabel=!vis.length?'':(has12&&has1?(pf==='m1'?'Map 1':'Maps 1-2'):(has1?'Map 1':'Maps 1-2'));
  h+='<div><div class="card"><h2>'+(d==='all'?'All lines':esc(dayLabel(d))+' lines')+' · '+(bf==='pp'?'PrizePicks':bf==='ud'?'Underdog':'PrizePicks + Underdog')+(perLabel?' · '+perLabel:'')+'</h2>'+(boardEmpty()?emptyBoardHtml():(LINES.length?'<div class="muted">Feed observed '+esc(META.lines_at||'')+'. Refreshes about every hour. Times are Central.</div>':'<div class="warn">No lines feed is connected yet, so lines are manual. PrizePicks is the source of truth: type the line you see in the app.</div>'))+
- (vis.length?vis.map(function(a){var l=a[0],i=a[1],g=l.g,live=l.team&&liveFor(l.team),started=l.start&&new Date(l.start).getTime()<NOW();return '<div class="item"><div><b>'+esc(l.player)+'</b> <span class="muted">'+esc(l.team)+(l.opp?' vs '+esc(l.opp):'')+'</span>'+(live?' <span class="pill">LIVE</span>':(started?' <span class="muted">· started</span>':''))+'<br><span class="muted">'+(l.book?esc(l.book)+' · ':'')+sname(l.stat,l.period)+(l.period==='Map 1'?' <span class="pill">Map 1</span>':'')+(l.start?' · '+esc(fmt(l.start)):'')+' · </span><b>'+l.line+'</b>'+(g?'<span class="muted"> · proj '+g.proj+'</span>'+hitBoxes(g.hits):'<span class="muted"> · Can\'t grade this one. '+(rp(l)?'Research the player in the Players tab':'Research needed')+'</span>')+blowPropLine(g||{team:l.team,opp:l.opp,start:l.start},{start:l.start,team:l.team,opp:l.opp})+'</div><div style="text-align:right">'+(g?gradePill(g)+'<br>':'')+(g||!rp(l)?'<button class="g" data-act="lg" data-i="'+i+'">Grade</button> <button class="g" data-act="ladd" data-i="'+i+'">+ Slip</button>':'<button class="g" data-act="plview" data-p="'+esc(rp(l))+'">Research</button>')+(l.src==='manual'?' <button class="g" data-act="ldel" data-i="'+l.idx+'">✕</button>':'')+'</div></div>'}).join(''):(emptyBoardHtml()||'<div class="muted">No lines for this day yet. New lines appear as the books post them.</div>'))+'</div>';
+ (vis.length?vis.map(function(a){var l=a[0],i=a[1],g=l.g,live=l.team&&liveFor(l.team),started=l.start&&new Date(l.start).getTime()<NOW();return '<div class="item"><div><b>'+esc(l.player)+'</b> <span class="muted">'+esc(l.team)+(l.opp?' vs '+esc(l.opp):'')+'</span>'+evBadgeLine(l)+(live?' <span class="pill">LIVE</span>':(started?' <span class="muted">· started</span>':''))+'<br><span class="muted">'+(l.book?esc(l.book)+' · ':'')+sname(l.stat,l.period)+(l.period==='Map 1'?' <span class="pill">Map 1</span>':'')+(l.start?' · '+esc(fmt(l.start)):'')+' · </span><b>'+l.line+'</b>'+(g?'<span class="muted"> · proj '+g.proj+'</span>'+hitBoxes(g.hits):'<span class="muted"> · Can\'t grade this one. '+(rp(l)?'Research the player in the Players tab':'Research needed')+'</span>')+blowPropLine(g||{team:l.team,opp:l.opp,start:l.start},{start:l.start,team:l.team,opp:l.opp})+'</div><div style="text-align:right">'+(g?gradePill(g)+'<br>':'')+(g||!rp(l)?'<button class="g" data-act="lg" data-i="'+i+'">Grade</button> <button class="g" data-act="ladd" data-i="'+i+'">+ Slip</button>':'<button class="g" data-act="plview" data-p="'+esc(rp(l))+'">Research</button>')+(l.src==='manual'?' <button class="g" data-act="ldel" data-i="'+l.idx+'">✕</button>':'')+'</div></div>'}).join(''):(emptyBoardHtml()||'<div class="muted">No lines for this day yet. New lines appear as the books post them.</div>'))+'</div>';
  h+='</div>';return h}
 // ---- track record: every saved line is graded with stats from BEFORE its match date, then checked against the real result
 var TS_CACHE={};
@@ -448,6 +450,121 @@ function recordCard(){if(HIST==null)return '';var h='<div class="card" style="ma
 // Hidden when HIST is missing (customers never receive lines_history.json). Does not change recordCard or old locks.
 function updateSheetCard(){if(HIST==null||typeof GPTrackSheet==='undefined')return '';return GPTrackSheet.html(GPTrackSheet.fromEntries(HIST,NOW()),esc)}
 function opts(){var t={};DB.forEach(function(p){t[p.team]=1});return '<datalist id="plist">'+DB.map(function(p){return '<option value="'+esc(p.name)+'">'+esc(p.team)}).join('')+'</datalist><datalist id="tlist">'+Object.keys(t).sort().map(function(x){return '<option value="'+esc(x)+'">'}).join('')+'</datalist>'}
+
+// ---- Slip reader (Grader tab): upload a slip screenshot, edit the reads, then grade with our math.
+var slipUI={step:'idle',error:'',note:'',book:'',entry:null,payout:null,picks:[],results:null,busy:false,fileName:''};
+function slipReset(){slipUI={step:'idle',error:'',note:'',book:'',entry:null,payout:null,picks:[],results:null,busy:false,fileName:''}}
+function slipVerdictHtml(r,g){
+ if(r.error&&!g)return '<div class="slip-verdict miss">Glocky couldn\'t grade this pick: '+esc(r.error)+'.</div>';
+ if(r.verdict==='agree')return '<div class="slip-verdict ok">Glocky agrees — our grade is '+esc(g.pick)+' at a '+esc(g.grade)+(r.like?' (a play we like)':'')+'.</div>';
+ if(r.verdict==='disagree')return '<div class="slip-verdict no">Glocky disagrees — our grade is '+esc(g.pick)+' at a '+esc(g.grade)+'.</div>';
+ return '<div class="slip-verdict">Glocky graded this line, but the slip did not show Over or Under.</div>';
+}
+function slipClientGrade(p){
+ if(!p||!p.player)return null;
+ try{var g=gradeFor(p.player,p.team||'',p.stat==='hs'?'hs':'kills',p.line,p.opponent||p.opp||'',{book:p.book||slipUI.book||'PrizePicks',odds:p.odds,period:p.period||'Maps 1-2',start:p.start||''});return g&&!g.missing?g:null}catch(e){return null}
+}
+function slipSummaryHtml(s){
+ if(!s)return '';
+ var bits=[];
+ bits.push('Glocky likes <b>'+s.liked+' of '+s.total+'</b> legs');
+ if(s.agreed||s.disagreed)bits.push('agrees on '+s.agreed+', disagrees on '+s.disagreed);
+ if(s.skipped)bits.push(s.skipped+' could not be graded');
+ var h='<div class="card slip-sum"><h2>Slip summary</h2><div>'+bits.join(' · ')+'.</div>';
+ if(s.weakest)h+='<div class="muted" style="margin-top:6px">Weakest leg: '+esc(s.weakest)+'</div>';
+ if(s.flags&&s.flags.length)h+='<div class="muted" style="margin-top:6px">Flags: '+esc(s.flags.join('; '))+'</div>';
+ if(s.book||s.entry!=null||s.payout!=null)h+='<div class="muted" style="margin-top:6px">'+(s.book?esc(s.book):'')+(s.entry!=null?' · entry $'+s.entry:'')+(s.payout!=null?' · payout $'+s.payout:'')+'</div>';
+ return h+'</div>';
+}
+function slipRow(p,i){
+ var st=p.stat==='hs'?'hs':'kills';
+ var per=p.period==='Map 1'?'Map 1':'Maps 1-2';
+ var side=p.side==='under'?'under':(p.side==='over'?'over':'');
+ var hint=p.matched?'Matched as '+esc(p.matched.name)+(p.matched.team?' ('+esc(p.matched.team)+')':'')+(p.matched.match==='fuzzy'?' — check the name':'')+(p.boardNote?'. '+esc(p.boardNote):''):(p.error?esc(p.error):'Not matched yet — fix the name if this is wrong');
+ return '<div class="slip-row'+(p.error&&!p.matched?' bad':'')+'"><div class="row"><div><label>Player</label><input id="slip-p'+i+'" list="plist" value="'+esc(p.player||'')+'"></div><div><label>Side</label><select id="slip-side'+i+'"><option value=""'+(side?'':' selected')+'>—</option><option value="over"'+(side==='over'?' selected':'')+'>Over</option><option value="under"'+(side==='under'?' selected':'')+'>Under</option></select></div></div><div class="row"><div><label>Stat</label><select id="slip-st'+i+'"><option value="kills"'+(st==='kills'?' selected':'')+'>Kills</option><option value="hs"'+(st==='hs'?' selected':'')+'>Headshots</option></select></div><div><label>Line</label><input id="slip-l'+i+'" type="number" step="0.5" value="'+esc(p.line==null?'':p.line)+'"></div></div><div class="row"><div><label>Period</label><select id="slip-per'+i+'"><option value="Maps 1-2"'+(per==='Maps 1-2'?' selected':'')+'>Maps 1-2</option><option value="Map 1"'+(per==='Map 1'?' selected':'')+'>Map 1</option></select></div><div><label>Opponent</label><input id="slip-o'+i+'" list="tlist" value="'+esc(p.opponent||'')+'"></div></div><input type="hidden" id="slip-t'+i+'" value="'+esc(p.team||'')+'"><input type="hidden" id="slip-b'+i+'" value="'+esc(p.book||'')+'"><div class="muted">'+hint+'</div></div>';
+}
+function slipReaderHtml(){
+ var h='<div class="card slip-reader" id="slipreader"><h2>Upload slip</h2><div class="muted">Upload a screenshot of your PrizePicks or Underdog CS2 slip. Glocky reads the picks, you can fix any misreads, then we grade each leg with the same math as the Grader.</div>';
+ h+='<div class="btns slip-uprow"><label class="b slip-up"><input type="file" id="slipfile" class="slip-file" accept="image/png,image/jpeg,image/webp,image/*" aria-label="Upload image"><span class="slip-up-txt">Upload image</span></label>'+(slipUI.fileName?'<span class="slip-fname muted" id="slipfname">'+esc(slipUI.fileName)+'</span>':'<span class="slip-fname muted hide" id="slipfname"></span>')+(slipUI.picks.length||slipUI.results?'<button type="button" class="g" data-act="slipclear">Clear</button>':'')+'</div>';
+ if(slipUI.step==='reading')h+='<div class="muted" style="margin-top:8px">Reading your slip…</div>';
+ if(slipUI.step==='grading')h+='<div class="muted" style="margin-top:8px">Grading with our math…</div>';
+ if(slipUI.error)h+='<div class="warn" style="margin-top:8px">'+esc(slipUI.error)+'</div>';
+ if(slipUI.note)h+='<div class="muted" style="margin-top:6px">'+esc(slipUI.note)+'</div>';
+ if(slipUI.picks.length){
+  h+='<h2 style="margin-top:14px">Picks on this slip</h2><div class="muted">Edit anything that looks wrong, then grade the slip.</div>'+slipUI.picks.map(slipRow).join('');
+  h+='<div class="btns"><button type="button" class="b" data-act="slipgrade"'+(slipUI.busy?' disabled':'')+'>Grade slip</button></div>';
+ }
+ if(slipUI.results&&slipUI.results.summary){
+  h+=slipSummaryHtml(slipUI.results.summary);
+  h+='<div class="slip-results">'+slipUI.results.results.map(function(r,i){
+   var p=r.pick||{},g=slipClientGrade(p);
+   var head='<div class="slip-leg"><div class="muted">'+esc(p.player||'Unknown')+(p.side?' · '+esc(p.side):'')+' '+(p.line!=null?p.line:'')+' · '+esc(p.stat==='hs'?'Headshots':'Kills')+' · '+esc(p.period||'Maps 1-2')+'</div>'+slipVerdictHtml(r,g||r.grade);
+   if(g)return head+(window.GPCards?GPCards.html(g):'')+gradeCard(g)+'<div class="btns"><button type="button" class="b" data-act="slipadd" data-i="'+i+'">Add to slip</button></div></div>';
+   return head+'</div>';
+  }).join('')+'</div>';
+ }
+ return h+'</div>';
+}
+function slipCollect(){
+ var out=[],n=slipUI.picks.length;
+ for(var i=0;i<n;i++){
+  var p=$('slip-p'+i);if(!p)continue;
+  out.push({player:(p.value||'').trim(),team:(($('slip-t'+i)||{}).value||'').trim(),stat:(($('slip-st'+i)||{}).value)||'kills',line:parseFloat(($('slip-l'+i)||{}).value),period:(($('slip-per'+i)||{}).value)||'Maps 1-2',side:(($('slip-side'+i)||{}).value)||'',opponent:(($('slip-o'+i)||{}).value||'').trim(),book:(($('slip-b'+i)||{}).value||slipUI.book||'')});
+ }
+ return out;
+}
+function slipApplyRead(d){
+ slipUI.note=d&&d.note||'';
+ slipUI.book=d&&d.book||'';
+ slipUI.entry=d&&d.entry!=null?d.entry:null;
+ slipUI.payout=d&&d.payout!=null?d.payout:null;
+ slipUI.picks=(d&&d.picks)||[];
+ slipUI.results=null;
+ slipUI.step=slipUI.picks.length?'review':'error';
+ if(!slipUI.picks.length&&!slipUI.error)slipUI.error=(d&&d.error)||'We couldn\'t find any CS2 kills or headshots picks on that slip.';
+}
+function slipReadFile(file){
+ if(!file||slipUI.busy)return;
+ slipUI.fileName=file.name||'image';
+ if(file.size>5*1024*1024){slipUI.error='Please use an image under 5 MB.';slipUI.step='error';render();toast('Image is too large');return}
+ var typ=String(file.type||'').toLowerCase(),ok=typ==='image/png'||typ==='image/jpeg'||typ==='image/jpg'||typ==='image/webp'||/\.(png|jpe?g|webp)$/i.test(file.name||'');
+ if(!ok){slipUI.error='Please upload a PNG, JPG, or WebP image of your slip.';slipUI.step='error';render();return}
+ slipUI.busy=true;slipUI.step='reading';slipUI.error='';slipUI.results=null;slipUI.picks=[];render();
+ var fr=new FileReader();
+ fr.onerror=function(){slipUI.busy=false;slipUI.step='error';slipUI.error='Could not read that file.';render()};
+ fr.onload=function(){
+  fetch('/ai/slip/read',{method:'POST',credentials:'include',headers:{'Content-Type':'application/json'},body:JSON.stringify({image:String(fr.result||''),mime:typ==='image/jpg'?'image/jpeg':typ})})
+   .then(function(r){return r.json().catch(function(){return{}}).then(function(d){return{ok:r.ok,status:r.status,d:d}})})
+   .then(function(x){
+     slipUI.busy=false;
+     if(x.status===401){slipUI.error='Please sign in to use the slip reader.';slipUI.step='error'}
+     else if(x.status===503&&x.d&&x.d.error){slipUI.error=x.d.error;slipUI.step='error'}
+     else if(x.status===429&&x.d&&x.d.error){slipUI.error=x.d.error;slipUI.step='error'}
+     else if(x.ok&&x.d&&x.d.picks&&x.d.picks.length){slipApplyRead(x.d);toast('Check the picks, then grade the slip')}
+     else{slipUI.error=(x.d&&x.d.error)||'We couldn\'t read that image. Try a clearer screenshot of a CS2 slip.';slipUI.step='error';if(x.d)slipApplyRead(x.d)}
+     render();var el=$('slipreader');if(el)el.scrollIntoView({block:'start'})
+   })
+   .catch(function(){slipUI.busy=false;slipUI.step='error';slipUI.error='Could not reach Glocky. Check your connection and try again.';render()});
+ };
+ fr.readAsDataURL(file);
+}
+function slipGradeNow(){
+ if(slipUI.busy)return;
+ var picks=slipCollect();
+ if(!picks.length){toast('Add at least one pick');return}
+ slipUI.busy=true;slipUI.step='grading';slipUI.picks=picks;render();
+ fetch('/ai/slip/grade',{method:'POST',credentials:'include',headers:{'Content-Type':'application/json'},body:JSON.stringify({picks:picks,book:slipUI.book,entry:slipUI.entry,payout:slipUI.payout})})
+  .then(function(r){return r.json().catch(function(){return{}}).then(function(d){return{ok:r.ok,status:r.status,d:d}})})
+  .then(function(x){
+    slipUI.busy=false;
+    if(x.status===401){slipUI.error='Please sign in to use the slip reader.';slipUI.step='review'}
+    else if(!x.ok){slipUI.error=(x.d&&x.d.error)||'Could not grade this slip.';slipUI.step='review'}
+    else{slipUI.error='';slipUI.results=x.d;slipUI.step='done';toast('Slip graded')}
+    render();var el=$('slipreader');if(el)el.scrollIntoView({block:'start'})
+  })
+  .catch(function(){slipUI.busy=false;slipUI.step='review';slipUI.error='Could not reach Glocky. Check your connection and try again.';render()});
+}
+
 function viewGrader(){var combo=isCombo(sel.player),p=combo?{name:sel.player}:find(sel.player,sel.team);
  var per=sel.period||'Maps 1-2';if(per!=='Map 1')per='Maps 1-2';sel.period=per;
  var line=parseFloat(sel.line),g=p&&!isNaN(line)?gradeFor(sel.player,sel.team||'',sel.stat,line,sel.opp,{book:sel.book||'PrizePicks',odds:sel.odds,period:per}):null,miss='';if(sel.odds!=null&&sel.oddsLine==null)sel.oddsLine=String(line);if(g&&g.missing){miss=g.missing;g=null}
@@ -459,7 +576,7 @@ function viewGrader(){var combo=isCombo(sel.player),p=combo?{name:sel.player}:fi
  else if(!p)h+='<div class="card"><div class="warn">No player named "'+esc(sel.player)+'" in the data.</div></div>';
  else if(!g&&miss)h+='<div class="card"><div class="warn">Cannot grade this combo: no usable '+unit+' stats for '+esc(miss)+'. Every player in a combo needs stats.</div></div>';
  else if(!g)h+='<div class="card"><div class="warn">Not enough '+unit+' data for '+esc(p.name)+' yet'+(per==='Map 1'?' (needs Map 1 logs)':' (needs matches where both Map 1 and Map 2 were played)')+' or the line is empty.</div></div>';
- else h+='<div>'+(window.GPCards?GPCards.html(g):'')+gradeCard(g)+scoutCard(g)+'</div>';return h+'</div>'+opts()}
+ else h+='<div>'+(window.GPCards?GPCards.html(g):'')+gradeCard(g)+scoutCard(g)+'</div>';return h+'</div>'+slipReaderHtml()+opts()}
 // ---- bar chart: real number on every bar, dashed line = the prop line, green over / red under
 function chart(cs,st,line,n){var rows=cs.slice(0,n||10).filter(function(c){return c[st]!=null}).reverse();if(!rows.length)return '<div class="muted">No '+(st==='hs'?'headshot':'kill')+' data for this selection.</div>';
  var hasL=line!=null&&!isNaN(line),mx=Math.max.apply(null,rows.map(function(c){return c[st]}).concat([hasL?line:0,1]))*1.25;
@@ -670,7 +787,7 @@ function openGP(id){var g=null;GAMES.forEach(function(x){if(String(x.id)===Strin
  var all=allLines(),mine=[];all.forEach(function(l,i){if(teq(l.team,g.team1)||teq(l.team,g.team2))mine.push([l,i])});
  function side(t){return mine.filter(function(a){return teq(a[0].team,t)}).sort(function(a,b){return a[0].player.toLowerCase()<b[0].player.toLowerCase()?-1:a[0].player.toLowerCase()>b[0].player.toLowerCase()?1:(a[0].stat<b[0].stat?-1:1)})}
  var s1=side(g.team1),s2=side(g.team2),gr=mine.filter(function(a){return a[0].g}).length;
- var body='<div class="muted">'+esc(g.tournament||'')+' · '+esc(fmt(g.start))+(g.bo?' · Bo'+esc(g.bo):'')+'</div><div class="big" style="margin:4px 0 2px">'+esc(g.team1)+' <span class="vs">vs</span> '+esc(g.team2)+'</div>'+blowGameLine(g)+'<div class="muted" style="margin-bottom:8px">'+(isUp(g)?mine.length+' props · '+gr+' graded'+(mine.some(function(a){return a[0].period==='Map 1'})?' · Map 1':' · Maps 1-2'):'')+'</div>';
+ var body='<div class="muted">'+esc(g.tournament||'')+evBadge(g)+' · '+esc(fmt(g.start))+(g.bo?' · Bo'+esc(g.bo):'')+'</div><div class="big" style="margin:4px 0 2px">'+esc(g.team1)+' <span class="vs">vs</span> '+esc(g.team2)+'</div>'+blowGameLine(g)+'<div class="muted" style="margin-bottom:8px">'+(isUp(g)?mine.length+' props · '+gr+' graded'+(mine.some(function(a){return a[0].period==='Map 1'})?' · Map 1':' · Maps 1-2'):'')+'</div>';
  var started=!isUp(g);
  if(started){body+='<div class="warn" style="margin-top:10px">'+(g.status==='finished'?'This game is finished, so props are closed.':'This game is already live, so props are closed.')+'</div>'}
  else if(!mine.length)body+=(emptyBoardHtml()||'<div class="warn">No props posted for this match yet. PrizePicks and Underdog usually post a few hours before the start, and this list updates about every hour.</div>');
@@ -718,9 +835,13 @@ document.addEventListener('click',function(e){var b=e.target.closest('[data-act]
  else if(a==='scopy'){var t=slip.map(function(s){return s.player+' '+sname(s.stat,s.period)+' '+s.pick+' '+s.line}).join('\n');(navigator.clipboard?navigator.clipboard.writeText(t):Promise.reject()).then(function(){toast('Copied')}).catch(function(){toast('Copy not allowed here')})}
  else if(a==='spp'){window.open('https://app.prizepicks.com','_blank','noopener');toast('Opening PrizePicks. Enter your picks there')}
  else if(a==='simg'||a==='sshare'){if(!slip.length){toast('Slip is empty');return}exportSlipCards()}
+ else if(a==='slipgrade'){slipGradeNow()}
+ else if(a==='slipclear'){slipReset();render();toast('Slip reader cleared')}
+ else if(a==='slipadd'){var rr=slipUI.results&&slipUI.results.results&&slipUI.results.results[i];if(!rr){toast('Grade the slip first');return}var gp=slipClientGrade(rr.pick||{});if(!gp){toast('Can\'t add this pick');return}addSlip(gp)}
+ else if(a==='slipto'){go('grader');var el=$('slipreader');if(el)setTimeout(function(){el.scrollIntoView({block:'start'})},50)}
 });
 document.addEventListener('input',function(e){if(e.target.id==='pq'){sel.q=e.target.value;var pos=e.target.selectionStart;render();var n=$('pq');n.focus();n.setSelectionRange(pos,pos)}});
-document.addEventListener('change',function(e){var i=e.target.id,m={pt:'tm',pn:'n',pv:'v',po:'o',pl1:'l1',pl2:'l2'};if(m[i]){sel[m[i]]=e.target.value;render();toast('Updated')}});
+document.addEventListener('change',function(e){var i=e.target.id,m={pt:'tm',pn:'n',pv:'v',po:'o',pl1:'l1',pl2:'l2'};if(m[i]){sel[m[i]]=e.target.value;render();toast('Updated')}else if(i==='slipfile'||i==='aislip'){var f=e.target.files&&e.target.files[0];if(f){var nm=f.name||'image';if(i==='slipfile'){slipUI.fileName=nm;var sf=$('slipfname');if(sf){sf.textContent=nm;sf.classList.remove('hide')}}else{var af=$('aifname');if(af){af.textContent=nm;af.classList.remove('hide')}}if(i==='aislip')chatSlipFile(f);else slipReadFile(f)}e.target.value=''}});
 // ---- data
 // admin key: open the site once as  /#admin=YOURKEY  to unlock the Track record on this device ( #admin=off removes it )
 (function(){try{var m=/admin=([^&]*)/.exec(location.hash||'');if(m){var k=decodeURIComponent(m[1]);if(k==='off')localStorage.removeItem('gp_admin');else localStorage.setItem('gp_admin',k);history.replaceState(null,'',location.pathname+location.search)}}catch(e){}})();
@@ -740,12 +861,43 @@ setInterval(function(){if(document.hidden||!DB.length)return;var ae=document.act
 // lines with the same v1e math as the Grader. Gemini only phrases the reply. The chat renders
 // the current Grader trading card (GPCards.html) when a grade comes back.
 var chatLog=[],chatBusy=false;
+function chatSlipFile(file){
+ if(chatBusy||!file)return;
+ if(file.size>5*1024*1024){addMsg('a','Please use an image under 5 MB.');return}
+ chatBusy=true;var wait=addMsg('a','Reading your slip...');
+ var typ=String(file.type||'').toLowerCase();
+ var fr=new FileReader();
+ fr.onerror=function(){chatBusy=false;fillAssistant(wait,'Could not read that file.',null)};
+ fr.onload=function(){
+  fetch('/ai/slip/read',{method:'POST',credentials:'include',headers:{'Content-Type':'application/json'},body:JSON.stringify({image:String(fr.result||''),mime:typ==='image/jpg'?'image/jpeg':typ})})
+   .then(function(r){return r.json().catch(function(){return{}}).then(function(d){return{ok:r.ok,status:r.status,d:d}})})
+   .then(function(x){
+     var a;
+     if(x.status===401)a='Please sign in to use the slip reader.';
+     else if(x.d&&x.d.error&&!(x.ok&&x.d.picks&&x.d.picks.length))a=x.d.error;
+     else if(x.ok&&x.d&&x.d.picks&&x.d.picks.length){
+       slipApplyRead(x.d);
+       var lines=x.d.picks.map(function(p){return (p.player||'?')+' '+(p.side||'')+' '+(p.line!=null?p.line:'')+' '+(p.stat==='hs'?'headshots':'kills')+' '+(p.period||'')});
+       a='I found '+x.d.picks.length+' pick'+(x.d.picks.length===1?'':'s')+' on this slip:\n'+lines.join('\n')+'\n\nYou can fix any misreads on the Grader tab, then grade the slip.';
+     }else a=(x.d&&x.d.error)||'We couldn\'t read that image. Try a clearer screenshot of a CS2 slip.';
+     fillAssistant(wait,String(a).replace(/^\s*glocky says[:\-\s]*/i,''),null);
+     if(x.ok&&x.d&&x.d.picks&&x.d.picks.length){
+       var btn=document.createElement('button');btn.type='button';btn.className='b';btn.setAttribute('data-act','slipto');btn.textContent='Review on Grader';
+       wait.appendChild(btn);
+     }
+   })
+   .catch(function(){fillAssistant(wait,'Could not reach Glocky. Check your connection and try again.',null)})
+   .then(function(){chatBusy=false;scrollChat(wait)});
+ };
+ fr.readAsDataURL(file);
+}
+
 function chatUI(){if($('aibtn'))return;
  var b=document.createElement('button');b.id='aibtn';b.type='button';b.textContent='Ask Glocky';document.body.appendChild(b);
  var p=document.createElement('div');p.id='aipanel';p.className='hide';
- p.innerHTML='<div class="aih"><b>Ask Glocky</b><button type="button" id="aix" aria-label="Close">✕</button></div><div id="aimsgs"></div><div class="aif"><input id="aiq" placeholder="e.g. What is EliGE\'s HS% on LAN?" maxlength="400" autocomplete="off"><button type="button" id="ais">Send</button></div>';
+ p.innerHTML='<div class="aih"><b>Ask Glocky</b><button type="button" id="aix" aria-label="Close">✕</button></div><div id="aimsgs"></div><div class="aif"><label class="aiup" title="Upload image"><input type="file" id="aislip" class="slip-file" accept="image/png,image/jpeg,image/webp,image/*" aria-label="Upload image"><span class="slip-up-txt">Upload image</span></label><span class="slip-fname muted hide" id="aifname"></span><input id="aiq" placeholder="e.g. What is EliGE\'s HS% on LAN?" maxlength="400" autocomplete="off"><button type="button" id="ais">Send</button></div>';
  document.body.appendChild(p);
- function show(){p.classList.toggle('hide');document.body.classList.toggle('aipanel-open',!p.classList.contains('hide'));if(!p.classList.contains('hide')){if(!chatLog.length)addMsg('a',"Ask me about our players and teams — for example EliGE's headshot percentage on LAN, a team's VRS rank, or 'EliGE over 35.5 kills maps 1-2?'. I only answer from our stats and Cito data, and I'll grade a line with the same math as the Grader.");$('aiq').focus()}}
+ function show(){p.classList.toggle('hide');document.body.classList.toggle('aipanel-open',!p.classList.contains('hide'));if(!p.classList.contains('hide')){if(!chatLog.length)addMsg('a',"Ask me about our players and teams — for example EliGE's headshot percentage on LAN, a team's VRS rank, or 'EliGE over 35.5 kills maps 1-2?'. I only answer from Glocky's data, and I'll grade a line with the same math as the Grader.");$('aiq').focus()}}
  b.onclick=show;$('aix').onclick=show;
  $('ais').onclick=send;$('aiq').addEventListener('keydown',function(e){if(e.key==='Enter')send()})}
 function addMsg(who,text){var d=document.createElement('div');d.className='aim '+who;if(who==='a'){var h=document.createElement('div');h.className='aisay';h.textContent='Glocky says';var tx=document.createElement('div');tx.className='aitxt';tx.textContent=text;d.appendChild(h);d.appendChild(tx)}else d.textContent=text;var m=$('aimsgs');m.appendChild(d);m.scrollTop=m.scrollHeight;return d}

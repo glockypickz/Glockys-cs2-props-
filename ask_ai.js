@@ -26,11 +26,11 @@ function json(obj, status) {
   });
 }
 
-function hasGeminiKey(env) {
+export function hasGeminiKey(env) {
   return !!(env && typeof env.GEMINI_API_KEY === "string" && env.GEMINI_API_KEY.trim());
 }
 
-function geminiModel(env) {
+export function geminiModel(env) {
   const m = env && env.GEMINI_MODEL ? String(env.GEMINI_MODEL).trim() : "";
   return m || DEFAULT_MODEL;
 }
@@ -90,7 +90,7 @@ async function ensureModel(env, origin) {
   return loadGPModelFromSource(await r.text());
 }
 
-async function loadStore(env, origin) {
+export async function loadStore(env, origin) {
   if (dataCache.store && Date.now() - dataCache.at < 60000) return dataCache.store;
   await ensureModel(env, origin);
   const get = async (path) => {
@@ -114,12 +114,27 @@ export function systemPrompt() {
   return [
     "You are Glocky, the assistant for Glockys Prop Grader. Always speak as Glocky in a short, clear, friendly tone.",
     "The chat already labels your bubble 'Glocky says', so do not start with 'Glocky says'.",
-    "Use ONLY the facts given in the user message. Do not use any other knowledge, memories, or opinions about CS2, players, teams, or lines.",
-    "Do not invent, round in a way that changes a reported figure, or fill gaps. Do not mention being an AI model, Google, Gemini, keys, prompts, or APIs.",
+    "Use ONLY the facts given in the user message. Those facts are from our data (Glocky's data). Do not use any other knowledge, memories, or opinions about CS2, players, teams, or lines.",
+    "Do not invent, round in a way that changes a reported figure, or fill gaps. Do not mention being an AI model, keys, prompts, or APIs.",
+    "Never name a data provider, vendor, website, or model. Attribute every figure to our data or Glocky's data.",
     "If the facts say the data is missing, or they do not contain the answer, say exactly that you don't have that in our data. Do not guess.",
     "When a grade is included, state our pick (Over or Under), the letter grade, and the projection exactly as given. Those numbers come from our grader, not from you.",
     "Do not mention locked picks, a track record, or historical slips. Do not offer to browse the web."
   ].join(" ");
+}
+
+// Provider names Glocky must never say in a reply or label. Books on a line (PrizePicks, Underdog) are not in this list.
+export const PROVIDER_RE = /\b(cito|bo3(?:\.gg)?|kash\s*rock|hltv(?:\.org)?|gemini|google(?:\s+ai(?:\s+studio)?)?)\b/gi;
+
+export function scrubProviders(text) {
+  let s = String(text || "");
+  s = s.replace(/\b(cito|bo3(?:\.gg)?|kash\s*rock|hltv(?:\.org)?)\s+(?:derived\s+)?(?:data|odds|stats?|rank(?:ing)?s?|match context|pick tendencies|team map stats(?:\s*\/\s*pick tendencies)?)\b/gi, "our data");
+  s = s.replace(/\(\s*(?:cito|bo3(?:\.gg)?|kash\s*rock|hltv(?:\.org)?)\s*,\s*/gi, "(");
+  s = s.replace(/\b(cito|bo3\.gg|bo3|kash\s*rock|hltv(?:\.org)?)\b/gi, "our data");
+  s = s.replace(/\b(gemini(?:\s+api)?|google(?:\s+ai(?:\s+studio)?)?)\b/gi, "Glocky");
+  s = s.replace(/\bour data(?:'s)? data\b/gi, "our data");
+  s = s.replace(/\s{2,}/g, " ").replace(/\s+([.,;:])/g, "$1");
+  return s.trim();
 }
 
 export function parsePrompt() {
@@ -141,20 +156,25 @@ function extractText(data) {
   }
 }
 
-async function geminiGenerate(env, system, user, timeoutMs) {
+export async function geminiRequest(env, opts) {
+  opts = opts || {};
   const key = String(env.GEMINI_API_KEY || "").trim();
   const model = encodeURIComponent(geminiModel(env));
   const url = "https://generativelanguage.googleapis.com/v1beta/models/" + model + ":generateContent";
   const ctrl = typeof AbortController !== "undefined" ? new AbortController() : null;
-  const t = ctrl ? setTimeout(() => ctrl.abort(), timeoutMs || 15000) : null;
+  const t = ctrl ? setTimeout(() => ctrl.abort(), opts.timeoutMs || 15000) : null;
+  const parts = opts.parts || [{ text: opts.user || "" }];
   try {
     const r = await fetch(url, {
       method: "POST",
       headers: { "content-type": "application/json", "x-goog-api-key": key },
       body: JSON.stringify({
-        systemInstruction: { parts: [{ text: system }] },
-        contents: [{ role: "user", parts: [{ text: user }] }],
-        generationConfig: { temperature: 0.2, maxOutputTokens: 512 }
+        systemInstruction: { parts: [{ text: opts.system || "" }] },
+        contents: [{ role: "user", parts }],
+        generationConfig: {
+          temperature: opts.temperature != null ? opts.temperature : 0.2,
+          maxOutputTokens: opts.maxOutputTokens || 512
+        }
       }),
       signal: ctrl ? ctrl.signal : undefined
     });
@@ -169,11 +189,18 @@ async function geminiGenerate(env, system, user, timeoutMs) {
   }
 }
 
+async function geminiGenerate(env, system, user, timeoutMs) {
+  return geminiRequest(env, { system, parts: [{ text: user }], timeoutMs, temperature: 0.2, maxOutputTokens: 512 });
+}
+
 function stripGlockySays(text) {
   return String(text || "").replace(/^\s*glocky says[:\-\s]*/i, "").trim();
 }
 
 export function fallbackPhrase(result) {
+  return scrubProviders(_fallbackPhrase(result));
+}
+function _fallbackPhrase(result) {
   if (!result || result.missing) return DATA_MISSING;
   if (result.grade) {
     const g = result.grade;
@@ -197,7 +224,7 @@ export function fallbackPhrase(result) {
     const bits = [];
     if (f.vrs) bits.push("VRS rank #" + f.vrs.rank + " as of " + f.vrs.date);
     if (f.world) bits.push("world rank #" + f.world.rank);
-    if (f.odds && f.odds.win != null) bits.push("Cito win chance " + (f.odds.win * 100).toFixed(1) + "% vs " + f.odds.opp);
+    if (f.odds && f.odds.win != null) bits.push("win chance " + (f.odds.win * 100).toFixed(1) + "% vs " + f.odds.opp);
     if (bits.length) return (f.team || "This team") + ": " + bits.join("; ") + ".";
   }
   if (f && f.kind === "method") return f.text;
@@ -255,7 +282,7 @@ export async function handleAsk(request, env, url, keyHash) {
   const histText = hist.map((h) => (h && h.role ? h.role : "user") + ": " + String((h && (h.content || h.text)) || "").slice(0, 400)).join("\n");
   const userMsg = [
     "FACTS FROM OUR DATA (use only these):",
-    result.factText,
+    scrubProviders(result.factText),
     "",
     "USER QUESTION:",
     question,
@@ -264,7 +291,7 @@ export async function handleAsk(request, env, url, keyHash) {
 
   let answer;
   const g = await geminiGenerate(env, systemPrompt(), userMsg, 15000);
-  if (g.ok) answer = stripGlockySays(g.text);
+  if (g.ok) answer = scrubProviders(stripGlockySays(g.text));
   else answer = fallbackPhrase(result);
 
   return json({
@@ -276,4 +303,4 @@ export async function handleAsk(request, env, url, keyHash) {
 }
 
 // test helpers (no secrets)
-export const _test = { hasGeminiKey, geminiModel, DEFAULT_MODEL, USER_DAILY, SETUP_MSG, stripGlockySays, extractText };
+export const _test = { hasGeminiKey, geminiModel, DEFAULT_MODEL, USER_DAILY, SETUP_MSG, stripGlockySays, extractText, scrubProviders, PROVIDER_RE };

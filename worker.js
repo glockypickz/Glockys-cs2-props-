@@ -5,6 +5,7 @@ import { handlePush, handlePushAdmin, isPushAdminPath } from "./push.js";
 import { handleSupport, handleSupportAdmin, isSupportAdminPath } from "./support_api.js";
 import { handleAsk, isAskPath } from "./ask_ai.js";
 import { handleWins, isWinsPath } from "./wins_api.js";
+import { handleSlip, isSlipPath } from "./slip_ai.js";
 
 const KEY_HASH = "07ba3c41d62c5e42aee4040361070343a7454bafdc5ed8490c3b5c1ae2271a4d";
 
@@ -72,6 +73,7 @@ export default {
     if (url.pathname.startsWith("/support/")) return handleSupport(request, env, url, KEY_HASH, ctx);
     if (isAskPath(url.pathname)) return handleAsk(request, env, url, KEY_HASH);
     if (isWinsPath(url.pathname)) return handleWins(request, env, url, KEY_HASH);
+    if (isSlipPath(url.pathname)) return handleSlip(request, env, url, KEY_HASH);
     if (url.pathname.startsWith("/live/")) return live(url, ctx);
     if (url.pathname === "/lines_history.json") {
       // Admin only: the admin key header (as before) or a logged-in admin account / admin session cookie.
