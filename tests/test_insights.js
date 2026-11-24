@@ -53,7 +53,7 @@ function grade(extra) {
 console.log("headline");
 var ins = I.build(grade());
 check("builds", !!ins);
-check("title uses pick and line", ins.headline.title === "Why we lean Under 24.5");
+check("title uses pick and line", ins.headline.title === "Why Glocky chooses Under 24.5");
 check("projection and gap are in the text", ins.headline.text.indexOf("Projection 20.1") > -1 && ins.headline.text.indexOf("4.4 below the line") > -1);
 check("chance and letter are in the text", ins.headline.text.indexOf("64% chance of Under (F)") > -1);
 
@@ -138,7 +138,7 @@ var m1 = I.build(grade({
     { key: "l3", w: 0.10, v: 13.7, n: 3 }
   ], adr_used: false, adr_mult: 1 }
 }));
-check("Map 1 headline still uses the pick", m1.headline.title === "Why we lean Under 16.5");
+check("Map 1 headline still uses the pick", m1.headline.title === "Why Glocky chooses Under 16.5");
 check("Map 1 copy says Map 1, not Maps 1-2", m1.support.concat(m1.also).some(function (x) { return /Map 1/.test(x.text); }));
 check("scope note says Map 1 only and excludes later maps", m1.also.some(function (x) { return x.key === "scope" && /Map 1 only/.test(x.text) && /Map 2 and later are not in this projection/.test(x.text); }));
 check("Map 1 map-pool averages count only n=1 logs", (function () {

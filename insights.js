@@ -234,7 +234,7 @@
     var un = unit(period), un1 = unit1(period), scope = scopeName(period);
     var sn = statName(st);
 
-    var title = "Why we lean " + side + " " + line;
+    var title = "Why Glocky chooses " + side + " " + line;
     var edge = (g.edge != null ? g.edge : (g.proj - line));
     var head = "Projection " + r1(g.proj) + ", " + r1(Math.abs(edge)) + (edge < 0 ? " below" : " above") + " the line";
     if (g.pPick != null) head += ". " + Math.round(g.pPick * 100) + "% chance of " + side + (g.grade ? " (" + g.grade + ")" : "");
