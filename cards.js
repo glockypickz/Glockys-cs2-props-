@@ -21,9 +21,10 @@ function pct(x){return x==null||isNaN(x)?'–':Math.round(x*100)+'%'}
 function edge(g){return g.edgePP==null||isNaN(g.edgePP)?'–':(g.edgePP>=0?'+':'')+g.edgePP.toFixed(1)+'pp'}
 function l10(g){var h=g.hits&&g.hits.l10;return h&&h[1]?h[0]+'/'+h[1]:'–'}
 // Season player stats from the same Maps 1-2 series the grade uses (g.cs, newest first).
-// HS% = headshots / kills; K/D = kills / deaths; Kills Map 1 = average Map 1 kills (l.n===1, not Maps 1-2 / 2);
+// HS% = headshots / kills; K/D = kills / deaths; Kills Map 1 = average Map 1 kills (kills1 on a Maps 1-2 series; on a Map 1 prop every series is one Map 1, so its kills);
 // HS / MAP = season average of (Map 1 HS + Map 2 HS) / 2 per series; Kills/HS 1-2 L10 = average total Maps 1-2 kills/headshots over the last 10 series.
-function pstats(g){var cs=g.cs||[],k=0,n=0,hk=0,hh=0,nh=0,dk=0,dd=0,k1=0,n1=0;cs.forEach(function(c){if(c.kills==null)return;k+=c.kills;n++;if(c.hs!=null){hh+=c.hs;hk+=c.kills;nh++}if(c.deaths!=null){dk+=c.kills;dd+=c.deaths}if(c.kills1!=null){k1+=c.kills1;n1++}});
+function isM1(g){var p=g&&g.period;return window.GPMap1&&GPMap1.isMap1?GPMap1.isMap1({period:p}):p==='Map 1'}
+function pstats(g){var m1=isM1(g),cs=g.cs||[],k=0,n=0,hk=0,hh=0,nh=0,dk=0,dd=0,k1=0,n1=0;cs.forEach(function(c){if(c.kills==null)return;k+=c.kills;n++;if(c.hs!=null){hh+=c.hs;hk+=c.kills;nh++}if(c.deaths!=null){dk+=c.kills;dd+=c.deaths}if(c.kills1!=null){k1+=c.kills1;n1++}else if(m1){k1+=c.kills;n1++}});
  var l10=cs.slice(0,10),h10=0,n10=0,k10=0,nk10=0;l10.forEach(function(c){if(c.hs!=null){h10+=c.hs;n10++}if(c.kills!=null){k10+=c.kills;nk10++}});
  return {n:n,hsp:hk?Math.round(hh/hk*100)+'%':'–',kd:dd?(dk/dd).toFixed(2):'–',k1:n1?(k1/n1).toFixed(1):'–',hpm:nh?(hh/(2*nh)).toFixed(1):'–',kl10:nk10?(k10/nk10).toFixed(1):'–',hsl10:n10?(h10/n10).toFixed(1):'–'}}
 function vals(g){return (g.cs||[]).slice(0,10).map(function(c){return c[g.stat]}).filter(function(x){return x!=null}).reverse()}
