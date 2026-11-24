@@ -95,7 +95,7 @@ Tests: `node --test tests/test_wins.mjs`.
 
 ## Ask Glocky (Cloudflare Worker only)
 
-The **Ask Glocky** button opens a chat. Answers use only our existing data (`players.json`, `team_strength.json`, the live `lines.json` board, and `games.json`). The Worker looks up the numbers first (including the same v1f grader math the site uses for over/under questions) and then phrases a "Glocky says" reply. It does not read `lines_history.json` or the Track Record. Replies and the chat UI never name data providers; they say "our data" or "Glocky's data".
+The **Ask Glocky** button opens a chat. Answers use only our existing data (`players.json`, `team_strength.json`, the live `lines.json` board, and `games.json`). The Worker looks up the numbers first (including the same v1f grader math the site uses for over/under questions) and then phrases a "Glocky says" reply. The grader (`model.js`) is statically imported into the Worker; it is not fetched and run with `eval` or `new Function`, which Cloudflare Workers forbid. It does not read `lines_history.json` or the Track Record. Replies and the chat UI never name data providers; they say "our data" or "Glocky's data".
 
 When someone asks over or under on a line (for example "EliGE over 35.5 kills maps 1-2?"), Glocky runs our grader (Map 1 vs Maps 1-2, LAN rule, head-to-head, bait flag) and the chat shows the current Grader trading card under the reply. If that line is on the board, the board line, book, and opponent are used; otherwise the line in the question is graded.
 
@@ -111,7 +111,7 @@ Ask Glocky stays dark until a Gemini API key is stored as a **Worker secret** na
 
 The default model is `gemini-3.8-flash`. Retired names such as `gemini-2.5-flash` are mapped to that default. To use another Flash model, set a plain Worker variable `GEMINI_MODEL` (not a secret). If a model returns 404 NOT_FOUND, or stays busy (503/429/500/504) after two short retries, the Worker tries `gemini-3.8-flash`, then `gemini-3.5-flash-lite`, then `gemini-3.6-flash`. Google's free-tier limits and terms apply (free prompts may be used to improve their models). The Worker also caps each signed-in user at 20 questions per UTC day.
 
-Tests: `node --test tests/test_ask_lookup.mjs tests/test_ask_ai.mjs`.
+Tests: `node --test tests/test_ask_lookup.mjs tests/test_ask_ai.mjs tests/test_worker_no_eval.mjs`.
 
 
 ## Slip reader
@@ -122,7 +122,7 @@ The slip reader uses **Workers AI** first (`@cf/meta/llama-4-scout-17b-16e-instr
 
 Limits: PNG, JPG, or WebP, up to 5 MB; 10 slips per signed-in user per UTC day, plus a short cooldown. The reader needs the Workers AI binding, or the Gemini secret as fallback. Until one of those is in place, it says it isn't set up yet.
 
-Tests: `node --test tests/test_slip_reader.mjs tests/test_slip_ai.mjs`.
+Tests: `node --test tests/test_slip_reader.mjs tests/test_slip_ai.mjs tests/test_worker_no_eval.mjs`.
 
 
 ## Shadow S: Scout-style factor projection (admin only, test)

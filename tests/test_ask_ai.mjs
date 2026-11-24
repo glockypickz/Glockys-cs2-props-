@@ -6,7 +6,7 @@ import { createRequire } from "node:module";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 import * as A from "../beta_auth.js";
-import { handleAsk, isAskPath, loadGPModelFromSource, systemPrompt, fallbackPhrase, scrubProviders, setRetryDelaysForTest, _test as T } from "../ask_ai.js";
+import { handleAsk, isAskPath, installGPModel, systemPrompt, fallbackPhrase, scrubProviders, setRetryDelaysForTest, _test as T } from "../ask_ai.js";
 import * as L from "../ask_lookup.js";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
@@ -85,12 +85,12 @@ test("gate on: signed-out users cannot ask", async () => {
   assert.equal(j.login, "/login");
 });
 
-test("loadGPModelFromSource installs the same current grader API", () => {
-  const src = readFileSync(join(root, "model.js"), "utf8");
-  const api = loadGPModelFromSource(src);
+test("installGPModel installs the same current grader API", () => {
+  const api = installGPModel(require(join(root, "model.js")));
   assert.equal(api.VERSION, "v1f");
   assert.equal(typeof api.grade, "function");
   assert.equal(typeof api.decodePlayers, "function");
+  assert.equal(globalThis.GPModel, api);
 });
 
 test("Gemini URL must not include the secret (header only); phrasing is stripped of a leading Glocky says", async () => {
@@ -305,3 +305,29 @@ test("Ask Glocky tells the user it is busy when every model stays unavailable", 
   }
 });
 
+test("Ask Glocky loads our data without fetching model.js from ASSETS", async () => {
+  T.resetDataCache();
+  const inner = new FakeAssets();
+  const env = mkEnv({
+    GEMINI_API_KEY: "not-a-real-key",
+    ASSETS: {
+      async fetch(req) {
+        const path = new URL(typeof req === "string" ? req : req.url).pathname;
+        assert.notEqual(path, "/model.js", "model.js must come from the static bundle, not ASSETS");
+        return inner.fetch(req);
+      }
+    }
+  });
+  const orig = globalThis.fetch;
+  globalThis.fetch = async () => new Response(JSON.stringify({
+    candidates: [{ content: { parts: [{ text: "EliGE's headshot percentage on LAN is 56.97%." }] } }]
+  }), { status: 200, headers: { "content-type": "application/json" } });
+  try {
+    const r = await handleAsk(req("/ai/ask", { body: { question: "what's EliGE's headshot percentage on LAN" }, ip: "10.9.9.1" }), env, new URL(ORIGIN + "/ai/ask"), KEY_HASH);
+    const j = await r.json();
+    assert.equal(r.status, 200, j.error);
+    assert.match(j.answer, /56\.97/);
+  } finally {
+    globalThis.fetch = orig;
+  }
+});

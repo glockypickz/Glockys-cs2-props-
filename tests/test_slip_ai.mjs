@@ -693,3 +693,23 @@ test("data-load failures include admin detail with the real reason, never the ke
   assert.match(gj.detail, /data-load=Memory limit exceeded/);
   assert.equal(String(gj.detail).includes("not-a-real-key"), false);
 });
+
+test("slip read loads our data without fetching model.js from ASSETS", async () => {
+  AT.resetDataCache();
+  const inner = new FakeAssets();
+  const env = mkEnv({
+    AI: { run: async () => ({ response: slipJsonText() }) },
+    ASSETS: {
+      async fetch(req) {
+        const path = new URL(typeof req === "string" ? req : req.url).pathname;
+        assert.notEqual(path, "/model.js", "model.js must come from the static bundle, not ASSETS");
+        return inner.fetch(req);
+      }
+    }
+  });
+  const r = await handleSlip(req("/ai/slip/read", { body: { image: pngB64(), mime: "image/png" }, ip: "10.3.1.1" }), env, new URL(ORIGIN + "/ai/slip/read"), KEY_HASH);
+  const j = await r.json();
+  assert.equal(r.status, 200, j.error);
+  assert.equal(j.picks.length, 1);
+  assert.equal(j.picks[0].matched && j.picks[0].matched.name, "EliGE");
+});
