@@ -118,7 +118,12 @@ class MapBlendTests(unittest.TestCase):
         d1 = self.g.v1_project_parts(self.p, "kills", "Beta", "2026-11-01", period="Map 1")
         d2 = self.g.v1_project_parts(self.p, "kills", "Beta", "2026-11-01", period="Maps 1-2")
         self.assertEqual(d1["map"]["src"], "veto")
-        self.assertAlmostEqual(d2["map"]["avg"], 2 * d1["map"]["avg"], places=6)
+        # Maps 1-2 is E[avg(Map 1)] + E[avg(Map 2)] = 2 * expected under the average of the two slot weights,
+        # which is not necessarily twice the Map 1 slot average.
+        w12 = d2["map"]["weights"]
+        per, _, _ = self.g.expected_map_avg(self.p, "kills", w12, "2026-11-01")
+        self.assertAlmostEqual(d2["map"]["avg"], 2 * per, places=6)
+        self.assertTrue(d1["map"].get("weights"))
 
     def test_caps_still_apply(self):
         g = self.g.grade(self.p, "kills", 10.5, "Beta", "Alpha", "PrizePicks", -137,

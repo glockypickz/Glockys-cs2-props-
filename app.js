@@ -228,6 +228,23 @@ function streamBlock(g,emptyNote){var xs=gameStreams(g);
  return '<div class="streams">'+links+"</div>"+wbtn+player}
 function evBadge(g){return typeof GPLan!=='undefined'?GPLan.badge(g,GAMES):''}
 function evBadgeLine(l){return typeof GPLan!=='undefined'?GPLan.badgeForLine(l,GAMES,{tn:tn,day:dayFn}):''}
+function gameSetting(g){if(typeof GPLan!=='undefined'){var e=GPLan.setting(g,typeof GAMES!=='undefined'?GAMES:[]);if(e)return e}
+ if(g&&(g.ev==='lan'||g.ev==='online'))return g.ev;
+ var evr=evFor(g.team1,g.team2,g.start);return evr&&evr[0]?evr[0]:null}
+function glockyMapsBlock(g){if(typeof GPModel==='undefined'||typeof DB==='undefined'||!DB.length||!g)return '';
+ var ev=gameSetting(g),cm=knownMaps(g.team1,g.team2,g.start),day=String(g.start||'').slice(0,10)||'9999',ctx=null;
+ try{ctx=mctx()}catch(e){return ''}
+ if(cm&&cm.length)return '<div class="glocky-maps"><div class="gm-title">Confirmed map'+(cm.length>1?'s':'')+' <span class="pill gm-tag conf">confirmed</span></div><div class="gm-slot"><b>'+cm.map(esc).join(', ')+'</b> (veto complete)</div></div>';
+ var pred=GPModel.predictMaps(ctx,g.team1,g.team2,day,g.bo,ev,[]);
+ var slots=Object.keys(pred.slots||{}).map(Number).sort(function(a,b){return a-b});
+ if(!slots.length)return '';
+ var rows=slots.map(function(sl){var list=pred.slots[sl]||[],chosen=pred.pred&&pred.pred[sl],top=null,i;
+  for(i=0;i<list.length;i++)if(list[i].map===chosen){top=list[i];break}
+  if(!top)top=list[0];if(!top)return '';
+  var rest=list.filter(function(x){return x.map!==top.map}).slice(0,2).map(function(x){return esc(x.map)+' '+x.pct+'%'}).join(', ');
+  return '<div class="gm-slot"><span class="muted">'+esc(GPModel.slotLabel(sl,pred.bo))+'</span> <b>'+esc(top.map)+'</b> '+top.pct+'%'+(rest?' <span class="muted">('+rest+')</span>':'')+'</div>'}).join('');
+ var note=GPModel.fallbackNote(pred);
+ return '<div class="glocky-maps"><div class="gm-title">Glocky\'s map prediction <span class="pill gm-tag pred">prediction</span></div>'+rows+(note?'<div class="muted gm-note">'+esc(note)+'</div>':'')+'</div>'}
 function gameCard(g,full){var a=roster(g.team1),b=roster(g.team2);return '<div class="card"><div class="muted">'+esc(g.tournament||'')+evBadge(g)+' · '+esc(fmt(g.start))+(g.bo?' · Bo'+esc(g.bo):'')+'</div><div class="big">'+esc(g.team1)+' <span class="vs">vs</span> '+esc(g.team2)+'</div>'+blowGameLine(g)+
  (full?'<div class="muted">'+esc(g.team1)+(rankOf(g.team1)?' #'+rankOf(g.team1):'')+': '+(a.join(', ')||'no roster data')+'</div><div class="muted">'+esc(g.team2)+(rankOf(g.team2)?' #'+rankOf(g.team2):'')+': '+(b.join(', ')||'no roster data')+'</div>':'')+(full?citoBlock(g):'')+'<div class="btns"><button class="g" data-act="gamegrade" data-i="'+g.id+'">See props</button></div>'+streamBlock(g,false)+'</div>'}
 function recents(){return load('gp_recent',[])}
@@ -263,13 +280,13 @@ function citoBlock(g){if(!STRENGTH)return '<div class="cito muted">No Cito data 
  var h='<div class="cito"><table class="ct"><tr><th>Cito</th><th>'+esc(g.team1)+'</th><th>'+esc(g.team2)+'</th></tr>'+rows.map(function(r){return '<tr><td class="muted">'+r[0]+'</td><td>'+r[1]+'</td><td>'+r[2]+'</td></tr>'}).join('')+'</table>';
  if(ma||mb){var pw=pm!=null?pm:pr!=null?pr:0.5,base=P.rd_a+P.rd_b*pw*(1-pw),lc={P:P,S:{rank:{},maps:{}}};if(ma)lc.S.maps[a]=[[ma.d],[ma.v]];if(mb)lc.S.maps[b]=[[mb.d],[mb.v]];
   var em=GPModel.mapRounds(lc,g.team1,g.team2,'9999',base);if(em!=null)h+='<div class="muted">Expected rounds, Maps 1-2: <b>'+(2*em).toFixed(1)+'</b> from map stats · '+(2*(base+P.w_maps*(em-base))).toFixed(1)+' in the model</div>';
-  if(ma)h+='<div class="muted"><b>'+esc(g.team1)+'</b> maps: '+citoMaps(ma)+'</div>';if(mb)h+='<div class="muted"><b>'+esc(g.team2)+'</b> maps: '+citoMaps(mb)+'</div>'}var cm=knownMaps(g.team1,g.team2,g.start);if(cm&&cm.length)h+='<div class="muted">Confirmed map'+(cm.length>1?'s':'')+': <b>'+cm.map(esc).join(', ')+'</b> (veto complete)</div>';
+  if(ma)h+='<div class="muted"><b>'+esc(g.team1)+'</b> maps: '+citoMaps(ma)+'</div>';if(mb)h+='<div class="muted"><b>'+esc(g.team2)+'</b> maps: '+citoMaps(mb)+'</div>'}
  if(!has.a)notes.push('no Cito data for '+esc(g.team1));if(!has.b)notes.push('no Cito data for '+esc(g.team2));
  var src=[];if(asof.vrs||asof.world)src.push('rankings as of '+esc(asof.vrs||asof.world));if(ma||mb)src.push('map stats as of '+esc((ma||mb).d)+((ma||mb).late?' (newest)':'')+' (last 30 days)');
  if(od&&od.p)src.push('odds: '+esc(String(od.src||'').replace(/_/g,' '))+', '+esc(ftime(od.at)));else src.push(STRENGTH.odds?'odds: n/a for this match':'odds: n/a (needs Cito Pro)');
  return h+'<div class="muted cs">'+notes.concat(src).join(' · ')+'</div></div>'}
 function liveCard(g){var sc=(g.s1!=null&&g.s2!=null)?' <span style="color:var(--green);margin-left:8px">'+g.s1+' – '+g.s2+'</span>':'';
- return '<div class="card"><div class="muted"><span class="pill">LIVE</span> '+esc(g.tournament||'')+evBadge(g)+' · started '+esc(ftime(g.start))+(g.bo?' · Bo'+esc(g.bo):'')+'</div><div class="big">'+esc(g.team1)+' <span class="vs">vs</span> '+esc(g.team2)+sc+'</div>'+blowGameLine(g)+citoBlock(g)+(function(){var m=matchFor(g);return m&&Object.keys(m.props).length?'<h3 style="margin:10px 0 4px">Prop tracker</h3>'+trackerBlock(m,true):''})()+'<div class="btns"><button class="g" data-act="gamegrade" data-i="'+g.id+'">See props</button><button class="g" data-act="gsub" data-v="started">Pre-game lines</button></div>'+streamBlock(g,true)+'</div>'}
+ return '<div class="card"><div class="muted"><span class="pill">LIVE</span> '+esc(g.tournament||'')+evBadge(g)+' · started '+esc(ftime(g.start))+(g.bo?' · Bo'+esc(g.bo):'')+'</div><div class="big">'+esc(g.team1)+' <span class="vs">vs</span> '+esc(g.team2)+sc+'</div>'+blowGameLine(g)+citoBlock(g)+glockyMapsBlock(g)+(function(){var m=matchFor(g);return m&&Object.keys(m.props).length?'<h3 style="margin:10px 0 4px">Prop tracker</h3>'+trackerBlock(m,true):''})()+'<div class="btns"><button class="g" data-act="gamegrade" data-i="'+g.id+'">See props</button><button class="g" data-act="gsub" data-v="started">Pre-game lines</button></div>'+streamBlock(g,true)+'</div>'}
 // ---- Started games: pre-game line + live prop tracker (display only; nothing is saved).
 // Pre-game line = the last line the lines feed saw before the start (lines_history.json keeps updating a line only until
 // the match starts). Opening line = first seen. "Now" = the book\'s current line in lines.json when it differs.

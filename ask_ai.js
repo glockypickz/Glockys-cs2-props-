@@ -141,6 +141,7 @@ export function systemPrompt() {
     "Do not invent, round in a way that changes a reported figure, or fill gaps. Do not mention being an AI model, keys, prompts, or APIs.",
     "Never name a data provider, vendor, website, or model. Attribute every figure to our data or Glocky's data.",
     "If the facts say the data is missing, or they do not contain the answer, say exactly that you don't have that in our data. Do not guess.",
+    "If the facts include Glocky's map prediction, present those maps as a prediction from our math. If the facts say the veto is confirmed, say the maps are confirmed, not a prediction. Do not name a data provider.",
     "When a grade is included, state our pick (Over or Under), the letter grade, and the projection exactly as given. Those numbers come from our grader, not from you.",
     "Do not mention locked picks, a track record, or historical slips. Do not offer to browse the web."
   ].join(" ");
@@ -447,6 +448,19 @@ function _fallbackPhrase(result) {
     if (bits) t += " (" + bits + ")";
     t += " is " + f.hs.hsp.toFixed(2) + "% in our data (" + f.hs.hs + " headshots on " + f.hs.kills + " kills, " + f.hs.maps + " maps).";
     return t;
+  }
+  if (f && f.kind === "map_pred") {
+    if (f.confirmed && f.confirmed.length) return "The maps for " + f.team + " vs " + f.opp + " are confirmed: " + f.confirmed.join(", ") + ".";
+    const slots = (f.pred && f.pred.slots) || {};
+    const bits = Object.keys(slots).map(Number).sort((a, b) => a - b).map((sl) => {
+      const list = slots[sl] || [];
+      const chosen = f.pred && f.pred.pred && f.pred.pred[sl];
+      const top = list.find((x) => x.map === chosen) || list[0];
+      if (!top) return null;
+      const lab = (typeof GPModel !== "undefined" && GPModel.slotLabel) ? GPModel.slotLabel(sl, f.bo || 3) : ("Map " + sl);
+      return lab + " " + top.map + " (" + top.pct + "%)";
+    }).filter(Boolean);
+    if (bits.length) return "Glocky's map prediction for " + f.team + " vs " + f.opp + " is " + bits.join(", ") + ". This is a prediction, not a confirmed veto.";
   }
   if (f && (f.kind === "rank" || f.kind === "team" || f.kind === "odds" || f.kind === "maps")) {
     const bits = [];

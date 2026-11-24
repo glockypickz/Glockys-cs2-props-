@@ -135,6 +135,46 @@ function buildCtx(store) {
     });
     ctx.teamCum[t] = [ds, ck, ch, cr];
   });
+  const allmaps = {}, teamUniq = {};
+  for (const stub of store.players) {
+    const t = GM.tn(stub.team);
+    const rows = (stub._src && stub._src.rows) || [];
+    const pos = {};
+    for (const r of rows) {
+      const mid = idx.mid != null ? r[idx.mid] : null;
+      const n = idx.n != null ? r[idx.n] : null;
+      const date = idx.date != null && r[idx.date] != null ? S[r[idx.date]] : "";
+      const opp = idx.opp != null && r[idx.opp] != null ? S[r[idx.opp]] : "";
+      if ((mid || 0) > 0) pos[String(date) + "|" + n + "|" + GM.tn(opp)] = 1;
+    }
+    for (const r of rows) {
+      const mid = idx.mid != null ? r[idx.mid] : null;
+      const n = idx.n != null ? r[idx.n] : null;
+      const date = idx.date != null && r[idx.date] != null ? S[r[idx.date]] : "";
+      if (mid == null || n == null || !date) continue;
+      const opp = idx.opp != null && r[idx.opp] != null ? S[r[idx.opp]] : "";
+      if (mid < 0 && pos[String(date) + "|" + n + "|" + GM.tn(opp)]) continue;
+      const rd = idx.rd != null ? r[idx.rd] : null;
+      if (!(t && typeof rd === "number" && rd >= 13)) continue;
+      const map = idx.map != null && r[idx.map] != null ? S[r[idx.map]] : null;
+      const ev = idx.ev != null && r[idx.ev] != null ? S[r[idx.ev]] : null;
+      const key = String(mid) + "|" + n;
+      if (!allmaps[key]) allmaps[key] = [date, map];
+      if (!teamUniq[t]) teamUniq[t] = {};
+      if (!teamUniq[t][key]) teamUniq[t][key] = { date, map, n, ev };
+    }
+  }
+  const gmaps = Object.keys(allmaps).map((k) => allmaps[k]);
+  gmaps.sort((a, b) => a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0);
+  const teamMaps = {};
+  Object.keys(teamUniq).forEach((t) => {
+    teamMaps[t] = Object.keys(teamUniq[t]).map((k) => teamUniq[t][k]);
+    teamMaps[t].sort((a, b) => a.date < b.date ? -1 : a.date > b.date ? 1 : 0);
+  });
+  ctx.gmaps = gmaps;
+  ctx.gdates = gmaps.map((x) => x[0]);
+  ctx.teamMaps = teamMaps;
+  ctx.matchMaps = (ctx.S && ctx.S.match_maps) || [];
   return ctx;
 }
 
@@ -191,6 +231,7 @@ function parseStat(q) {
   if (/\bkills?\b/.test(s)) return "kills";
   if (/\b(vrs|world rank|ranking|rank)\b/.test(s)) return "rank";
   if (/\b(win chance|win probability|odds|moneyline|implied)\b/.test(s)) return "odds";
+  if (/\b(what maps|which maps|maps will|map prediction|predicted maps|what map will|which map will)\b/.test(s)) return "map_pred";
   if (/\b(pick\s*%|pick rate|veto|ban tendency|map pool|map stats|map chance)/.test(s)) return "maps";
   return null;
 }
@@ -332,6 +373,14 @@ export function parseQuestion(q, store) {
   if (grade && player) intent = "grade";
   else if (stat === "rank" || (/\b(vrs|world rank)\b/i.test(text) && team)) intent = "rank";
   else if (stat === "odds" || (/\b(win chance|odds|map chance)/i.test(text) && team)) intent = "odds";
+  else if (stat === "map_pred" || (/\b(what maps|which maps|maps will|map prediction|predicted maps|what map will|which map will)\b/i.test(text) && team)) {
+    if (!opp && teams.length >= 2) opp = teams.find((x) => !M().teq(x, team)) || teams[1];
+    if (!opp) {
+      const g = (store.games || []).find((x) => M().teq(x.team1, team) || M().teq(x.team2, team));
+      if (g) opp = M().teq(g.team1, team) ? g.team2 : g.team1;
+    }
+    intent = opp ? "map_pred" : "maps";
+  }
   else if (stat === "maps" && team) intent = "maps";
   else if (player && (stat || ev || map || window)) intent = "player_stat";
   else if (player) intent = "player_stat";
@@ -737,6 +786,32 @@ function formatFacts(bundle) {
     }
     return lines.join("\n");
   }
+  if (bundle.kind === "map_pred") {
+    const a = bundle.team, b = bundle.opp;
+    if (bundle.confirmed && bundle.confirmed.length) {
+      lines.push("The maps for " + a + " vs " + b + " are confirmed (veto complete): " + bundle.confirmed.join(", ") + ". This is not a prediction.");
+    } else {
+      lines.push("Glocky's map prediction for " + a + " vs " + b + (bundle.bo ? " (Bo" + bundle.bo + ")" : "") + (bundle.ev ? ", " + (bundle.ev === "lan" ? "LAN" : "online") : ", setting unknown") + (bundle.start ? ", start " + bundle.start : "") + ".");
+      lines.push("This is a prediction from Glocky's veto math, not a confirmed veto.");
+      const slots = bundle.pred && bundle.pred.slots ? bundle.pred.slots : {};
+      const bo = (bundle.pred && bundle.pred.bo) || bundle.bo || 3;
+      Object.keys(slots).map(Number).sort((x, y) => x - y).forEach((sl) => {
+        const list = slots[sl] || [];
+        if (!list.length) return;
+        const chosen = bundle.pred && bundle.pred.pred && bundle.pred.pred[sl];
+        const top = list.find((x) => x.map === chosen) || list[0];
+        const rest = list.filter((x) => x.map !== top.map).slice(0, 2).map((x) => x.map + " " + x.pct + "%").join(", ");
+        const lab = M().slotLabel ? M().slotLabel(sl, bo) : ("Map " + sl);
+        lines.push(lab + ": " + top.map + " " + top.pct + "%" + (rest ? " (next: " + rest + ")" : "") + ".");
+      });
+      if (bundle.note) lines.push(bundle.note);
+    }
+    if (!lines.length) {
+      lines.push("DATA STATUS: missing.");
+      lines.push("Reason: I don't have that in our data.");
+    }
+    return lines.join("\n");
+  }
   if (bundle.kind === "team" || bundle.kind === "rank" || bundle.kind === "odds" || bundle.kind === "maps") {
     if (bundle.team) lines.push("Team: " + bundle.team + ".");
     if (bundle.vrs) lines.push("VRS rank as of " + bundle.vrs.date + " (our data): #" + bundle.vrs.rank + " with " + bundle.vrs.points + " points (of " + bundle.vrs.of + " teams in this snapshot).");
@@ -758,6 +833,55 @@ function formatFacts(bundle) {
     return lines.join("\n");
   }
   return "DATA STATUS: missing.\nReason: I don't have that in our data.";
+}
+
+function findMatchGame(store, team, opp) {
+  const GM = M();
+  const games = store.games || [];
+  if (!team || !opp || !games.length) return null;
+  let best = null, bestDt = Infinity;
+  for (const g of games) {
+    const ok = (GM.teq(g.team1, team) && GM.teq(g.team2, opp)) || (GM.teq(g.team1, opp) && GM.teq(g.team2, team));
+    if (!ok) continue;
+    const t = Date.parse(g.start || "");
+    const dt = isNaN(t) ? 0 : Math.abs(t - Date.now());
+    if (!best || dt < bestDt) { best = g; bestDt = dt; }
+  }
+  return best;
+}
+
+function mapPredBundle(intent, store) {
+  const team = intent.team || (intent.player && intent.player.team);
+  let opp = intent.opp;
+  if (!team) return { missing: true, reason: "I don't have that in our data" };
+  if (!opp) {
+    const g0 = (store.games || []).find((x) => M().teq(x.team1, team) || M().teq(x.team2, team));
+    if (g0) opp = M().teq(g0.team1, team) ? g0.team2 : g0.team1;
+  }
+  if (!opp) return { missing: true, reason: "I need two teams to predict the maps." };
+  const GM = M();
+  const ctx = ensureCtx(store);
+  const g = findMatchGame(store, team, opp);
+  let ev = (g && (g.ev === "lan" || g.ev === "online")) ? g.ev : (intent.ev || null);
+  if (!ev && GM.matchEv) {
+    const evr = GM.matchEv(ctx, team, opp, (g && g.start) || new Date().toISOString(), store.games || []);
+    ev = evr && evr[0] ? evr[0] : null;
+  }
+  const day = g ? String(g.start).slice(0, 10) : new Date().toISOString().slice(0, 10);
+  const bo = (g && g.bo) ? g.bo : 3;
+  const confirmed = GM.confirmedMaps ? GM.confirmedMaps(ctx, team, opp, (g && g.start) || day) : [];
+  const pred = GM.predictMaps(ctx, team, opp, day, bo, ev, confirmed);
+  const missing = !pred || (!(pred.confirmed) && !Object.keys(pred.slots || {}).length && !(confirmed && confirmed.length));
+  return {
+    kind: "map_pred",
+    missing,
+    reason: missing ? "I don't have enough map history in our data to predict this match." : null,
+    team, opp, ev, bo,
+    start: g && g.start || null,
+    status: g && g.status || null,
+    pred, confirmed,
+    note: GM.fallbackNote ? GM.fallbackNote(pred) : ""
+  };
 }
 
 function teamBundle(intent, store) {
@@ -795,6 +919,7 @@ export function answerQuestion(question, store, parsed) {
       bundle = { kind: "grade", missing: false, grade: g, context: ctx };
     }
   } else if (intent.intent === "player_stat") bundle = playerStatFacts(intent, store);
+  else if (intent.intent === "map_pred") bundle = mapPredBundle(intent, store);
   else if (intent.intent === "rank" || intent.intent === "odds" || intent.intent === "maps" || intent.intent === "team") bundle = teamBundle(intent, store);
   else if (intent.player) bundle = playerStatFacts(intent, store);
   else if (intent.team) bundle = teamBundle(intent, store);

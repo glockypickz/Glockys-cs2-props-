@@ -11,7 +11,7 @@
 var PARAMS={"m": 100, "half_life": 8, "n_max": 200, "m_team": 1500, "elo_k": 16, "beta": 0.25, "rd_a": 17.34, "rd_b": 16.18, "h2h_min": 1, "h2h_w": 0.1, "w_line": 0.7, "g_kills": 0.6573, "g_hs": 0.3404, "size_kills": 20.0, "size_hs": 16.0, "min_series": 8, "grade_a": 4.0, "grade_b": 0.0, "grade_f": 3.0, "w_rank": 0.25, "rank_s": 1.0, "w_maps": 0.25, "k_maps": 6.0, "w_hr": 0.0, "k_hr": 5.0, "w_hr_l5": 0.25, "w_hr_l10": 0.25, "w_hr_l20": 0.25, "w_hr_szn": 0.25, "hr_upgrade_a": 0.0, "hr_upgrade_b": 0.0, "hr_szn_min": 8, "w_l5": 0.1, "w_l10": 0.05, "w_l20": 0.05, "w_szn": 0.05, "w_kd": 0.1, "k_kd": 40.0,
  "w_hs5": 0.3, "w_hs10": 0.2, "w_hs20": 0.15, "w_hsszn": 0.1, "w_khs5": 0.1, "w_khs10": 0.05, "w_khs15": 0.025, "w_khsszn": 0.0, "k_hsp": 30.0, "w_hkd": -0.1, "lan_data": 1, "lan_k": 5.0, "lan_adr_min": 3, "map_data": 1, "map_k": 5.0};
 // lan_data / lan_k / lan_adr_min: LAN-match props use the player's LAN series for every v1 input (see grader.py PARAMS comment).
-// map_data / map_k: after v1 + ADR, shrink toward the player's per-map average (all games on that map, k=5). Known maps if the veto is in, else scout veto full-pool expected maps. Map 1 = one map; Maps 1-2 = two (or 2 x expected per-map). Logs before the match day only.
+// map_data / map_k: after v1 + ADR, shrink toward the player's per-map average (all games on that map, k=5). Known maps if the veto is in, else Glocky's simulated veto (LAN/online pick-ban history, fall back to all matches when thin). Map 1 = Map 1 slot weights; Maps 1-2 = E[avg(Map 1)]+E[avg(Map 2)]. Logs before the match day only.
 // w_hs* / w_khs* / k_hsp: HS% form inputs for the headshots / kills projection. See grader.py.
 var HS_WIN=["5","10","20","szn"];  // headshots-projection HS% windows
 var KHS_WIN=["5","10","15","szn"];  // kills-projection HS% factor windows (no L20)
@@ -119,24 +119,107 @@ function confirmedMaps(ctx,team,opp,start){var day=String(start||'').slice(0,10)
   var d=Date.parse(String(r.start||'').slice(0,10)+'T00:00:00Z');if(isNaN(d))return;var dt=Math.abs(Math.round((d-d0)/864e5));if(dt>1)return;
   var maps=(r.maps||[]).map(normMap).filter(Boolean);if(maps.length&&(bestDt==null||dt<bestDt)){best=maps;bestDt=dt}});
  return best}
+
+var MIN_SETTING_N=8, VETO_EPS=1e-6;
+function settingOf(ev){return ev==='lan'||ev==='online'?ev:null}
+function vetoSteps(n,bo){n=n|0;if(n<=0)return[];bo=(bo||3)>=5?5:(bo===1?1:3);
+ if(bo===1){var s=[],i;for(i=0;i<Math.max(0,n-1);i++)s.push(['ban',i%2]);s.push(['left',1]);return s}
+ var nPicks=bo===5?4:2,decider=bo===5?5:3;if(n<nPicks+1)nPicks=Math.max(0,n-1);
+ var nBans=Math.max(0,n-nPicks-1),openBans=Math.min(2,nBans),closeBans=nBans-openBans,steps=[],j;
+ for(j=0;j<openBans;j++)steps.push(['ban',j%2]);
+ for(j=0;j<nPicks;j++)steps.push(['pick',(openBans+j)%2,j+1]);
+ for(j=0;j<closeBans;j++)steps.push(['ban',(openBans+nPicks+j)%2]);
+ steps.push(['left',decider]);return steps}
+function normW(weights,rem){var s=0,i;for(i=0;i<rem.length;i++)s+=Math.max(0,weights[rem[i]]||0);
+ if(s<=0){var u=1/rem.length,o={};for(i=0;i<rem.length;i++)o[rem[i]]=u;return o}
+ var o={};for(i=0;i<rem.length;i++)o[rem[i]]=Math.max(0,weights[rem[i]]||0)/s;return o}
+function banWeights(own,opp,pool){var o={},i;for(i=0;i<pool.length;i++){var m=pool[i];o[m]=(opp[m]||0)/((own[m]||0)+VETO_EPS)}return o}
+function softVeto(pool,pickA,pickB,bo){pool=(pool||[]).slice().sort();if(!pool.length)return {};
+ var steps=vetoSteps(pool.length,bo);if(!steps.length)return {};
+ var pick=[pickA,pickB],ban=[banWeights(pickA,pickB,pool),banWeights(pickB,pickA,pool)],need={},i;
+ steps.forEach(function(s){if(s[0]==='pick')need[s[2]]=1;else if(s[0]==='left')need[s[1]]=1});
+ var slots=Object.keys(need).map(Number).sort(function(a,b){return a-b});
+ function empty(){var o={};slots.forEach(function(sl){o[sl]={};pool.forEach(function(m){o[sl][m]=0})});return o}
+ function run(starter){var memo={};
+  function rec(rem,si){var key=rem.join('\t')+'|'+si;if(memo[key])return memo[key];
+   var out=empty();if(!rem.length||si>=steps.length){memo[key]=out;return out}
+   var step=steps[si],kind=step[0];
+   if(kind==='left'){var slot=step[1];if(rem.length===1&&out[slot])out[slot][rem[0]]=1;
+    else if(rem.length&&out[slot]){var u=1/rem.length;rem.forEach(function(m){out[slot][m]=u})}
+    memo[key]=out;return out}
+   var side=(step[1]+starter)%2,w=normW(kind==='pick'?pick[side]:ban[side],rem),slot=kind==='pick'?step[2]:null,mi;
+   for(mi=0;mi<rem.length;mi++){var m=rem[mi],p=w[m];if(!p)continue;
+    var child=rec(rem.slice(0,mi).concat(rem.slice(mi+1)),si+1);
+    if(slot!=null&&out[slot])out[slot][m]+=p;
+    slots.forEach(function(sl){var dist=child[sl],mm;for(mm in dist)if(dist[mm])out[sl][mm]+=p*dist[mm]})}
+   memo[key]=out;return out}
+  return rec(pool,0)}
+ var a=run(0),b=run(1),out=empty();
+ slots.forEach(function(sl){pool.forEach(function(m){out[sl][m]=0.5*(a[sl][m]+b[sl][m])})});
+ return out}
+function pickShares(ctx,team,D,ev){ev=settingOf(ev);var pool=poolOf(ctx,D);if(!pool.length||!team)return {w:{},n:0,fallback:false,nSetting:0,ev:ev};
+ var lo=addDays(D,-180),k=1.5,t=tn(team);
+ function count(want){var c={},n=0;((ctx.teamMaps||{})[t]||[]).forEach(function(g){
+  if(g.date<lo||g.date>=D||pool.indexOf(g.map)<0)return;if(g.n!==1&&g.n!==2)return;if(want&&g.ev!==want)return;
+  c[g.map]=(c[g.map]||0)+1;n++});return [c,n]}
+ function weights(c,n){if(!n){var u={};pool.forEach(function(m){u[m]=1/pool.length});return [u,0]}
+  var w={};pool.forEach(function(m){w[m]=((c[m]||0)+k/pool.length)/(n+k)});return [w,n]}
+ if(ev){var a=count(ev),nSet=a[1];if(nSet>=MIN_SETTING_N){var w=weights(a[0],nSet);return {w:w[0],n:nSet,fallback:false,nSetting:nSet,ev:ev}}
+  var all=count(null),ww=weights(all[0],all[1]);return {w:ww[0],n:all[1],fallback:true,nSetting:nSet,ev:ev}}
+ var all=count(null),ww=weights(all[0],all[1]);return {w:ww[0],n:all[1],fallback:false,nSetting:all[1],ev:null}}
+function argmaxMap(dist,banned){var items=[],m;for(m in (dist||{}))if(!banned||!banned[m])items.push([dist[m],m]);
+ if(!items.length){for(m in (dist||{}))items.push([dist[m],m])}
+ if(!items.length)return null;items.sort(function(a,b){return b[0]-a[0]||(a[1]<b[1]?-1:a[1]>b[1]?1:0)});return items[0][1]}
+function rankedMaps(dist){return Object.keys(dist||{}).map(function(m){return {map:m,p:dist[m],pct:Math.round(100*dist[m])}})
+ .filter(function(x){return x.p>0}).sort(function(a,b){return b.p-a.p||(a.map<b.map?-1:a.map>b.map?1:0)})}
+function predictMaps(ctx,team,opp,D,bo,ev,confirmed){ev=settingOf(ev);bo=(bo||3)>=5?5:(bo===1?1:3);
+ var known=(confirmed||[]).map(normMap).filter(Boolean);
+ var out={bo:bo,ev:ev,fallback:[],confirmed:!!known.length,slots:{},pred:{},slotW:{},played:{},w12:{},src:'pred'};
+ if(known.length){out.src='confirmed';var nslots=bo===1?1:(bo===5?5:3),i;
+  for(i=0;i<Math.min(known.length,nslots);i++){var m=known[i],sl=i+1;out.slotW[sl]={};out.slotW[sl][m]=1;out.slots[sl]=[{map:m,p:1,pct:100}];out.pred[sl]=m;out.played[m]=(out.played[m]||0)+1}
+  if(bo!==1){var tw=0; [1,2].forEach(function(s){if(out.pred[s])tw+=1});tw=tw||1;[1,2].forEach(function(s){var m=out.pred[s];if(m)out.w12[m]=(out.w12[m]||0)+1/tw})}
+  else out.w12=Object.assign({},out.slotW[1]||{});
+  return out}
+ var pool=poolOf(ctx,D),sa=pickShares(ctx,team,D,ev),sb=opp?pickShares(ctx,opp,D,ev):{w:{},n:0,fallback:false,nSetting:0,ev:ev};
+ if(ev){if(sa.fallback||!sa.nSetting)out.fallback.push({team:team,used:'all',n:sa.n,nSetting:sa.nSetting,wanted:ev});
+  if(opp&&(sb.fallback||!sb.nSetting))out.fallback.push({team:opp,used:'all',n:sb.n,nSetting:sb.nSetting,wanted:ev})}
+ if(!pool.length||(!sa.n&&!sb.n&&!Object.keys(sa.w).length&&!Object.keys(sb.w).length))return out;
+ if(!Object.keys(sa.w).length){sa.w={};pool.forEach(function(m){sa.w[m]=1/pool.length})}
+ if(!Object.keys(sb.w).length){sb.w={};pool.forEach(function(m){sb.w[m]=1/pool.length})}
+ var slotW=softVeto(pool,sa.w,sb.w,bo);out.slotW=slotW;var used={},sl;
+ Object.keys(slotW).map(Number).sort(function(a,b){return a-b}).forEach(function(sl){out.slots[sl]=rankedMaps(slotW[sl]);var choice=argmaxMap(slotW[sl],used);if(choice){out.pred[sl]=choice;used[choice]=1}});
+ var played={};Object.keys(slotW).forEach(function(sl){Object.keys(slotW[sl]).forEach(function(m){played[m]=(played[m]||0)+slotW[sl][m]})});out.played=played;
+ if(bo===1)out.w12=Object.assign({},slotW[1]||{});
+ else{var A=slotW[1]||{},B=slotW[2]||{},w12={},keys={};Object.keys(A).concat(Object.keys(B)).forEach(function(m){keys[m]=1});Object.keys(keys).forEach(function(m){w12[m]=0.5*((A[m]||0)+(B[m]||0))});out.w12=w12}
+ return out}
+function fallbackNote(pred){var ev=pred&&pred.ev,setting=ev==='lan'?'LAN':ev==='online'?'online':null;
+ if(!pred||!setting)return ev? '':'Match setting is unknown, so this uses all of both teams\' matches.';
+ var bits=(pred.fallback||[]).map(function(row){return (row.team||'This team')+' has too few '+setting+' vetos in our data, so that side uses all of their matches.'});
+ return bits.length?bits.join(' '):'Based on both teams\' '+setting+' pick and ban history.'}
+function slotLabel(slot,bo){if(slot===1)return 'Map 1';if(slot===2)return 'Map 2';if(slot===3)return (bo||3)<=3?'Map 3 (decider)':'Map 3';if(slot===5)return 'Map 5 (decider)';return 'Map '+slot}
 function playerMapAvg(ctx,p,st,mapName,before){var want=normMap(mapName);if(!want||!st)return [null,0];var vals=[];
  mapLogRows(p).forEach(function(l){if(String(l.date||'')>=(before||'9999'))return;if(normMap(l.map)!==want)return;if(l[st]==null)return;vals.push(+l[st])});
  return vals.length?[vals.reduce(function(s,x){return s+x},0)/vals.length,vals.length]:[null,0]}
 function expectedMapAvg(ctx,p,st,weights,before){var num=0,den=0,nsum=0,used=0,m,a;
  Object.keys(weights||{}).forEach(function(m){var w=weights[m];if(!w||w<=0)return;a=playerMapAvg(ctx,p,st,m,before);if(a[0]==null)return;num+=w*a[0];den+=w;nsum+=a[1];used++});
  if(den<=0||used<=0)return [null,0,0];return [num/den,Math.round(nsum/used),used]}
-function mapBlend(ctx,p,st,opp,before,period,maps){var team=p.team,known=(maps||[]).map(normMap).filter(Boolean);
- if(!known.length)known=confirmedMaps(ctx,team,opp,before);var map1=isMap1Period(period);
+function blendWeights(ctx,team,opp,before,ev,bo,mode,map1){
+ if(mode==='full_pool')return vetoWeights(ctx,team,opp,String(before||'9999').slice(0,10));
+ var pred=predictMaps(ctx,team,opp,String(before||'9999').slice(0,10),bo,ev,[]);
+ if(map1)return Object.assign({},(pred.slotW&&pred.slotW[1])||{});
+ return Object.assign({},pred.w12||{})}
+function mapBlend(ctx,p,st,opp,before,period,maps,ev,bo,vetoMode){var team=p.team,known=(maps||[]).map(normMap).filter(Boolean);
+ if(!known.length)known=confirmedMaps(ctx,team,opp,before);var map1=isMap1Period(period),mode=vetoMode||'pred';
  if(known.length){
-  if(map1){var a=playerMapAvg(ctx,p,st,known[0],before);return {avg:a[0],n:a[1],src:'known',maps:known.slice(0,1),weights:{}}}
+  if(map1){var a=playerMapAvg(ctx,p,st,known[0],before);var w={};if(known[0])w[known[0]]=1;return {avg:a[0],n:a[1],src:'known',maps:known.slice(0,1),weights:w}}
   var pieces=[],ns=[],i;for(i=0;i<Math.min(2,known.length);i++){var a=playerMapAvg(ctx,p,st,known[i],before);if(a[0]!=null){pieces.push(a[0]);ns.push(a[1])}}
-  if(pieces.length===1){var ev=expectedMapAvg(ctx,p,st,vetoWeights(ctx,team,opp,String(before||'9999').slice(0,10)),before);if(ev[0]!=null){pieces.push(ev[0]);ns.push(ev[1]||ns[0])}}
+  if(pieces.length===1){var evw=expectedMapAvg(ctx,p,st,blendWeights(ctx,team,opp,before,ev,bo,mode,true),before);if(evw[0]!=null){pieces.push(evw[0]);ns.push(evw[1]||ns[0])}}
   if(pieces.length>=2)return {avg:pieces[0]+pieces[1],n:Math.min(ns[0],ns[1]),src:'known',maps:known.slice(0,2),weights:null};
   if(pieces.length===1)return {avg:pieces[0]*2,n:ns[0],src:'known',maps:known.slice(0,1),weights:null};
   return {avg:null,n:0,src:'known',maps:known,weights:null}}
- var w=vetoWeights(ctx,team,opp,String(before||'9999').slice(0,10)),per=expectedMapAvg(ctx,p,st,w,before);
- if(per[0]==null)return {avg:null,n:0,src:'veto',maps:[],weights:w};
- return {avg:map1?per[0]:2*per[0],n:per[1],src:'veto',maps:[],weights:w,nMaps:per[2]}}
+ var w=blendWeights(ctx,team,opp,before,ev,bo,mode,map1),per=expectedMapAvg(ctx,p,st,w,before);
+ if(per[0]==null)return {avg:null,n:0,src:'veto',maps:[],weights:w,vetoMode:mode,ev:settingOf(ev)};
+ return {avg:map1?per[0]:2*per[0],n:per[1],src:'veto',maps:[],weights:w,nMaps:per[2],vetoMode:mode,ev:settingOf(ev)}}
 
 function build(players,params,strength,ranks){var P={},k;for(k in PARAMS)P[k]=PARAMS[k];if(params)for(k in params)P[k]=params[k];
  var ctx={P:P,players:players,ranks:ranks||{},ser:new Map(),ser1:new Map(),eloHist:{},teamCum:{},teamMids:{},S:prepStrength(strength)};
@@ -160,7 +243,7 @@ function build(players,params,strength,ranks){var P={},k;for(k in PARAMS)P[k]=PA
    var rd=l.rd;if(!(t&&typeof rd==='number'&&rd>=13))return;
    var key=String(mid)+'|'+l.n;
    if(!allmaps[key])allmaps[key]=[l.date,l.map];
-   if(!teamUniq[t])teamUniq[t]={};if(!teamUniq[t][key])teamUniq[t][key]={date:l.date,map:l.map}})});
+   if(!teamUniq[t])teamUniq[t]={};if(!teamUniq[t][key])teamUniq[t][key]={date:l.date,map:l.map,n:l.n,ev:l.ev}})});
  gmaps=Object.keys(allmaps).map(function(k){return allmaps[k]});
  gmaps.sort(function(a,b){return a[0]<b[0]?-1:a[0]>b[0]?1:0});
  Object.keys(teamUniq).forEach(function(t){teamMaps[t]=Object.keys(teamUniq[t]).map(function(k){return teamUniq[t][k]});
@@ -249,7 +332,7 @@ function v1Pieces(ctx,cs,h,st,opp,lan){if(lan){cs=cs.filter(function(c){return c
  out.adrc=avg(cs.map(function(c){return c.adr}).filter(function(x){return x!=null}));
  out.adrN5=cs.slice(0,5).filter(function(c){return c.adr!=null}).length;out.adrN=cs.filter(function(c){return c.adr!=null}).length;out.n=cs.length;return out}
 // ev==='lan' (and P.lan_data): every part from the player's LAN series; thin samples blended with overall (rule in grader.py PARAMS).
-function v1ProjectParts(ctx,p,st,opp,before,period,ev,maps){before=before||'9999';var P=ctx.P,cs=series(ctx,p,period).filter(function(c){return c.date<before});
+function v1ProjectParts(ctx,p,st,opp,before,period,ev,maps,bo,vetoMode){before=before||'9999';var P=ctx.P,cs=series(ctx,p,period).filter(function(c){return c.date<before});
  if(!cs.some(function(c){return c[st]!=null}))return null;var on=norm(opp),h=opp?cs.filter(function(c){return norm(c.opp)===on}):[];
  var A=v1Pieces(ctx,cs,h,st,opp,false),lanOn=ev==='lan'&&!!P.lan_data,L=lanOn?v1Pieces(ctx,cs,h,st,opp,true):null,K=+(P.lan_k||5);
  function blend(key,N){var va=A[key][0],na=A[key][1];if(!lanOn)return[va,na,null];var vl=L[key][0],nl=L[key][1];if(vl==null||va==null)return[va,na,0];
@@ -262,7 +345,7 @@ function v1ProjectParts(ctx,p,st,opp,before,period,ev,maps){before=before||'9999
  if(lanOn&&L.adrN5>=(+P.lan_adr_min||3)&&L.adrc){R=L;adrLan=true}
  var adr5=R.adr5,adrc=R.adrc,adrN5=R.adrN5,adrN=R.adrN,adrUsed=adr5!=null&&!!adrc,adrMult=1;
  if(adrUsed){adrMult=Math.max(0.95,Math.min(1.05,1+0.5*(adr5/adrc-1)));proj*=adrMult}
- var mb=P.map_data?mapBlend(ctx,p,st,opp,before,period,maps):null;
+ var mb=P.map_data?mapBlend(ctx,p,st,opp,before,period,maps,ev,bo,vetoMode):null;
  if(mb&&mb.avg!=null&&mb.n){var k=+(P.map_k||5);mb=Object.assign({},mb,{pre:proj,k:k,used:true});proj=(mb.n*mb.avg+k*proj)/(mb.n+k);mb.proj=proj}
  else if(mb){mb=Object.assign({},mb,{used:false,pre:proj,proj:proj})}
  return{proj:proj,pre:pre,parts:parts,adr5:adr5,adrc:adrc,adrMult:adrMult,adrUsed:adrUsed,adrN5:adrN5,adrN:adrN,weightSum:tw,lan:{used:lanOn,n:lanOn?L.n:null,adrLan:adrLan,ev:ev||null},map:mb}}
@@ -274,14 +357,14 @@ function matchEv(ctx,team,opp,start,games,days){days=days||3;var day=String(star
  var lo=new Date(d0-days*864e5).toISOString().slice(0,10),best=null;
  [tn(team),tn(opp)].forEach(function(t){var m=ctx.teamEv[t];if(!m)return;var top=null;Object.keys(m).forEach(function(k){if(k<day&&(top==null||k>top))top=k});if(top!=null&&top>=lo&&(best==null||top>best[0]))best=[top,m[top]]});
  return best?[best[1],'recent maps']:[null,null]}
-function v1Project(ctx,p,st,opp,before,period,ev,maps){var d=v1ProjectParts(ctx,p,st,opp,before,period,ev,maps);return d?d.proj:null}
+function v1Project(ctx,p,st,opp,before,period,ev,maps,bo,vetoMode){var d=v1ProjectParts(ctx,p,st,opp,before,period,ev,maps,bo,vetoMode);return d?d.proj:null}
 function v1Result(ctx,mu,line,st,book,odds,reasons,period,nPlayers){if(line==null||isNaN(line)||+line===0)return null;var proj=round1(mu),pr=residualProbs(proj,+line,st,period,nPlayers),po=pr[0],pPush=pr[1],pu=pr[2];
  var pick=Math.abs(po-pu)<1e-6?(proj>=+line?'OVER':'UNDER'):(po>pu?'OVER':'UNDER'),pPick=pick==='OVER'?po:pu,be=breakEven(book,odds),epp=(pPick-be)*100,ls=letterFromEdge(epp);
  var size=st==='kills'?ctx.P.size_kills:ctx.P.size_hs,muF=blendMean(proj,+line,size,ctx.P.w_line);
  reasons=(reasons||[]).slice();
  return{proj:proj,muBlend:muF,edge:proj-+line,grade:ls.grade,pick:pick,stake:ls.stake,pOver:po,pPush:pPush,pPick:pPick,be:be,edgePP:epp,reasons:reasons,flag:reasons.join('; '),model:VERSION,hrBlend:null,hrUpgrade:null,modelGrade:ls.grade,modelPick:pick,
   underBe:{applied:false,pu:null,be:null,epp:null,preGrade:null},gradeCap:{applied:false,reason:null,preGrade:null}}}
-function grade(ctx,p,st,line,opp,o){o=o||{};if(line==null||isNaN(line))return null;var maps=o.maps||confirmedMaps(ctx,o.team||p.team,opp,o.before||o.start);var det=v1ProjectParts(ctx,p,st,opp,o.before,o.period,o.ev,maps);if(!det)return null;
+function grade(ctx,p,st,line,opp,o){o=o||{};if(line==null||isNaN(line))return null;var maps=o.maps||confirmedMaps(ctx,o.team||p.team,opp,o.before||o.start);var det=v1ProjectParts(ctx,p,st,opp,o.before,o.period,o.ev,maps,o.bo,o.vetoMode);if(!det)return null;
  var nV1=series(ctx,p,o.period).filter(function(c){return c.date<(o.before||'9999')}).length;
  var r=v1Result(ctx,det.proj,+line,st,o.book,o.odds,filters(ctx,p,o.team,nV1,o.before,o.period),o.period,1);if(!r)return null;
  r.v1=det;r.period=isMap1Period(o.period)?'Map 1':'Maps 1-2';
@@ -297,6 +380,6 @@ function gradeCombo(ctx,ps,names,st,line,opp,o){o=o||{};var mu=0,reasons=[],nmin
   filters(ctx,p,o.team,nser,o.before,o.period).forEach(function(x){reasons.push(names[i]+': '+x)})}
  var r=v1Result(ctx,mu,+line,st,o.book,o.odds,reasons,o.period,ps.length);if(!r)return null;r.n=nmin;r.parts=parts;r.period=isMap1Period(o.period)?'Map 1':'Maps 1-2';r.bait=false;applyGradeCap(r,st,o.ev,false,null);return r}
 var api={PARAMS:PARAMS,VERSION:VERSION,TEAM_ALIASES:TEAM_ALIASES,CALIB:CALIB,GRADE_SCALE:GRADE_SCALE,FIT_CUTOFF:FIT_CUTOFF,PLAY_GRADES:PLAY_GRADES,CAP_LETTER:CAP_LETTER,tn:tn,teq:teq,norm:norm,breakEven:breakEven,americanBe:americanBe,nbProbs:nbProbs,lineMean:lineMean,erfAs:erfAs,normCdf:normCdf,laplaceCdf:laplaceCdf,residualProbs:residualProbs,letterFromEdge:letterFromEdge,calibOf:calibOf,applyGradeCap:applyGradeCap,capReasons:capReasons,
- build:build,decodePlayers:decodePlayers,hitrates:hitrates,isBait:isBait,prepStrength:prepStrength,pRank:pRank,pwin:pwin,mapRounds:mapRounds,series:series,map1Combos:map1Combos,isMap1Period:isMap1Period,elo:elo,project:project,v1Project:v1Project,v1ProjectParts:v1ProjectParts,matchEv:matchEv,normMap:normMap,confirmedMaps:confirmedMaps,mapBlend:mapBlend,vetoWeights:vetoWeights,filters:filters,finish:finish,grade:grade,gradeCombo:gradeCombo};
+ build:build,decodePlayers:decodePlayers,hitrates:hitrates,isBait:isBait,prepStrength:prepStrength,pRank:pRank,pwin:pwin,mapRounds:mapRounds,series:series,map1Combos:map1Combos,isMap1Period:isMap1Period,elo:elo,project:project,v1Project:v1Project,v1ProjectParts:v1ProjectParts,matchEv:matchEv,normMap:normMap,confirmedMaps:confirmedMaps,mapBlend:mapBlend,vetoWeights:vetoWeights,predictMaps:predictMaps,pickShares:pickShares,softVeto:softVeto,fallbackNote:fallbackNote,slotLabel:slotLabel,settingOf:settingOf,MIN_SETTING_N:MIN_SETTING_N,filters:filters,finish:finish,grade:grade,gradeCombo:gradeCombo};
 if(typeof module!=='undefined'&&module.exports)module.exports=api;else root.GPModel=api;
 })(typeof window!=='undefined'?window:this);
