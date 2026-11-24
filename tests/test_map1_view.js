@@ -63,5 +63,27 @@ var altKeys = [
 var va = M.linesTabLines(altKeys, tn);
 check("start/opp aliases group the same game and drop Map 1", va.length === 1 && va[0].period === "Maps 1-2");
 
+console.log("Period filter split (after per-game rule)");
+var vis = M.linesTabLines(mixed, tn);
+var f12 = vis.filter(M.isMaps12);
+var f1 = vis.filter(M.isMap1);
+check("Maps 1-2 filter is only Maps 1-2 games", f12.length === 1 && f12[0].player === "g12");
+check("Map 1 filter is only Map 1-only games", f1.length === 1 && f1[0].player === "g1");
+var bothSplit = M.linesTabLines(both.concat(only1.map(function (l) { return Object.assign({}, l, { team: "C", opponent: "D", starts_at: "2026-11-24T14:00:00Z" }); })), tn);
+check("Map 1 filter does not include hidden Map 1 from a Maps 1-2 game", bothSplit.filter(M.isMap1).every(function (l) { return l.team === "C"; }));
+check("Maps 1-2 filter does not include Map 1-only games", bothSplit.filter(M.isMaps12).every(function (l) { return l.team === "Fnatic"; }));
+
+console.log("Games without PrizePicks or Underdog lines are not listed");
+var keys = M.listedGameKeys(mixed, tn);
+check("PP/UD Maps 1-2 game is listed", M.gameIsListed({ team1: "A", team2: "B", start: "2026-11-24T10:00:00Z" }, keys, tn));
+check("PP/UD Map 1-only game is listed", M.gameIsListed({ team1: "C", team2: "D", start: "2026-11-24T14:00:00Z" }, keys, tn));
+check("lineless game is not listed", M.gameIsListed({ team1: "FaZe", team2: "Wildcard", start: "2026-11-24T10:00:00Z" }, keys, tn) === false);
+check("flipped teams still match", M.gameIsListed({ team1: "B", team2: "A", start: "2026-11-24T10:00:00Z" }, keys, tn));
+var other = [line({ book: "SomeBook", period: "Maps 1-2", team: "X", opponent: "Y" })];
+check("non-PP/UD book is not listed", M.gameIsListed({ team1: "X", team2: "Y", start: "2026-11-24T18:00:00Z" }, M.listedGameKeys(other, tn), tn) === false);
+var manual = [line({ book: "", src: "manual", period: "Maps 1-2", team: "X", opponent: "Y" })];
+check("manual line still lists the game", M.gameIsListed({ team1: "X", team2: "Y", start: "2026-11-24T18:00:00Z" }, M.listedGameKeys(manual, tn), tn));
+check("isPpUd recognizes PrizePicks and Underdog", M.isPpUd({ book: "PrizePicks" }) && M.isPpUd({ book: "Underdog Fantasy" }) && !M.isPpUd({ book: "Other" }));
+
 if (failed) { console.log(failed + " failed"); process.exit(1); }
 console.log("all view tests passed");

@@ -7,6 +7,8 @@
  *    If a game has no Maps 1-2 lines and has Map 1 lines -> those Map 1 lines (1-map grades)
  *    Neither -> the game is not shown
  *  Applies to the Lines tab, slip auto-grading, and graded lines lists.
+ *  The Lines tab can filter Map 1-only games vs Maps 1-2 games when both exist.
+ *  Games with no PrizePicks or Underdog (or manual) lines are not listed on Lines or Games.
  *  The Grader tab manual period selector is separate and can still grade Map 1.
  */
 (function (root) {
@@ -23,6 +25,11 @@
   function isMap1(l) { return periodOf(l) === "Map 1"; }
   function isMaps12(l) { return periodOf(l) === "Maps 1-2"; }
   function isAcceptedPeriod(l) { return isMap1(l) || isMaps12(l); }
+  function isPpUd(l) {
+    if (l && l.src === "manual") return true;
+    var b = String((l && l.book) || "").toLowerCase();
+    return b.indexOf("prize") > -1 || b.indexOf("underdog") > -1;
+  }
   function gameKey(l, tnFn, dayFn) {
     tnFn = tnFn || function (s) { return String(s || "").toLowerCase().replace(/[^a-z0-9]+/g, ""); };
     var a = tnFn(l.team || l.team1 || "");
@@ -47,7 +54,24 @@
       return g.has12 ? isMaps12(l) : isMap1(l);
     });
   }
-  var api = { periodOf: periodOf, isMap1: isMap1, isMaps12: isMaps12, isAcceptedPeriod: isAcceptedPeriod, gameKey: gameKey, linesTabLines: linesTabLines };
+  /** Keys of games that have at least one PrizePicks, Underdog, or manual line after the period rule. */
+  function listedGameKeys(lines, tnFn, dayFn) {
+    var keys = {};
+    linesTabLines(lines, tnFn, dayFn).forEach(function (l) {
+      if (!isPpUd(l)) return;
+      keys[gameKey(l, tnFn, dayFn)] = true;
+    });
+    return keys;
+  }
+  function gameIsListed(g, keys, tnFn, dayFn) {
+    if (!g || !keys) return false;
+    return !!keys[gameKey({ team: g.team1, opponent: g.team2, start: g.start || g.starts_at }, tnFn, dayFn)];
+  }
+  var api = {
+    periodOf: periodOf, isMap1: isMap1, isMaps12: isMaps12, isAcceptedPeriod: isAcceptedPeriod,
+    isPpUd: isPpUd, gameKey: gameKey, linesTabLines: linesTabLines,
+    listedGameKeys: listedGameKeys, gameIsListed: gameIsListed
+  };
   if (typeof module !== "undefined" && module.exports) module.exports = api;
   else root.GPMap1 = api;
 })(typeof window !== "undefined" ? window : this);

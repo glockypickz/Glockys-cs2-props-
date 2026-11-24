@@ -73,8 +73,8 @@ function isLive(g){if(g.status!=='live')return false;var n=boN(g.bo),age=(NOW()-
  if(n&&n>=3&&g.s1!=null&&g.s2!=null&&Math.max(g.s1,g.s2)>=Math.floor(n/2)+1)return false;
  return age<({1:3,3:8,5:12}[n]||12)}
 function isUp(g){if(g.status==='live'||g.status==='finished')return false;return new Date(g.start).getTime()>NOW()-10*60000}
-function liveGames(){return GAMES.filter(isLive)}
-function upGames(){return GAMES.filter(isUp)}
+function liveGames(){return GAMES.filter(function(g){return isLive(g)&&gameHasBookLines(g)})}
+function upGames(){return GAMES.filter(function(g){return isUp(g)&&gameHasBookLines(g)})}
 function liveFor(team){return liveGames().some(function(g){return teq(g.team1,team)||teq(g.team2,team)})}
 function gamesAge(){var u=META.games_iso;if(!u||u.indexOf('T')<0)return null;var m=(NOW()-new Date(u).getTime())/60000;return isNaN(m)?null:m}
 function rankOf(name){var k=norm(name);for(var t in RANK)if(norm(t)===k)return RANK[t];return null}
@@ -141,12 +141,19 @@ function gclass(g){return g==='A+'||g==='A'||g==='B'||g==='F'?'':g==='C'||g==='D
 function sname(s,period){var per=(typeof GPMap1!=='undefined'?GPMap1.periodOf({period:period}):(period||'Maps 1-2'));return (s==='hs'?'Headshots':'Kills')+' '+per}
 function normStat(s){s=String(s||'').toLowerCase();return s.indexOf('head')>-1||s==='hs'?'hs':s.indexOf('kill')>-1?'kills':null}
 // ---- all lines = feed + manual
-function acceptedRaw(l){if(!normStat(l.stat))return false;var per=typeof GPMap1!=='undefined'?GPMap1.periodOf(l):(l.period||'Maps 1-2');return per==='Maps 1-2'||per==='Map 1'}
+function acceptedRaw(l){if(!normStat(l.stat))return false;var per=typeof GPMap1!=='undefined'?GPMap1.periodOf(l):(l.period||'Maps 1-2');if(per!=='Maps 1-2'&&per!=='Map 1')return false;return typeof GPMap1==='undefined'||GPMap1.isPpUd(l)}
 function allLines(){var out=[];
  LINES.concat(manual).forEach(function(l,i){if(!acceptedRaw(l))return;var st=normStat(l.stat),per=typeof GPMap1!=='undefined'?GPMap1.periodOf(l):(l.period||'Maps 1-2');
  var combo=isCombo(l.player),p=combo?null:find(l.player,l.team);var o={player:l.player,team:l.team||(p&&p.team)||'',stat:st,line:+l.line,opp:l.opponent||'',src:l.src||'feed',idx:i,book:l.book||'',odds:l.odds,start:l.starts_at||'',period:per};var G=gradeFor(l.player,l.team,st,o.line,o.opp,{book:o.book,odds:o.odds,period:per});o.g=G&&!G.missing?G:null;o.miss=G&&G.missing?G.missing:'';out.push(o)});
  if(typeof GPMap1!=='undefined')out=GPMap1.linesTabLines(out,tn,function(iso){return iso?cday(iso):cday()});
  return out}
+var BK_C=null;
+function dayFn(iso){return iso?cday(iso):cday()}
+function bookGameKeySet(){var ck=FEED_V+'|'+manual.length+'|'+LINES.length+'|'+((HIST||PREG||[]).length);if(BK_C&&BK_C.k===ck)return BK_C.v;
+ var src=allLines().slice();(HIST||PREG||[]).forEach(function(e){src.push({player:e.player,team:e.team,opponent:e.opponent,opp:e.opponent,start:e.start,stat:e.stat,period:e.period,book:e.book,line:e.line,src:e.src})});
+ var keys=typeof GPMap1!=='undefined'?GPMap1.listedGameKeys(src,tn,dayFn):{};return(BK_C={k:ck,v:keys}).v}
+function gameHasBookLines(g){return typeof GPMap1!=='undefined'&&GPMap1.gameIsListed(g,bookGameKeySet(),tn,dayFn)}
+function startedHasBookLines(m){if(!m)return false;if(gameHasBookLines({team1:m.t1,team2:m.t2,start:m.start}))return true;var rows=Object.keys(m.props||{}).map(function(k){return m.props[k]});if(typeof GPMap1!=='undefined')rows=GPMap1.linesTabLines(rows,tn,dayFn).filter(GPMap1.isPpUd);return !!rows.length}
 // ---- views
 function chips(){var c=[];c.push('<span class="chip g">'+DB.length+' players</span>');c.push('<span class="chip">Stats updated '+esc(META.updated||'—')+'</span>');
  c.push('<span class="chip'+(liveGames().length?' g':'')+'">Games: '+(GAMES.length?liveGames().length+' live · '+upGames().length+' upcoming':'none loaded')+'</span>');c.push('<span class="chip">Lines: '+(LINES.length?LINES.length+' feed':'manual')+'</span>');c.push('<span class="chip">Opened '+ftime()+'</span>');$('chips').innerHTML=c.join('')}
@@ -194,7 +201,7 @@ function gameCard(g,full){var a=roster(g.team1),b=roster(g.team2);return '<div c
 function recents(){return load('gp_recent',[])}
 function viewDash(){var ls=allLines().filter(function(l){return l.g}).sort(function(a,b){return b.g.edgePP-a.g.edgePP}).slice(0,5),rc=recents(),dg=liveGames().concat(upGames());
  var h='<div class="card"><h2>Player search</h2><div class="row"><input id="ds" list="plist" placeholder="Search a player, e.g. donk"><button class="b" style="flex:0 0 auto;margin:0" data-act="dsearch">Stats</button></div>'+(rc.length?'<div class="btns" style="margin-top:6px"><span class="muted" style="align-self:center">Recent:</span>'+rc.map(function(n){return '<button class="g" data-act="plview" data-p="'+esc(n)+'">'+esc(n)+'</button>'}).join('')+'<button class="g" data-act="rclear">Clear</button></div>':'')+'</div>';
- h+='<div class="grid c2"><div class="card"><h2>Live + upcoming games · '+dg.length+'</h2>'+(dg.length?'<div class="scroll" style="max-height:560px;overflow-y:auto">'+dg.map(function(g){return '<div class="item"><div><b>'+esc(g.team1)+' <span class="vs">vs</span> '+esc(g.team2)+'</b>'+(g.status==='live'?' <span class="pill">LIVE</span>':'')+'<br><span class="muted">'+esc(g.tournament||'')+' · '+esc(fmt(g.start))+'</span></div><button class="g" style="margin:0" data-act="gamegrade" data-i="'+g.id+'">Props</button></div>'}).join('')+'</div>':'<div class="warn">No schedule loaded yet. Run the "Update CS2 games" workflow.</div>')+'</div>';
+ h+='<div class="grid c2"><div class="card"><h2>Live + upcoming games · '+dg.length+'</h2>'+(dg.length?'<div class="scroll" style="max-height:560px;overflow-y:auto">'+dg.map(function(g){return '<div class="item"><div><b>'+esc(g.team1)+' <span class="vs">vs</span> '+esc(g.team2)+'</b>'+(g.status==='live'?' <span class="pill">LIVE</span>':'')+'<br><span class="muted">'+esc(g.tournament||'')+' · '+esc(fmt(g.start))+'</span></div><button class="g" style="margin:0" data-act="gamegrade" data-i="'+g.id+'">Props</button></div>'}).join('')+'</div>':(GAMES.length?'<div class="muted">No live or upcoming matches with PrizePicks or Underdog lines.</div>':'<div class="warn">No schedule loaded yet. Run the "Update CS2 games" workflow.</div>'))+'</div>';
  h+='<div><div class="card"><h2>Top graded lines</h2>'+(ls.length?ls.map(function(l){return '<div class="item"><div><b>'+esc(l.player)+'</b> <span class="muted">'+esc(l.team)+'</span><br><span class="muted">'+sname(l.stat,l.period)+' · line '+l.line+' · proj '+l.g.proj+'</span></div><div>'+gradePill(l.g)+'</div></div>'}).join(''):'<div class="warn">No lines yet. Add a PrizePicks line in the Lines tab.</div>')+'</div>';
  h+='<div class="card"><h2>Quick actions</h2><div class="btns"><button class="b" data-act="go" data-t="grader">Grade a prop</button><button class="g" data-act="go" data-t="lines">Lines</button><button class="g" data-act="go" data-t="slip">Slip ('+slip.length+')</button><button class="g" data-act="reload">Reload data</button></div></div></div></div>';return h+recordCard()+opts()}
 // ---- Cito panel on the Games tab (team_strength.json, built by cito_update.py; the site never calls Cito)
@@ -298,16 +305,15 @@ function pollLive(force){if(LIVE_OK===false||!liveView())return;if(typeof locati
   if(!o||JSON.stringify(o.maps)!==JSON.stringify(d.maps)||JSON.stringify(o.players)!==JSON.stringify(d.players)){LIVE[id]=d;changed=true}}).catch(function(){})})).then(function(){if(changed&&liveView()&&!document.getElementById('imgov'))render()})}
 function viewGames(){if(!GAMES.length)return '<div class="card"><h2>Games</h2><div class="warn">No schedule loaded yet. Run the "Update CS2 games" workflow once to create games.json.</div></div>';
  var lv=liveGames(),up=upGames(),v=sel.gv||(lv.length?'live':'up'),age=gamesAge();
- var sm=startedMatches();pollLive();var h='<div class="btns" style="margin-bottom:10px"><button class="'+(v==='live'?'b':'g')+'" data-act="gsub" data-v="live">Live · '+lv.length+'</button><button class="'+(v==='started'?'b':'g')+'" data-act="gsub" data-v="started">Started today · '+sm.length+'</button><button class="'+(v==='up'?'b':'g')+'" data-act="gsub" data-v="up">Upcoming · '+up.length+'</button></div>';
+ var sm=startedMatches().filter(startedHasBookLines);pollLive();var h='<div class="btns" style="margin-bottom:10px"><button class="'+(v==='live'?'b':'g')+'" data-act="gsub" data-v="live">Live · '+lv.length+'</button><button class="'+(v==='started'?'b':'g')+'" data-act="gsub" data-v="started">Started today · '+sm.length+'</button><button class="'+(v==='up'?'b':'g')+'" data-act="gsub" data-v="up">Upcoming · '+up.length+'</button></div>';
  h+='<div class="muted" style="margin-bottom:8px">From bo3.gg, updated '+esc(META.games_at||'')+(age!=null?' ('+Math.round(age)+' min ago)':'')+'. Times are Central. Refreshes about every 10 minutes.</div>';
  if(age!=null&&age>90)h+='<div class="warn">This game data is '+(Math.round(age/6)/10)+' hours old, so live status may be out of date.</div>';
- if(v==='started'){if(!sm.length)return h+'<div class="card"><h2>Started today</h2><div class="muted">No match with saved props has started yet today (Central).</div></div>';
-  var wp=sm.filter(function(m){return Object.keys(m.props).length}),np=sm.filter(function(m){return !Object.keys(m.props).length});
-  return h+'<h2>Started today · props from their pre-game line</h2><div class="grid c2">'+wp.map(startedCard).join('')+'</div>'+(np.length?'<div class="muted" style="margin-top:8px">Started with no saved props (no pre-game line): '+np.map(function(m){return esc(m.t1)+' vs '+esc(m.t2)}).join(' · ')+'</div>':'')}
+ if(v==='started'){if(!sm.length)return h+'<div class="card"><h2>Started today</h2><div class="muted">No match with PrizePicks or Underdog lines has started yet today (Central).</div></div>';
+  return h+'<h2>Started today · props from their pre-game line</h2><div class="grid c2">'+sm.map(startedCard).join('')+'</div>'}
  if(v==='live'){
-  if(!lv.length)return h+'<div class="card"><h2>Live</h2><div class="muted">No matches are live right now. A match shows here only while bo3.gg marks it live, and drops off when it finishes.</div></div>';
+  if(!lv.length)return h+'<div class="card"><h2>Live</h2><div class="muted">No live matches with PrizePicks or Underdog lines right now. A match shows here only while it is live and has a line, and drops off when it finishes.</div></div>';
   return h+'<div class="grid c2">'+lv.map(liveCard).join('')+'</div><div class="muted" style="margin-top:8px">Stream links come from bo3.gg. Watch opens an official Twitch or YouTube embed in this page (one at a time). Kick and other platforms open in a new tab. The app does not rebroadcast or proxy video.</div>'}
- if(!up.length)return h+'<div class="card"><h2>Upcoming</h2><div class="muted">No upcoming matches in the schedule.</div></div>';
+ if(!up.length)return h+'<div class="card"><h2>Upcoming</h2><div class="muted">No upcoming matches with PrizePicks or Underdog lines.</div></div>';
  var days={};up.forEach(function(g){var d=new Intl.DateTimeFormat('en-US',{timeZone:'America/Chicago',weekday:'long',month:'short',day:'numeric'}).format(new Date(g.start));(days[d]=days[d]||[]).push(g)});
  return h+Object.keys(days).map(function(d){return '<h2>'+esc(d)+' · '+days[d].length+' games</h2><div class="grid c2">'+days[d].map(function(g){return gameCard(g,true)}).join('')+'</div>'}).join('')}
 function lineDays(ls){var t=cday(),set={};set[t]=1;set[addDays(t,1)]=1;ls.forEach(function(l){if(l.start)set[cday(l.start)]=1});return Object.keys(set).sort().filter(function(d){return d>=t})}
@@ -318,10 +324,14 @@ function viewLines(){var ls=allLines(),days=lineDays(ls),cnt={},t0=cday();
  var bkey=function(l){var b=String(l.book||'').toLowerCase();return b.indexOf('prize')>-1?'pp':b.indexOf('underdog')>-1?'ud':'other'},bf=sel.lb||'all',bc={all:0,pp:0,ud:0};
  ls.forEach(function(l){var k=l.start?cday(l.start):t0;if(d==='all'||k===d){bc.all++;if(bkey(l)==='pp')bc.pp++;else if(bkey(l)==='ud')bc.ud++}});
  h+='<div class="btns" style="margin-bottom:8px">'+[['all','All books'],['pp','PrizePicks'],['ud','Underdog']].map(function(x){return '<button class="'+(bf===x[0]?'b':'g')+'" data-act="lbook" data-b="'+x[0]+'">'+x[1]+' · '+bc[x[0]]+'</button>'}).join('')+'</div>';
- var vis=[];ls.forEach(function(l,i){var k=l.start?cday(l.start):t0;if((d==='all'||k===d)&&(bf==='all'||bkey(l)===bf))vis.push([l,i])});
+ var dayBook=[];ls.forEach(function(l,i){var k=l.start?cday(l.start):t0;if((d==='all'||k===d)&&(bf==='all'||bkey(l)===bf))dayBook.push([l,i])});
+ var has12=dayBook.some(function(a){return a[0].period==='Maps 1-2'}),has1=dayBook.some(function(a){return a[0].period==='Map 1'});
+ var pf=sel.lp||'12';if(!has12||!has1)pf=has1&&!has12?'m1':'12';if(pf==='m1'&&!has1)pf='12';if(pf==='12'&&!has12&&has1)pf='m1';
+ if(has12&&has1){var pc={12:0,m1:0};dayBook.forEach(function(a){if(a[0].period==='Maps 1-2')pc[12]++;if(a[0].period==='Map 1')pc.m1++});
+  h+='<div class="btns" style="margin-bottom:8px">'+[['12','Maps 1-2'],['m1','Map 1']].map(function(x){return '<button class="'+(pf===x[0]?'b':'g')+'" data-act="lper" data-p="'+x[0]+'">'+x[1]+' · '+pc[x[0]]+'</button>'}).join('')+'</div>'}
+ var vis=dayBook.filter(function(a){return !has12||!has1||(pf==='m1'?a[0].period==='Map 1':a[0].period==='Maps 1-2')});
  vis.sort(function(a,b){var x=a[0].start||'9',y=b[0].start||'9';if(x!==y)return x<y?-1:1;var ea=a[0].g?a[0].g.edgePP:-999,eb=b[0].g?b[0].g.edgePP:-999;return eb-ea});
- var has12=vis.some(function(l){return l[0].period==='Maps 1-2'}),has1=vis.some(function(l){return l[0].period==='Map 1'});
- var perLabel=!vis.length?'':(has12&&!has1?'Maps 1-2':!has12&&has1?'Map 1':'');
+ var perLabel=!vis.length?'':(has12&&has1?(pf==='m1'?'Map 1':'Maps 1-2'):(has1?'Map 1':'Maps 1-2'));
  h+='<div><div class="card"><h2>'+(d==='all'?'All lines':esc(dayLabel(d))+' lines')+' · '+(bf==='pp'?'PrizePicks':bf==='ud'?'Underdog':'PrizePicks + Underdog')+(perLabel?' · '+perLabel:'')+'</h2>'+(LINES.length?'<div class="muted">Feed observed '+esc(META.lines_at||'')+'. Refreshes about every hour. Times are Central.</div>':'<div class="warn">No lines feed is connected yet, so lines are manual. PrizePicks is the source of truth: type the line you see in the app.</div>')+
  (vis.length?vis.map(function(a){var l=a[0],i=a[1],g=l.g,live=l.team&&liveFor(l.team),started=l.start&&new Date(l.start).getTime()<NOW();return '<div class="item"><div><b>'+esc(l.player)+'</b> <span class="muted">'+esc(l.team)+(l.opp?' vs '+esc(l.opp):'')+'</span>'+(live?' <span class="pill">LIVE</span>':(started?' <span class="muted">· started</span>':''))+'<br><span class="muted">'+(l.book?esc(l.book)+' · ':'')+sname(l.stat,l.period)+(l.period==='Map 1'?' <span class="pill">Map 1</span>':'')+(l.start?' · '+esc(fmt(l.start)):'')+' · </span><b>'+l.line+'</b>'+(g?'<span class="muted"> · proj '+g.proj+'</span>'+hitBoxes(g.hits):'<span class="muted"> · Can\'t grade this one. '+(rp(l)?'Research the player in the Players tab':'Research needed')+'</span>')+'</div><div style="text-align:right">'+(g?gradePill(g)+'<br>':'')+(g||!rp(l)?'<button class="g" data-act="lg" data-i="'+i+'">Grade</button> <button class="g" data-act="ladd" data-i="'+i+'">+ Slip</button>':'<button class="g" data-act="plview" data-p="'+esc(rp(l))+'">Research</button>')+(l.src==='manual'?' <button class="g" data-act="ldel" data-i="'+l.idx+'">✕</button>':'')+'</div></div>'}).join(''):'<div class="muted">No lines for this day yet. New lines appear as the books post them.</div>')+'</div>';
  h+='</div>';return h}
@@ -628,6 +638,7 @@ document.addEventListener('click',function(e){var b=e.target.closest('[data-act]
  else if(a==='watch'){var id=b.dataset.i,si=+b.dataset.s;if(sel.watch&&String(sel.watch.id)===String(id)&&+sel.watch.s===si)sel.watch=null;else sel.watch={id:id,s:si};render()}
  else if(a==='lday'){sel.ld=b.dataset.d;render()}
  else if(a==='lbook'){sel.lb=b.dataset.b;render()}
+ else if(a==='lper'){sel.lp=b.dataset.p;render()}
  else if(a==='rday'){sel.rd=b.dataset.d;render()}
  else if(a==='gamegrade'){openGP(b.dataset.i)}
  else if(a==='gpclose'){gpClose()}
