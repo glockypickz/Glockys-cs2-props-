@@ -21,12 +21,12 @@ function pct(x){return x==null||isNaN(x)?'–':Math.round(x*100)+'%'}
 function edge(g){return g.edgePP==null||isNaN(g.edgePP)?'–':(g.edgePP>=0?'+':'')+g.edgePP.toFixed(1)+'pp'}
 function l10(g){var h=g.hits&&g.hits.l10;return h&&h[1]?h[0]+'/'+h[1]:'–'}
 // Season player stats from the same Maps 1-2 series the grade uses (g.cs, newest first).
-// HS% = headshots / kills; K/D = kills / deaths; Kills Map 1 = average Map 1 kills (kills1 on a Maps 1-2 series; on a Map 1 prop every series is one Map 1, so its kills);
+// HS% = headshots / kills; K/D = kills / deaths; Kills / Map L10 = average kills per map over the last 10 series (a Maps 1-2 series is two maps, so total / 2; a Map 1 prop's series is one Map 1);
 // HS / MAP = season average of (Map 1 HS + Map 2 HS) / 2 per series; Kills/HS 1-2 L10 = average total Maps 1-2 kills/headshots over the last 10 series.
 function isM1(g){var p=g&&g.period;return window.GPMap1&&GPMap1.isMap1?GPMap1.isMap1({period:p}):p==='Map 1'}
-function pstats(g){var m1=isM1(g),cs=g.cs||[],k=0,n=0,hk=0,hh=0,nh=0,dk=0,dd=0,k1=0,n1=0;cs.forEach(function(c){if(c.kills==null)return;k+=c.kills;n++;if(c.hs!=null){hh+=c.hs;hk+=c.kills;nh++}if(c.deaths!=null){dk+=c.kills;dd+=c.deaths}if(c.kills1!=null){k1+=c.kills1;n1++}else if(m1){k1+=c.kills;n1++}});
+function pstats(g){var m1=isM1(g),cs=g.cs||[],k=0,n=0,hk=0,hh=0,nh=0,dk=0,dd=0;cs.forEach(function(c){if(c.kills==null)return;k+=c.kills;n++;if(c.hs!=null){hh+=c.hs;hk+=c.kills;nh++}if(c.deaths!=null){dk+=c.kills;dd+=c.deaths}});
  var l10=cs.slice(0,10),h10=0,n10=0,k10=0,nk10=0;l10.forEach(function(c){if(c.hs!=null){h10+=c.hs;n10++}if(c.kills!=null){k10+=c.kills;nk10++}});
- return {n:n,hsp:hk?Math.round(hh/hk*100)+'%':'–',kd:dd?(dk/dd).toFixed(2):'–',k1:n1?(k1/n1).toFixed(1):'–',hpm:nh?(hh/(2*nh)).toFixed(1):'–',kl10:nk10?(k10/nk10).toFixed(1):'–',hsl10:n10?(h10/n10).toFixed(1):'–'}}
+ return {n:n,hsp:hk?Math.round(hh/hk*100)+'%':'–',kd:dd?(dk/dd).toFixed(2):'–',kpm:nk10?(k10/(nk10*(m1?1:2))).toFixed(1):'–',hpm:nh?(hh/(2*nh)).toFixed(1):'–',kl10:nk10?(k10/nk10).toFixed(1):'–',hsl10:n10?(h10/n10).toFixed(1):'–'}}
 function vals(g){return (g.cs||[]).slice(0,10).map(function(c){return c[g.stat]}).filter(function(x){return x!=null}).reverse()}
 
 // ---- logos
@@ -60,7 +60,7 @@ function html(g){if(!g)return '';var t=tier(g.grade),u=g.pick==='UNDER',fo=t.foi
  var mid=pic?(port+top+name+info):(top+info+name);
  return '<div class="tc-wrap"><div class="tc t-'+(g.grade==='A+'?'ap':String(g.grade||'d').toLowerCase())+(pic?'':' tc-plain')+'" style="--foil:linear-gradient(135deg,'+fo+');--acc:'+t.accent+';--ink:'+t.ink+'">'+
  '<div class="tc-in"><div class="tc-pat" aria-hidden="true"></div><div class="tc-wm" aria-hidden="true">'+('GLOCKY PICKS   '.repeat(28))+'</div>'+mid+
- (function(){var q=pstats(g);return '<div class="tc-back"><div class="tc-bh">Season · Maps 1-2 · '+q.n+' series</div><div><b>'+q.hsp+'</b><i>HS%</i></div><div><b>'+q.kd+'</b><i>K/D</i></div><div><b>'+q.k1+'</b><i>Kills Map 1</i></div><div><b>'+q.hpm+'</b><i>HS / Map</i></div><div><b>'+q.kl10+'</b><i>Kills 1-2 L10</i></div><div><b>'+q.hsl10+'</b><i>HS 1-2 L10</i></div></div>'})()+
+ (function(){var q=pstats(g);return '<div class="tc-back"><div class="tc-bh">Season · Maps 1-2 · '+q.n+' series</div><div><b>'+q.hsp+'</b><i>HS%</i></div><div><b>'+q.kd+'</b><i>K/D</i></div><div><b>'+q.kpm+'</b><i>Kills / Map L10</i></div><div><b>'+q.hpm+'</b><i>HS / Map</i></div><div><b>'+q.kl10+'</b><i>Kills 1-2 L10</i></div><div><b>'+q.hsl10+'</b><i>HS 1-2 L10</i></div></div>'})()+
  '<div class="tc-foot"><span>GLOCKY PICKS</span><span>CS2 PROP GRADER</span></div></div></div></div>'}
 
 // ---- image export (canvas, no libraries). 750x1050 = 2.5 x 3.5 in at 300 dpi.
@@ -127,7 +127,7 @@ function draw(g,logo,mark,tile,pic){var c=document.createElement('canvas');c.wid
   x.fillStyle='#8b9297';x.font=(has?12:14)+'px '+FONT;x.fillText('LAST '+v.length+' SERIES  ·  DASHED = LINE',W/2,sy+sh+18)}
  var q=pstats(g);
  x.fillStyle='#8b9297';x.font=(has?13:15)+'px '+FONT;x.fillText('SEASON  ·  MAPS 1-2  ·  '+q.n+' SERIES',W/2,gy);
- var cells=[[q.hsp,'HS%'],[q.kd,'K/D'],[q.k1,'KILLS MAP 1'],[q.hpm,'HS / MAP'],[q.kl10,'KILLS 1-2 L10'],[q.hsl10,'HS 1-2 L10']],gx=P+14,gw=(W-2*P-28-8)/2,cy0=gy+10,gap=has?6:8,cf=has?13:15,vf=has?26:30;
+ var cells=[[q.hsp,'HS%'],[q.kd,'K/D'],[q.kpm,'KILLS / MAP L10'],[q.hpm,'HS / MAP'],[q.kl10,'KILLS 1-2 L10'],[q.hsl10,'HS 1-2 L10']],gx=P+14,gw=(W-2*P-28-8)/2,cy0=gy+10,gap=has?6:8,cf=has?13:15,vf=has?26:30;
  cells.forEach(function(cl,k){var cx=gx+(k%2)*(gw+8),cy=cy0+Math.floor(k/2)*(gh+gap);
   x.fillStyle='rgba(255,255,255,.06)';rr(x,cx,cy,gw,gh,10);x.fill();
   x.strokeStyle=t.accent;x.globalAlpha=.35;x.lineWidth=2;rr(x,cx,cy,gw,gh,10);x.stroke();x.globalAlpha=1;
