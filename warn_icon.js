@@ -14,8 +14,8 @@
  *  computed, e.g. "Blowout risk 34% per map · FaZe favored" (the side more
  *  likely to win big). A 48-52% Elo split is labeled "even match".
  *
- *  Threshold: the pulsing ⚠️ is shown when that predicted chance is >= 30%
- *  per map (BLOWOUT_RISK_THRESHOLD = 0.30). Even matches sit around 24% and
+ *  Threshold: the pulsing ⚠️ and the BLOWOUT tag (like the BAIT tag) are shown when that
+ *  predicted chance is >= 30% per map (BLOWOUT_RISK_THRESHOLD = 0.30). Even matches sit around 24% and
  *  are not flagged; about a 70/30 Elo favorite crosses 30%.
  *
  *  When a saved shadow_s.blowout object is passed in, those p_win / p_loss
@@ -155,7 +155,23 @@
     return ' <span class="warn-icon" title="' + t + '" role="img" aria-label="' + t + '">⚠️</span>';
   }
 
-  function lineHtml(p, withIcon) {
+  // Text tag like BAIT, shown when blowout risk is at or above the threshold. Display only.
+  function badge(g, opts) {
+    var f = flags(g, opts);
+    if (!f.blowout) return "";
+    var t = esc(f.text + ". A blowout is a map won 13-5 or wider. This tag shows at " + Math.round(100 * BLOWOUT_RISK_THRESHOLD) + "% or more per map. It never changes the grade or pick.");
+    return ' <span class="pill blow" title="' + t + '">BLOWOUT</span>';
+  }
+
+  // Yes/no tag for the Games tab: BLOWOUT EXPECTED at the threshold, NO BLOWOUT EXPECTED below it. Display only.
+  function verdict(p) {
+    if (!p || p.risk == null || isNaN(p.risk)) return "";
+    var yes = !!p.flagged;
+    var t = esc(p.text + ". A blowout is a map won 13-5 or wider. This reads BLOWOUT EXPECTED at " + Math.round(100 * BLOWOUT_RISK_THRESHOLD) + "% or more per map. It never changes a grade or pick.");
+    return '<span class="pill blow-verdict ' + (yes ? "blow" : "calm") + '" title="' + t + '">' + (yes ? "BLOWOUT EXPECTED" : "NO BLOWOUT EXPECTED") + "</span> ";
+  }
+
+  function lineHtml(p, withIcon, withVerdict) {
     if (!p || !p.text) return "";
     var cls = "blow-line" + (p.flagged ? " hot" : "");
     var ic = "";
@@ -163,10 +179,10 @@
       var t = esc(p.text);
       ic = ' <span class="warn-icon" title="' + t + '" role="img" aria-label="' + t + '">⚠️</span>';
     }
-    return '<div class="' + cls + '">' + esc(p.text) + ic + '</div>';
+    return '<div class="' + cls + '">' + (withVerdict ? verdict(p) : "") + esc(p.text) + ic + '</div>';
   }
 
-  function gameLine(p) { return lineHtml(p, true); }
+  function gameLine(p) { return lineHtml(p, true, true); }
   function propLine(p) { return lineHtml(p, false); }
 
   var api = {
@@ -183,6 +199,8 @@
     flags: flags,
     tooltip: tooltip,
     icon: icon,
+    badge: badge,
+    verdict: verdict,
     gameLine: gameLine,
     propLine: propLine
   };
