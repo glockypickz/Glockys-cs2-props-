@@ -133,6 +133,9 @@ test("vision request uses the header for the secret and only extracts, then our 
     }
     const body = JSON.parse(seen[0].body);
     assert.ok(body.contents[0].parts.some((p) => p.inlineData && p.inlineData.mimeType === "image/png"));
+    assert.equal(body.generationConfig.thinkingConfig.thinkingBudget, 0);
+    assert.equal(body.generationConfig.responseMimeType, "application/json");
+    assert.ok(body.generationConfig.maxOutputTokens >= 2048);
   } finally {
     globalThis.fetch = orig;
   }
@@ -211,6 +214,11 @@ test("UI source has Upload slip on the Grader path and never mentions keys", () 
   const css = readFileSync(join(root, "styles.css"), "utf8");
   assert.match(app, /Upload slip/);
   assert.match(app, /Upload image/);
+  assert.match(app, /function prepareSlipImage/);
+  assert.match(app, /var max=1600/);
+  assert.match(app, /toDataURL/);
+  assert.match(app, /function slipReadFile[\s\S]*prepareSlipImage\(file/);
+  assert.match(app, /function chatSlipFile[\s\S]*prepareSlipImage\(file/);
   assert.doesNotMatch(app, /Choose file|No file chosen/i);
   assert.match(app, /slipReaderHtml/);
   assert.match(app, /viewGrader[\s\S]*slipReaderHtml\(\)/);
