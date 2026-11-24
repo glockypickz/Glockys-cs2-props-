@@ -13,7 +13,11 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
+      # Always start from the newest main. Without ref, a run that waited in the queue (or a Re-run) starts from the
+      # older commit that triggered it, and its commit then collides with the data files pushed since.
       - uses: actions/checkout@v4
+        with:
+          ref: main
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
@@ -40,19 +44,45 @@ jobs:
         run: python player_photos.py
       - name: Commit lines
         if: ${{ always() && !cancelled() }}
+        env:
+          KASHROCK_API_KEY: ${{ secrets.KASHROCK_API_KEY }}
+          CITO_API_KEY: ${{ secrets.CITO_API_KEY }}
         run: |
           git config user.name "actions-user"
           git config user.email "actions@github.com"
-          if [ -f lines.json ]; then git add lines.json; fi
-          if [ -f lines_history.json ]; then git add lines_history.json; fi
-          if [ -f pregame.json ]; then git add pregame.json; fi
-          if [ -f player_photos.json ]; then git add player_photos.json; fi
-          if [ -f cito_odds.json ]; then git add cito_odds.json; fi
-          if [ -f players_cito.json ]; then git add players_cito.json; fi
-          if [ -d assets/players ]; then git add assets/players; fi
-          git diff --staged --quiet || git commit -m "Update lines"
-          git pull --rebase
-          git push
+          stage() {
+            if [ -f lines.json ]; then git add lines.json; fi
+            if [ -f lines_history.json ]; then git add lines_history.json; fi
+            if [ -f pregame.json ]; then git add pregame.json; fi
+            if [ -f player_photos.json ]; then git add player_photos.json; fi
+            if [ -f cito_odds.json ]; then git add cito_odds.json; fi
+            if [ -f players_cito.json ]; then git add players_cito.json; fi
+            if [ -d assets/players ]; then git add assets/players; fi
+            git diff --staged --quiet || git commit -m "Update lines"
+          }
+          stage
+          for attempt in 1 2 3; do
+            if git pull --rebase; then
+              if git push; then
+                break
+              fi
+              echo "Push refused because main moved. Trying again ($attempt of 3)."
+            else
+              # Someone changed the same data files after this job started. Nothing is merged by hand: this run's copy is
+              # thrown away and the fetch is done again on top of the newest main, so the history keeps everything.
+              echo "Merge conflict in the data files. Redoing this run on the newest main ($attempt of 3)."
+              git rebase --abort || true
+              git reset --hard origin/main
+              python cito_players.py || true
+              python fetch_lines.py || true
+              python player_photos.py || true
+              stage
+            fi
+            if [ "$attempt" = 3 ]; then
+              echo "Still could not push after 3 tries."
+              exit 1
+            fi
+          done
       # Phone notifications to beta users (new lines / new grades). Skips if nothing is new or GP_ADMIN_KEY isn't set. Never fails the job.
       - name: Push notifications
         continue-on-error: true
