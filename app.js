@@ -718,43 +718,51 @@ function boot(){Promise.all([getJSON('players.json'),feeds(),getJSON('team_stren
  }).catch(function(){$('main').innerHTML='<div class="card"><div class="warn">Could not load players.json. Open this from the hosted site.</div></div>';nav()})}
 setInterval(function(){if(document.hidden||!DB.length)return;var ae=document.activeElement;if(ae&&/INPUT|SELECT|TEXTAREA/.test(ae.tagName))return;if(['games','lines','dash'].indexOf(tab)<0)return;
  feeds().then(function(r){applyFeeds(r[0],r[1],r[2],r[3]);if(!document.getElementById('imgov'))render();if(tab==='games')pollLive(true)})},60000);
-// ---- AI chat: answers only from the app's own numbers. The page builds a small facts sheet; the Cloudflare Worker adds the key.
+// ---- Ask Glocky: questions go to /ai/ask. The Worker looks up facts in our data and grades
+// lines with the same v1be math as the Grader. Gemini only phrases the reply. The chat renders
+// the current Grader trading card (GPCards.html) when a grade comes back.
 var chatLog=[],chatBusy=false;
-function f1(x,d){return x==null||isNaN(x)?'n/a':x.toFixed(d==null?1:d)}
-function aiPlayerFacts(p){var all=combos(p),l10=all.slice(0,10),S=summ(l10),A=summ(all);
- var t=p.name+' ('+p.team+(rankOf(p.team)?', team rank #'+rankOf(p.team):'')+'): '+all.length+' series logged with both Map 1 and Map 2.\n';
- t+='Last '+l10.length+' series, Maps 1-2: avg kills '+f1(S.kills)+', avg headshots '+f1(S.hs)+', kills per map '+f1(S.kpm)+', headshot % '+f1(S.hsp,0)+', K/D '+f1(S.kd,2)+', assists per map '+f1(S.apm)+', ADR '+f1(S.adr,0)+'.\n';
- t+='All logged ('+all.length+' series): avg kills '+f1(A.kills)+', avg headshots '+f1(A.hs)+', kills per map '+f1(A.kpm)+', headshot % '+f1(A.hsp,0)+', K/D '+f1(A.kd,2)+', ADR '+f1(A.adr,0)+'.\n';
- t+='Last 10 series (date, opponent, kills, headshots): '+l10.map(function(c){return c.date+' vs '+c.opp+' '+c.kills+'k '+(c.hs==null?'?':c.hs)+'hs'}).join('; ')+'\n';
- var ls=allLines().filter(function(l){return l.g&&!isCombo(l.player)&&find(l.player,l.team)===p});
- if(ls.length)t+='Current lines: '+ls.map(function(l){return sname(l.stat,l.period)+' '+(l.book?l.book+' ':'')+l.line+' vs '+(l.opp||'?')+' -> projection '+l.g.proj+', grade '+l.g.grade+', pick '+l.g.pick+', over '+l.g.over+'/'+l.g.of+' recently'}).join('; ')+'\n';
- return t}
-function aiFacts(q){var seen={},picks=[],toks=String(q).split(/[^A-Za-z0-9_.\-]+/).filter(Boolean);
- toks.forEach(function(w){var n=norm(w);if(n.length<2||seen[n])return;seen[n]=1;var p=find(w,'');if(p&&picks.indexOf(p)<0)picks.push(p)});
- if(!picks.length){var cur=tab==='players'&&sel.pl?find(sel.pl):tab==='grader'&&sel.player?find(sel.player,sel.team):null;if(cur)picks.push(cur)}
- picks=picks.slice(0,3);
- var t='';if(!picks.length)t+='No player in the question matched the data.\n';
- picks.forEach(function(p){t+=aiPlayerFacts(p)+'\n'});
- t+='Grader method: projection = 35% last 10 series, 20% all logged, 20% head-to-head vs the opponent, 15% vs teams of a similar rank tier, 10% last 3 series, then a small form adjustment from ADR (capped at 5%). Grade A+ = projection 15%+ above the line, B = 5-15% above, C = within about 2% below to 5% above, D = 2-10% below, F = more than 10% below. If the pick is Under and the letter is D or F, F is kept only when P(under) is at least +3pp over the book break-even; otherwise it is D.\n';
- return t}
 function chatUI(){if($('aibtn'))return;
- var b=document.createElement('button');b.id='aibtn';b.type='button';b.textContent='Ask AI';document.body.appendChild(b);
+ var b=document.createElement('button');b.id='aibtn';b.type='button';b.textContent='Ask Glocky';document.body.appendChild(b);
  var p=document.createElement('div');p.id='aipanel';p.className='hide';
- p.innerHTML='<div class="aih"><b>Ask the AI</b><button type="button" id="aix" aria-label="Close">✕</button></div><div id="aimsgs"></div><div class="aif"><input id="aiq" placeholder="e.g. What is donk\'s headshot %?" maxlength="300"><button type="button" id="ais">Send</button></div>';
+ p.innerHTML='<div class="aih"><b>Ask Glocky</b><button type="button" id="aix" aria-label="Close">✕</button></div><div id="aimsgs"></div><div class="aif"><input id="aiq" placeholder="e.g. What is EliGE\'s HS% on LAN?" maxlength="400" autocomplete="off"><button type="button" id="ais">Send</button></div>';
  document.body.appendChild(p);
- function show(){p.classList.toggle('hide');if(!p.classList.contains('hide')){if(!chatLog.length)addMsg('a','Ask me about any player in the app: headshot %, K/D, last 10 kills against a line, or what a grade means. I only answer from the app\'s own data.');$('aiq').focus()}}
+ function show(){p.classList.toggle('hide');document.body.classList.toggle('aipanel-open',!p.classList.contains('hide'));if(!p.classList.contains('hide')){if(!chatLog.length)addMsg('a',"Ask me about our players and teams — for example EliGE's headshot percentage on LAN, a team's VRS rank, or 'EliGE over 35.5 kills maps 1-2?'. I only answer from our stats and Cito data, and I'll grade a line with the same math as the Grader.");$('aiq').focus()}}
  b.onclick=show;$('aix').onclick=show;
  $('ais').onclick=send;$('aiq').addEventListener('keydown',function(e){if(e.key==='Enter')send()})}
-function addMsg(who,text){var d=document.createElement('div');d.className='aim '+who;d.textContent=text;var m=$('aimsgs');m.appendChild(d);m.scrollTop=m.scrollHeight;return d}
+function addMsg(who,text){var d=document.createElement('div');d.className='aim '+who;if(who==='a'){var h=document.createElement('div');h.className='aisay';h.textContent='Glocky says';var tx=document.createElement('div');tx.className='aitxt';tx.textContent=text;d.appendChild(h);d.appendChild(tx)}else d.textContent=text;var m=$('aimsgs');m.appendChild(d);m.scrollTop=m.scrollHeight;return d}
+function fillAssistant(el,text,grade){
+ el.innerHTML='';
+ var h=document.createElement('div');h.className='aisay';h.textContent='Glocky says';
+ var tx=document.createElement('div');tx.className='aitxt';tx.textContent=text;
+ el.appendChild(h);el.appendChild(tx);
+ if(grade&&grade.player&&typeof gradeFor==='function'){
+  try{
+   var g=gradeFor(grade.player,grade.team,grade.stat,grade.line,grade.opp,{book:grade.book,odds:grade.odds,period:grade.period,start:grade.start});
+   if(g&&!g.missing&&window.GPCards){var wrap=document.createElement('div');wrap.className='aicard';wrap.innerHTML=GPCards.html(g);el.appendChild(wrap)}
+  }catch(e){}
+ }
+ scrollChat(el);
+}
+function scrollChat(el){var m=$('aimsgs');if(!m)return;if(el){var top=el.offsetTop-8;m.scrollTop=Math.max(0,top)}else m.scrollTop=m.scrollHeight}
 function send(){if(chatBusy)return;var inp=$('aiq'),q=(inp.value||'').trim();if(!q)return;inp.value='';addMsg('u',q);
- var url=window.GP_AI_URL||'';if(!url){addMsg('a','The AI is not connected yet. Add the server address to config.js.');return}
  chatBusy=true;var wait=addMsg('a','Thinking...');
  var hist=chatLog.slice(-6);
- fetch(url,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({question:q,facts:aiFacts(q),history:hist})})
-  .then(function(r){return r.json().catch(function(){return{}}).then(function(d){return{ok:r.ok,d:d}})})
-  .then(function(x){var a=x.ok&&x.d.answer?x.d.answer:(x.d.error||'Something went wrong. Try again.');wait.textContent=a;if(x.ok&&x.d.answer){chatLog.push({role:'user',content:q},{role:'assistant',content:a})}})
-  .catch(function(){wait.textContent='Could not reach the AI. Check your connection and try again.'})
-  .then(function(){chatBusy=false;var m=$('aimsgs');m.scrollTop=m.scrollHeight})}
+ fetch('/ai/ask',{method:'POST',credentials:'include',headers:{'Content-Type':'application/json'},body:JSON.stringify({question:q,history:hist})})
+  .then(function(r){return r.json().catch(function(){return{}}).then(function(d){return{ok:r.ok,status:r.status,d:d}})})
+  .then(function(x){
+    var a;
+    if(x.status===503&&x.d&&x.d.error)a=x.d.error;
+    else if(x.status===401)a='Please sign in to ask Glocky.';
+    else if(x.status===429&&x.d&&x.d.error)a=x.d.error;
+    else if(x.ok&&x.d&&x.d.answer)a=x.d.answer;
+    else a=(x.d&&x.d.error)||'Something went wrong. Try again.';
+    a=String(a).replace(/^\s*glocky says[:\-\s]*/i,'');
+    fillAssistant(wait,a,x.ok&&x.d?x.d.grade:null);
+    if(x.ok&&x.d&&x.d.answer)chatLog.push({role:'user',content:q},{role:'assistant',content:a});
+  })
+  .catch(function(){fillAssistant(wait,'Could not reach Glocky. Check your connection and try again.',null)})
+  .then(function(){chatBusy=false;scrollChat(wait)})}
 nav();boot();chatUI();
 document.addEventListener('gp-photos',function(){if(tab==='grader')render()});
 })();

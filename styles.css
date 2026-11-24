@@ -78,12 +78,14 @@ header img{filter:drop-shadow(0 0 10px rgba(0,255,102,.35));animation:gpglow 3.5
 #enter button{background:var(--green);color:#000;border:0;border-radius:99px;padding:14px 44px;font:800 18px system-ui;letter-spacing:.12em;box-shadow:0 0 28px rgba(0,255,102,.5)}
 #enter .s{color:var(--muted);font-size:12px;margin-top:14px}
 
-/* ---- AI chat ---- */
+/* ---- Ask Glocky chat ---- */
 #aibtn{position:fixed;right:14px;bottom:calc(86px + var(--safe-bottom,0px));z-index:70;background:var(--green);color:#000;border:0;border-radius:99px;padding:12px 20px;font:800 15px system-ui;box-shadow:0 0 22px rgba(0,255,102,.5)}
 @media(min-width:1024px){#aibtn{bottom:24px}}
-#aipanel{position:fixed;right:12px;bottom:calc(140px + var(--safe-bottom,0px));z-index:80;width:min(380px,calc(100vw - 24px));height:min(520px,60vh);display:flex;flex-direction:column;background:rgba(6,10,8,.97);border:1px solid rgba(0,255,102,.45);border-radius:16px;box-shadow:0 0 30px rgba(0,255,102,.2),0 10px 40px rgba(0,0,0,.6)}
+#aipanel{position:fixed;right:12px;bottom:calc(140px + var(--safe-bottom,0px));z-index:80;width:min(380px,calc(100vw - 24px));height:min(620px,70vh);display:flex;flex-direction:column;background:rgba(6,10,8,.97);border:1px solid rgba(0,255,102,.45);border-radius:16px;box-shadow:0 0 30px rgba(0,255,102,.2),0 10px 40px rgba(0,0,0,.6)}
 #aipanel.hide{display:none}
-@media(min-width:1024px){#aipanel{bottom:80px}}
+body.aipanel-open #aibtn{display:none}
+@media(max-width:1023px){#aipanel{left:10px;right:10px;width:auto;top:calc(10px + var(--safe-top,0px));bottom:calc(72px + var(--safe-bottom,0px));height:auto}}
+@media(min-width:1024px){#aipanel{bottom:80px;height:min(680px,calc(100vh - 120px))}}
 .aih{display:flex;justify-content:space-between;align-items:center;padding:10px 14px;border-bottom:1px solid var(--line);color:var(--green)}
 #aix{background:none;border:0;color:#fff;font-size:18px}
 #aimsgs{flex:1;overflow-y:auto;padding:12px;display:flex;flex-direction:column;gap:8px;-webkit-overflow-scrolling:touch}
@@ -93,6 +95,11 @@ header img{filter:drop-shadow(0 0 10px rgba(0,255,102,.35));animation:gpglow 3.5
 .aif{display:flex;gap:8px;padding:10px;border-top:1px solid var(--line)}
 .aif input{flex:1;min-width:0;font-size:16px}
 .aif button{background:var(--green);color:#000;border:0;border-radius:10px;padding:0 16px;font:800 14px system-ui}
+.aim .aisay{font:800 11px/1.2 system-ui;letter-spacing:.08em;text-transform:uppercase;color:var(--green);margin:0 0 6px}
+.aim .aitxt{white-space:pre-wrap;word-wrap:break-word}
+.aicard{margin-top:10px;max-width:100%}
+.aicard .tc-wrap{margin:0 auto}
+.aicard .tc{width:min(240px,100%)}
 
 /* game props side panel */
 #gpanel{position:fixed;inset:0;z-index:60;pointer-events:none}
@@ -197,7 +204,7 @@ header img{filter:drop-shadow(0 0 10px rgba(0,255,102,.35));animation:gpglow 3.5
 .gp-tg i:after{content:"";position:absolute;top:3px;left:3px;width:20px;height:20px;border-radius:50%;background:#888;transition:.2s}
 .gp-tg input:checked+i{background:#00ff6640}.gp-tg input:checked+i:after{left:21px;background:var(--green)}
 .gp-sheet .gp-on{width:100%;margin-top:12px}
-/* support chat (support-ui.js): bottom-left so it never covers Ask AI (bottom-right) */
+/* support chat (support-ui.js): bottom-left so it never covers Ask Glocky (bottom-right) */
 .gp-sup-btn{position:fixed;left:14px;bottom:calc(86px + var(--safe-bot));z-index:70;background:#131313;color:var(--green);border:1px solid var(--green);border-radius:99px;padding:11px 16px;font:800 14px system-ui;box-shadow:0 0 18px rgba(0,255,102,.3);display:flex;gap:6px;align-items:center}
 @media(min-width:1024px){.gp-sup-btn{bottom:24px}}
 .gp-sup-badge{position:absolute;top:-6px;right:-6px;min-width:20px;height:20px;border-radius:99px;background:var(--red);color:#fff;font:800 11px system-ui;display:flex;align-items:center;justify-content:center;padding:0 5px;border:2px solid #0a0a0a}
