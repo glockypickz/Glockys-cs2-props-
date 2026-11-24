@@ -32,6 +32,11 @@ button.g{background:transparent;color:var(--silver);border:1px solid var(--line)
 .pill{display:inline-block;padding:3px 9px;border-radius:99px;font-size:12px;font-weight:800;background:var(--green);color:#000}
 .pill.u{background:var(--red);color:#fff}
 .pill.bait{background:var(--amber);color:#000;margin-left:4px;letter-spacing:.06em}
+.warn-icon{display:inline-block;margin-left:4px;font-size:16px;line-height:1;vertical-align:middle;cursor:help;animation:warnPulse 1.6s ease-in-out infinite}
+.blow-line{color:var(--muted);font-size:12px;margin:4px 0 0;line-height:1.35}.blow-line.hot{color:var(--amber)}
+@keyframes warnPulse{0%,100%{opacity:1;transform:scale(1)}50%{opacity:.55;transform:scale(1.12)}}
+@media (prefers-reduced-motion:reduce){.warn-icon{animation:none}}
+
 .stats{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin:10px 0}
 .st{border:1px solid var(--line);border-radius:10px;padding:8px;text-align:center}.st b{display:block;font-size:18px}.st span{font-size:11px;color:var(--muted)}
 table{width:100%;border-collapse:collapse;font-size:13px}td,th{padding:7px 6px;border-bottom:1px solid var(--line);text-align:left;white-space:nowrap}
@@ -47,6 +52,7 @@ table{width:100%;border-collapse:collapse;font-size:13px}td,th{padding:7px 6px;b
 .item:last-child{border:0}
 .toast{position:fixed;left:12px;right:12px;bottom:calc(76px + var(--safe-bot));background:var(--green);color:#000;font-weight:800;padding:12px;border-radius:12px;text-align:center;z-index:50}
 .warn{border-left:3px solid var(--amber);padding-left:10px;color:var(--silver);font-size:13px;margin:8px 0}
+.empty-board{border-left:3px solid rgba(0,255,102,.5);padding:10px 12px;color:var(--silver);font-size:14px;margin:8px 0;background:rgba(0,255,102,.05);border-radius:0 10px 10px 0}
 .hide{display:none}
 @media(min-width:768px){.wrap{padding:0 24px 40px}.grid.c2{grid-template-columns:1fr 1fr}.grid.c3{grid-template-columns:repeat(3,1fr)}}
 @media(min-width:1024px){nav.bot{display:none}nav.top{display:flex;gap:8px;justify-content:center;margin:8px 0 16px;flex-wrap:wrap}nav.top button{background:var(--card);border:1px solid var(--line);color:var(--silver);padding:9px 16px;border-radius:99px;font:700 13px system-ui}nav.top button.on{border-color:var(--green);color:var(--green)}header img{max-width:340px}.toast{left:50%;right:auto;transform:translateX(-50%);bottom:24px;min-width:280px}}

@@ -33,9 +33,13 @@ jobs:
           KASHROCK_API_KEY: ${{ secrets.KASHROCK_API_KEY }}
           CITO_API_KEY: ${{ secrets.CITO_API_KEY }}
         run: python fetch_lines.py
+      # Commit even if the fetch failed: fetch_lines.py marks the old file stale so the site can say so.
       - name: Cache player photos
+        if: ${{ always() && !cancelled() }}
+        continue-on-error: true
         run: python player_photos.py
       - name: Commit lines
+        if: ${{ always() && !cancelled() }}
         run: |
           git config user.name "actions-user"
           git config user.email "actions@github.com"

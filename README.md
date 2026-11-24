@@ -32,7 +32,7 @@ Kills grades also show season K/D and kills per map over the last 5 / 10 / 15 se
 Built-in accounts for beta customers. Code: `beta_auth.js` (Worker), `beta-login.html/js`, `beta-admin.html/js`, `beta.css`, `beta.js` (account bar + Log out in the app).
 
 - **Customers** sign up at `/login` with an invite code, username, email and password, then log in. They get the whole Grader but **not** the Track Record (`lines_history.json`).
-- **Admin accounts** get everything: the Grader, the full Track Record and the owner tools at `/beta-admin`. Make the first one by typing the existing admin key into the *Invite code* box on the Sign up tab (the key is only hashed and compared with `KEY_HASH`, never stored). Promote / demote others at `/beta-admin`.
+- **Admin accounts** get everything: the Grader, the full Track Record, a second sheet that counts only props locked after Nov 24, 2026, 2:09 AM CT (by `lock.at`; there is no lock version tag for that deploy), and the owner tools at `/beta-admin`. Make the first one by typing the existing admin key into the *Invite code* box on the Sign up tab (the key is only hashed and compared with `KEY_HASH`, never stored). Promote / demote others at `/beta-admin`.
 - The admin key still works as before (`#admin=` link / `X-Admin-Key` header) and always gets through the gate.
 - `/beta-admin`: turn the gate on/off, create / revoke invite codes, list users, turn a user off, reset a password (gives a one-time temporary password), make admin / make customer.
 - Sessions: HttpOnly, Secure, SameSite=Lax cookie `gp_sess`, HMAC-SHA256 signed with `SESSION_SECRET`, 30 days. Turning a user off or resetting their password logs them out everywhere.
