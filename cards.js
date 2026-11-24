@@ -16,16 +16,20 @@ function tier(gr){return TIERS[gr]||TIERS.D}
 function esc(s){return String(s==null?'':s).replace(/[&<>"]/g,function(c){return{'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]})}
 function sname(s){return s==='hs'?'Headshots':'Kills'}
 function key(s){return window.GPModel&&GPModel.tn?GPModel.tn(s):String(s||'').toLowerCase().replace(/[^a-z0-9]/g,'')}
-function mono(t){var w=String(t||'?').replace(/[^A-Za-z0-9 ]/g,' ').trim().split(/\s+/).filter(Boolean);if(!w.length)return '?';return (w.length>1?w[0][0]+w[1][0]:w[0].slice(0,3)).toUpperCase()}
 function pct(x){return x==null||isNaN(x)?'–':Math.round(x*100)+'%'}
 function edge(g){return g.edgePP==null||isNaN(g.edgePP)?'–':(g.edgePP>=0?'+':'')+g.edgePP.toFixed(1)+'pp'}
 function l10(g){var h=g.hits&&g.hits.l10;return h&&h[1]?h[0]+'/'+h[1]:'–'}
-// Season player stats from the same Maps 1-2 series the grade uses (g.cs, newest first).
-// HS% = headshots / kills; K/D = kills / deaths; Kills Map 1 = average Map 1 kills (l.n===1, not Maps 1-2 / 2);
+// Season player stats block (labelled Maps 1-2): always the player's Maps 1-2 series, newest first. A Maps 1-2 prop's g.cs is that already;
+// a Map 1 prop's g.cs is one Map 1 per series, so app.js also passes g.cs12 (display only) and the block reads that.
+// HS% = headshots / kills; K/D = kills / deaths; Kills 1-2 L10 = average TOTAL Maps 1-2 kills over the last 10 Maps 1-2 series;
+// Kills / Map L10 = average kills per map over the last 10 series of the prop's own period (a Maps 1-2 series is two maps, so total / 2; a Map 1 prop's series is one Map 1);
 // HS / MAP = season average of (Map 1 HS + Map 2 HS) / 2 per series; Kills/HS 1-2 L10 = average total Maps 1-2 kills/headshots over the last 10 series.
-function pstats(g){var cs=g.cs||[],k=0,n=0,hk=0,hh=0,nh=0,dk=0,dd=0,k1=0,n1=0;cs.forEach(function(c){if(c.kills==null)return;k+=c.kills;n++;if(c.hs!=null){hh+=c.hs;hk+=c.kills;nh++}if(c.deaths!=null){dk+=c.kills;dd+=c.deaths}if(c.kills1!=null){k1+=c.kills1;n1++}});
+function season(g){return g.cs12||(isM1(g)?[]:(g.cs||[]))}
+function isM1(g){var p=g&&g.period;return window.GPMap1&&GPMap1.isMap1?GPMap1.isMap1({period:p}):p==='Map 1'}
+function pstats(g){var m1=isM1(g),cs=season(g),k=0,n=0,hk=0,hh=0,nh=0,dk=0,dd=0;cs.forEach(function(c){if(c.kills==null)return;k+=c.kills;n++;if(c.hs!=null){hh+=c.hs;hk+=c.kills;nh++}if(c.deaths!=null){dk+=c.kills;dd+=c.deaths}});
  var l10=cs.slice(0,10),h10=0,n10=0,k10=0,nk10=0;l10.forEach(function(c){if(c.hs!=null){h10+=c.hs;n10++}if(c.kills!=null){k10+=c.kills;nk10++}});
- return {n:n,hsp:hk?Math.round(hh/hk*100)+'%':'–',kd:dd?(dk/dd).toFixed(2):'–',k1:n1?(k1/n1).toFixed(1):'–',hpm:nh?(hh/(2*nh)).toFixed(1):'–',kl10:nk10?(k10/nk10).toFixed(1):'–',hsl10:n10?(h10/n10).toFixed(1):'–'}}
+ return {n:n,hsp:hk?Math.round(hh/hk*100)+'%':'–',kd:dd?(dk/dd).toFixed(2):'–',kpm:perMap(g),hpm:nh?(hh/(2*nh)).toFixed(1):'–',kl10:nk10?(k10/nk10).toFixed(1):'–',hsl10:n10?(h10/n10).toFixed(1):'–'}}
+function perMap(g){var r=(g.cs||[]).slice(0,10),k=0,n=0;r.forEach(function(c){if(c.kills!=null){k+=c.kills;n++}});return n?(k/(n*(isM1(g)?1:2))).toFixed(1):'–'}
 function vals(g){return (g.cs||[]).slice(0,10).map(function(c){return c[g.stat]}).filter(function(x){return x!=null}).reverse()}
 
 // ---- logos
@@ -33,8 +37,8 @@ var LOGOS=null,waiting=[];
 function logoUrl(team){if(!LOGOS||!team)return null;return LOGOS[key(team)]||null}
 function loadLogos(){try{fetch('team_logos.json',{cache:'no-cache'}).then(function(r){return r.ok?r.json():{}}).then(function(d){var m={},l=(d&&d.logos)||{};Object.keys(l).forEach(function(k){var u=l[k];if(typeof u==='string'&&u.indexOf('https://files.bo3.gg/')===0)m[key(k)]=u});LOGOS=m;patch();waiting.splice(0).forEach(function(f){f()})}).catch(function(){LOGOS={};waiting.splice(0).forEach(function(f){f()})})}catch(e){LOGOS={}}}
 function whenLogos(cb){if(LOGOS)cb();else{waiting.push(cb);setTimeout(function(){var i=waiting.indexOf(cb);if(i>=0){waiting.splice(i,1);cb()}},2500)}}
-function badge(team){var u=logoUrl(team);return u?'<img src="'+esc(u)+'" alt="'+esc(team)+'" crossorigin="anonymous" loading="lazy" onerror="this.parentNode.classList.add(\'mono\');this.remove()">':''}
-function patch(){var els=document.querySelectorAll('.tc-logo[data-team]');for(var i=0;i<els.length;i++){var e=els[i];if(e.querySelector('img'))continue;var b=badge(e.getAttribute('data-team'));if(b){e.classList.remove('mono');e.insertAdjacentHTML('afterbegin',b)}}}
+function badge(team){var u=logoUrl(team);return u?'<img src="'+esc(u)+'" alt="'+esc(team)+'" crossorigin="anonymous" loading="lazy" onerror="this.parentNode.classList.add(\'none\');this.remove()">':''}
+function patch(){var els=document.querySelectorAll('.tc-logo[data-team]');for(var i=0;i<els.length;i++){var e=els[i];if(e.querySelector('img'))continue;var b=badge(e.getAttribute('data-team'));if(b){e.classList.remove('none');e.insertAdjacentHTML('afterbegin',b)}}}
 // Player photos: player_photos.json + same-origin files in assets/players/ (cached from the lines feed so the export is not blocked by CORS).
 var PHOTOS=null,photowait=[];
 function pkey(s){return String(s||'').toLowerCase().replace(/[^a-z0-9]/g,'')}
@@ -51,15 +55,15 @@ function spark(g){var v=vals(g);if(!v.length)return '';var mx=Math.max.apply(nul
  return '<div class="tc-spark">'+(g.line!=null?'<i class="tc-sl" style="bottom:'+(g.line/mx*100)+'%"></i>':'')+v.map(function(x){return '<b class="'+(x>g.line?'o':x<g.line?'u':'p')+'" style="height:'+Math.max(4,x/mx*100)+'%"></b>'}).join('')+'</div>'}
 function html(g){if(!g)return '';var t=tier(g.grade),u=g.pick==='UNDER',fo=t.foil.join(','),bk=esc(g.book||'PrizePicks'),pic=hasPic(g.player);
  var top='<div class="tc-top"><div class="tc-rate"><b>'+esc(g.grade)+'</b><span>'+t.name+'</span></div>'+
-  '<div class="tc-logo'+(logoUrl(g.team)?'':' mono')+'" data-team="'+esc(g.team)+'">'+badge(g.team)+'<span>'+esc(mono(g.team))+'</span></div></div>';
+  '<div class="tc-logo'+(logoUrl(g.team)?'':' none')+'" data-team="'+esc(g.team)+'">'+badge(g.team)+'</div></div>';
  var name='<div class="tc-name"><b>'+esc(g.player)+'</b><span>'+esc(g.team||'')+(g.opp?' vs '+esc(g.opp):'')+' · '+bk+'</span></div>';
- var info='<div class="tc-info"><div class="tc-stat">'+esc(sname(g.stat))+' · Maps 1-2'+(g.lan?' · LAN data':'')+'</div><div class="tc-pick'+(u?' u':'')+'">'+esc(g.pick)+' '+esc(g.line)+'</div>'+
+ var info='<div class="tc-info"><div class="tc-stat">'+esc(sname(g.stat))+' · '+(isM1(g)?'Map 1':'Maps 1-2')+(g.lan?' · LAN data':'')+'</div><div class="tc-pick'+(u?' u':'')+'">'+esc(g.pick)+' '+esc(g.line)+'</div>'+
   '<div class="tc-proj"><span>PROJ</span><b>'+esc(g.proj)+'</b></div>'+'<div class="tc-meta">'+pct(g.pPick)+' chance · '+edge(g)+' edge · L10 '+l10(g)+'</div>'+spark(g)+'</div>';
  var port=pic?'<div class="tc-port"><div class="tc-pic"><img src="'+esc(photoSrc(g.player))+'" alt="" onerror="GPCards.dropPic(this)"></div></div>':'';
  var mid=pic?(port+top+name+info):(top+info+name);
  return '<div class="tc-wrap"><div class="tc t-'+(g.grade==='A+'?'ap':String(g.grade||'d').toLowerCase())+(pic?'':' tc-plain')+'" style="--foil:linear-gradient(135deg,'+fo+');--acc:'+t.accent+';--ink:'+t.ink+'">'+
  '<div class="tc-in"><div class="tc-pat" aria-hidden="true"></div><div class="tc-wm" aria-hidden="true">'+('GLOCKY PICKS   '.repeat(28))+'</div>'+mid+
- (function(){var q=pstats(g);return '<div class="tc-back"><div class="tc-bh">Season · Maps 1-2 · '+q.n+' series</div><div><b>'+q.hsp+'</b><i>HS%</i></div><div><b>'+q.kd+'</b><i>K/D</i></div><div><b>'+q.k1+'</b><i>Kills Map 1</i></div><div><b>'+q.hpm+'</b><i>HS / Map</i></div><div><b>'+q.kl10+'</b><i>Kills 1-2 L10</i></div><div><b>'+q.hsl10+'</b><i>HS 1-2 L10</i></div></div>'})()+
+ (function(){var q=pstats(g);return '<div class="tc-back"><div class="tc-bh">Season · Maps 1-2 · '+q.n+' series</div><div><b>'+q.hsp+'</b><i>HS%</i></div><div><b>'+q.kd+'</b><i>K/D</i></div><div><b>'+q.kpm+'</b><i>Kills / Map L10</i></div><div><b>'+q.hpm+'</b><i>HS / Map</i></div><div><b>'+q.kl10+'</b><i>Kills 1-2 L10</i></div><div><b>'+q.hsl10+'</b><i>HS 1-2 L10</i></div></div>'})()+
  '<div class="tc-foot"><span>GLOCKY PICKS</span><span>CS2 PROP GRADER</span></div></div></div></div>'}
 
 // ---- image export (canvas, no libraries). 750x1050 = 2.5 x 3.5 in at 300 dpi.
@@ -84,11 +88,10 @@ function drawPort(x,pic,logo,g,t,P){var x0=P+14,y0=P+14,w=W-2*P-28,h=410,r=18;
  x.fillStyle=grad(x,t.foil,bx,by,bx+bs,by+bs);rr(x,bx,by,bs,bs,16);x.fill();
  x.fillStyle=t.ink;fit(x,g.grade,g.grade.length>1?42:50,76);x.fillText(g.grade,bx+bs/2,by+58);x.font='10px '+FONT;x.fillText(t.name,bx+bs/2,by+76);
  // team logo, top-right corner of the frame
- var lx=x0+w-12-42,ly=y0+12+42,lr=42;x.save();x.beginPath();x.arc(lx,ly,lr+6,0,7);x.fillStyle=grad(x,t.foil,lx-lr,ly-lr,lx+lr,ly+lr);x.fill();
+ if(logo){var lx=x0+w-12-42,ly=y0+12+42,lr=42;x.save();x.beginPath();x.arc(lx,ly,lr+6,0,7);x.fillStyle=grad(x,t.foil,lx-lr,ly-lr,lx+lr,ly+lr);x.fill();
  x.beginPath();x.arc(lx,ly,lr,0,7);x.fillStyle='#0d0d0d';x.fill();x.clip();
- if(logo){var ls=Math.min(lr*1.5/logo.width,lr*1.5/logo.height);x.drawImage(logo,lx-logo.width*ls/2,ly-logo.height*ls/2,logo.width*ls,logo.height*ls)}
- else{x.fillStyle=t.accent;var tm=mono(g.team);fit(x,tm,tm.length>2?26:32,lr*1.6);x.textBaseline='middle';x.fillText(tm,lx,ly+2);x.textBaseline='alphabetic'}
- x.restore();
+ var ls=Math.min(lr*1.5/logo.width,lr*1.5/logo.height);x.drawImage(logo,lx-logo.width*ls/2,ly-logo.height*ls/2,logo.width*ls,logo.height*ls);
+ x.restore()};
  return y0+h}
 function tilePat(x,tile,P){if(!tile)return;x.save();rr(x,P,P,W-2*P,H-2*P,30);x.clip();x.translate(W/2,H/2);x.rotate(-Math.PI/9);x.globalAlpha=.17;
  var tw=168,th=tw*tile.height/tile.width,gx=tw*1.15,gy=th*1.15;for(var row=0,yy=-H-gy;yy<H+gy;yy+=gy,row++){var ox=row%2?gx/2:0;for(var xx=-W-gx;xx<W+gx;xx+=gx)x.drawImage(tile,xx+ox-tw/2,yy-th/2,tw,th)}x.restore()}
@@ -126,7 +129,7 @@ function draw(g,logo,mark,tile,pic){var c=document.createElement('canvas');c.wid
   x.fillStyle='#8b9297';x.font=(has?12:14)+'px '+FONT;x.fillText('LAST '+v.length+' SERIES  ·  DASHED = LINE',W/2,sy+sh+18)}
  var q=pstats(g);
  x.fillStyle='#8b9297';x.font=(has?13:15)+'px '+FONT;x.fillText('SEASON  ·  MAPS 1-2  ·  '+q.n+' SERIES',W/2,gy);
- var cells=[[q.hsp,'HS%'],[q.kd,'K/D'],[q.k1,'KILLS MAP 1'],[q.hpm,'HS / MAP'],[q.kl10,'KILLS 1-2 L10'],[q.hsl10,'HS 1-2 L10']],gx=P+14,gw=(W-2*P-28-8)/2,cy0=gy+10,gap=has?6:8,cf=has?13:15,vf=has?26:30;
+ var cells=[[q.hsp,'HS%'],[q.kd,'K/D'],[q.kpm,'KILLS / MAP L10'],[q.hpm,'HS / MAP'],[q.kl10,'KILLS 1-2 L10'],[q.hsl10,'HS 1-2 L10']],gx=P+14,gw=(W-2*P-28-8)/2,cy0=gy+10,gap=has?6:8,cf=has?13:15,vf=has?26:30;
  cells.forEach(function(cl,k){var cx=gx+(k%2)*(gw+8),cy=cy0+Math.floor(k/2)*(gh+gap);
   x.fillStyle='rgba(255,255,255,.06)';rr(x,cx,cy,gw,gh,10);x.fill();
   x.strokeStyle=t.accent;x.globalAlpha=.35;x.lineWidth=2;rr(x,cx,cy,gw,gh,10);x.stroke();x.globalAlpha=1;
@@ -138,16 +141,15 @@ function draw(g,logo,mark,tile,pic){var c=document.createElement('canvas');c.wid
 function drawBadges(x,logo,g,t){var bx=58,by=56,bs=150;x.textBaseline='alphabetic';x.textAlign='center';
  x.fillStyle=grad(x,t.foil,bx,by,bx+bs,by+bs);rr(x,bx,by,bs,bs,24);x.fill();
  x.fillStyle=t.ink;fit(x,g.grade,g.grade.length>1?88:102,130);x.fillText(g.grade,bx+bs/2,by+98);x.font='16px '+FONT;x.fillText(t.name,bx+bs/2,by+126);
- var lx=W-58-70,ly=by+70,lr=70;x.save();x.beginPath();x.arc(lx,ly,lr+7,0,7);x.fillStyle=grad(x,t.foil,lx-lr,ly-lr,lx+lr,ly+lr);x.fill();
+ if(logo){var lx=W-58-70,ly=by+70,lr=70;x.save();x.beginPath();x.arc(lx,ly,lr+7,0,7);x.fillStyle=grad(x,t.foil,lx-lr,ly-lr,lx+lr,ly+lr);x.fill();
  x.beginPath();x.arc(lx,ly,lr,0,7);x.fillStyle='#0d0d0d';x.fill();x.clip();
- if(logo){var ls=Math.min(lr*1.5/logo.width,lr*1.5/logo.height);x.drawImage(logo,lx-logo.width*ls/2,ly-logo.height*ls/2,logo.width*ls,logo.height*ls)}
- else{x.fillStyle=t.accent;var tm=mono(g.team);fit(x,tm,tm.length>2?36:46,lr*1.6);x.textBaseline='middle';x.fillText(tm,lx,ly+2);x.textBaseline='alphabetic'}
- x.restore()}
+ var ls=Math.min(lr*1.5/logo.width,lr*1.5/logo.height);x.drawImage(logo,lx-logo.width*ls/2,ly-logo.height*ls/2,logo.width*ls,logo.height*ls);
+ x.restore()}}
 function drawName(x,g,t,P,ny,nh,nf,sf){x.fillStyle=grad(x,t.foil,P,ny,W-P,ny+nh);rr(x,P+14,ny,W-2*P-28,nh,14);x.fill();x.fillStyle='rgba(0,0,0,.55)';rr(x,P+18,ny+3,W-2*P-36,nh-6,12);x.fill();
  x.textAlign='center';x.fillStyle='#fff';fit(x,String(g.player).toUpperCase(),nf,W-2*P-80);x.fillText(String(g.player).toUpperCase(),W/2,ny+Math.round(nh*0.56));
  var bk=(g.book||'PrizePicks').toUpperCase();var sub=(g.team||'')+(g.opp?'  vs  '+g.opp:'')+'  ·  '+bk;x.fillStyle=t.accent;fit(x,sub,sf,W-2*P-80);x.fillText(sub,W/2,ny+Math.round(nh*0.84))}
 function drawPick(x,g,pc,iy,statSize,pickSize,plSize,projSize,metaSize){
- x.fillStyle='#c8cdd2';x.font=statSize+'px '+FONT;x.fillText((sname(g.stat)+' · Maps 1-2').toUpperCase(),W/2,iy);
+ x.fillStyle='#c8cdd2';x.font=statSize+'px '+FONT;x.fillText((sname(g.stat)+' · '+(isM1(g)?'Map 1':'Maps 1-2')).toUpperCase(),W/2,iy);
  var pk=g.pick+' '+g.line;x.shadowColor=pc;x.shadowBlur=20;x.fillStyle=pc;fit(x,pk,pickSize,640);x.fillText(pk,W/2,iy+44+(pickSize>60?16:0));x.shadowBlur=0;
  x.font=plSize+'px '+FONT;var pl='PROJ ',pw=x.measureText(pl).width;x.font=projSize+'px '+FONT;var pv=String(g.proj),vw=x.measureText(pv).width;var px0=W/2-(pw+vw)/2,py=iy+(pickSize>60?116:76);
  x.textAlign='left';x.fillStyle='#8b9297';x.font=plSize+'px '+FONT;x.fillText(pl,px0,py);x.fillStyle='#fff';x.font=projSize+'px '+FONT;x.fillText(pv,px0+pw,py);x.textAlign='center';
