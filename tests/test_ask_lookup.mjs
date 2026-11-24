@@ -10,6 +10,7 @@ const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 const require = createRequire(import.meta.url);
 globalThis.GPModel = require(join(root, "model.js"));
 const L = await import("../ask_lookup.js");
+const { fallbackPhrase, systemPrompt, scrubProviders } = await import("../ask_ai.js");
 
 const playersRaw = JSON.parse(readFileSync(join(root, "players.json"), "utf8"));
 const strength = JSON.parse(readFileSync(join(root, "team_strength.json"), "utf8"));
@@ -184,4 +185,33 @@ test("lookup never reads or mentions the Track Record / lines_history", () => {
   assert.equal(blob.includes("lines_history"), false);
   assert.doesNotMatch(ans.factText, /track record/i);
   assert.doesNotMatch(ans.factText, /locked pick/i);
+});
+
+const PROVIDER = /\b(cito|bo3(?:\.gg)?|kash\s*rock|hltv(?:\.org)?|gemini|google(?:\s+ai)?)\b/i;
+
+test("replies, fact text, source labels, and Ask Glocky UI never name data providers", () => {
+  const questions = [
+    "what's EliGE's headshot percentage on LAN",
+    "EliGE over 35.5 kills maps 1-2?",
+    "what is Liquid's VRS rank",
+    "what are Liquid's map pick tendencies",
+    "what's Liquid's win chance",
+    "how does the grader work"
+  ];
+  for (const q of questions) {
+    const ans = L.answerQuestion(q, store);
+    assert.doesNotMatch(ans.factText, PROVIDER, "factText: " + q);
+    assert.doesNotMatch(fallbackPhrase(ans), PROVIDER, "fallback: " + q);
+  }
+  const app = readFileSync(join(root, "app.js"), "utf8");
+  const welcome = app.match(/addMsg\('a',"((?:\\.|[^"\\])*)"/);
+  assert.ok(welcome, "welcome message in app.js");
+  const welcomeText = welcome[1].replace(/\\'/g, "'");
+  assert.doesNotMatch(welcomeText, PROVIDER);
+  assert.match(welcomeText, /Glocky's data|our data/);
+  const prompt = systemPrompt();
+  assert.doesNotMatch(prompt, PROVIDER);
+  assert.match(prompt, /our data or Glocky's data/);
+  assert.doesNotMatch(scrubProviders("Cito win chance 60% vs FaZe according to bo3.gg and KashRock. Gemini and Google AI Studio agree."), PROVIDER);
+  assert.match(scrubProviders("Cito win chance 60%"), /our data|win chance/);
 });
