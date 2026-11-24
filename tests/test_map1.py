@@ -77,15 +77,18 @@ class GradeMap1Tests(unittest.TestCase):
         self.assertIsNotNone(m12)
         self.assertEqual(m1["period"], "Map 1")
         self.assertLess(m1["proj"], m12["proj"])
-        self.assertIn(m1["grade"], list("A+BCDF") + ["A+"])
+        self.assertIn(m1["grade"], ["A+", "A", "B+", "B", "C+", "C", "D", "F"])
         self.assertIn(m1["pick"], ("OVER", "UNDER"))
 
-    def test_under_breakeven_rule_still_applies(self):
-        # very high line so the pick is Under
+    def test_high_line_is_under_from_calibrated_edge(self):
+        # very high line so the pick is Under; letter comes from P(under) vs break-even, not the old D/F rule
         g = self.g.grade(self.p, "kills", 40.5, "FaZe", "Spirit", "PrizePicks", -137, period="Map 1")
         self.assertEqual(g["pick"], "UNDER")
-        self.assertIn(g["grade"], ("D", "F"))
-        self.assertTrue(g.get("under_be", {}).get("applied"))
+        self.assertIn(g["grade"], ["A+", "A", "B+", "B", "C+", "C", "D", "F"])
+        self.assertGreater(g["p_pick"], 0.5)
+        self.assertFalse(g.get("under_be", {}).get("applied"))
+        self.assertIn("stake", g)
+        self.assertEqual(g["model"], "v1e")
 
 
 class SettleMap1Tests(unittest.TestCase):
