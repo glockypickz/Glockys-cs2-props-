@@ -4,7 +4,15 @@ KashRock returns props as `groups` (one per player + market). Each group has a `
 offers (book, line, odds, over/under, alt-line flag). We keep the main OVER offer per book.
 
 Needs the KASHROCK_API_KEY secret. Never prints or stores the key.
-If anything fails, the old lines.json is left untouched.
+
+When KashRock returns successfully but the board is empty (zero props across
+every market, or every returned prop is for a match that has already started),
+lines.json is replaced with an empty board: fetched_at / fetched_by_job_at,
+status "no_lines_up", and lines: []. Exit 0. lines_history.json, locked
+grades, and settlement are not touched.
+
+When a fetch fails (missing key, HTTP error, or any exception), the previous
+lines.json is kept and marked stale (stale, stale_at, stale_reason). Exit 1.
 """
 import json, os, sys, time, datetime, urllib.request, urllib.error, urllib.parse
 
@@ -336,16 +344,89 @@ def write_pregame(entries, now):
     print(PREGAME_FILE + ":", len(out), "started props")
 
 
-def main():
-    if not KEY:
-        sys.exit("KASHROCK_API_KEY is not set, keeping the old lines.json")
+LINES_FILE = "lines.json"
+
+
+def utcnow():
+    return datetime.datetime.now(datetime.timezone.utc)
+
+
+def iso_utc(dt):
+    if isinstance(dt, str):
+        return dt
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=datetime.timezone.utc)
+    return dt.astimezone(datetime.timezone.utc).isoformat(timespec="seconds")
+
+
+def is_upcoming(line, now=None):
+    """True if this prop's match has not started yet. Lines with no start stay (the UI has a safety net)."""
+    t0 = parse_time((line or {}).get("starts_at") or "")
+    if t0 is None:
+        return True
+    now = now or utcnow()
+    if t0.tzinfo is None:
+        t0 = t0.replace(tzinfo=datetime.timezone.utc)
+    if now.tzinfo is None:
+        now = now.replace(tzinfo=datetime.timezone.utc)
+    return now < t0
+
+
+def upcoming_lines(lines, now=None):
+    now = now or utcnow()
+    return [l for l in (lines or []) if is_upcoming(l, now)]
+
+
+def write_board(lines, fetched=None, now=None, path=LINES_FILE, empty=None):
+    """Replace lines.json with the current board. empty=True writes the 'no lines up' marker."""
+    now_iso = iso_utc(now or utcnow())
+    rows = list(lines or [])
+    empty = bool(not rows) if empty is None else bool(empty)
+    out = {
+        "observed_at": fetched or now_iso,
+        "fetched_by_job_at": now_iso,
+        "fetched_at": now_iso,
+        "source": "kashrock",
+        "empty": empty,
+        "status": "no_lines_up" if empty else "ok",
+        "stale": False,
+        "lines": [] if empty else rows,
+    }
+    if empty:
+        out["message"] = "no lines up"
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(out, f, separators=(",", ":"), ensure_ascii=False)
+    return out
+
+
+def mark_stale(reason, path=LINES_FILE, now=None):
+    """Keep the existing board and flag it stale after a failed pull. Creates a stub if the file is missing."""
+    now_iso = iso_utc(now or utcnow())
+    try:
+        with open(path, encoding="utf-8") as f:
+            data = json.load(f)
+        if not isinstance(data, dict):
+            data = {"source": "kashrock", "lines": []}
+    except Exception:
+        data = {"source": "kashrock", "lines": []}
+    data["stale"] = True
+    data["stale_at"] = now_iso
+    data["stale_reason"] = str(reason)[:500]
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(data, f, separators=(",", ":"), ensure_ascii=False)
+    return data
+
+
+def collect_lines(fetch_fn=None):
+    """Pull every market. Raises on HTTP / network failure. Returns (lines, fetched_at)."""
+    fetch_fn = fetch_fn or fetch
     seen, lines, fetched = set(), [], None
     for book in BOOKS:
         for market, (stat, period) in MARKETS.items():
             offset, kept = 0, 0
             for _ in range(MAX_PAGES):
-                d = fetch("/v7/cs2/props", {"board": "dfs", "book": book, "market": market,
-                                            "limit": PAGE, "offset": offset})
+                d = fetch_fn("/v7/cs2/props", {"board": "dfs", "book": book, "market": market,
+                                              "limit": PAGE, "offset": offset})
                 if not d.get("available", True):
                     print(f"{book} {market}: not available ({d.get('reason')})")
                     break
@@ -380,14 +461,33 @@ def main():
                 if not d.get("has_more") or not groups:
                     break
                 offset += len(groups)
-    if not lines:
-        sys.exit("No CS2 lines returned (board may be empty). Keeping the old lines.json")
-    now = datetime.datetime.now(datetime.timezone.utc).isoformat(timespec="seconds")
-    out = {"observed_at": fetched or now, "fetched_by_job_at": now, "source": "kashrock", "lines": lines}
-    json.dump(out, open("lines.json", "w"), separators=(",", ":"), ensure_ascii=False)
-    print("wrote lines.json:", len(lines), "lines")
+    return lines, fetched
+
+
+def main(lines_path=LINES_FILE, history=True, fetch_fn=None, now=None):
+    if not KEY:
+        mark_stale("KASHROCK_API_KEY is not set", path=lines_path, now=now)
+        sys.exit("KASHROCK_API_KEY is not set, keeping the old lines.json")
     try:
-        update_history(lines, now)
+        lines, fetched = collect_lines(fetch_fn)
+    except Exception as e:
+        mark_stale(e, path=lines_path, now=now)
+        sys.exit("fetch failed, keeping the old lines.json (marked stale): " + str(e))
+    now = now or utcnow()
+    kept = upcoming_lines(lines, now)
+    dropped = len(lines) - len(kept)
+    if dropped:
+        print("dropped", dropped, "props whose match already started or finished")
+    if not kept:
+        write_board([], fetched=fetched, now=now, path=lines_path, empty=True)
+        print("No CS2 lines up right now. Wrote empty lines.json")
+        return  # exit 0; do not touch lines_history.json
+    write_board(kept, fetched=fetched, now=now, path=lines_path, empty=False)
+    print("wrote lines.json:", len(kept), "lines")
+    if not history:
+        return
+    try:
+        update_history(kept, iso_utc(now))
     except Exception as e:
         print("history update failed (lines.json is fine):", e)
 
