@@ -2,11 +2,12 @@
  *  Used by the Lines and Grader tabs (app.js). Keep this file free of DOM and of app state.
  *  A missing period (all historical lines) is Maps 1-2. "maps1-2" is never treated as Map 1.
  *
- *  Lines tab (owner, final): show a game if it has Map 1 lines OR Maps 1-2 lines.
- *    Map 1 only  -> those Map 1 lines (graded on Map 1 stats)
- *    Maps 1-2 only -> those Maps 1-2 lines (graded on Maps 1-2)
- *    both -> both, labeled
- *    neither -> the game is not shown
+ *  Visible/graded feed lines (owner): either/or per game, Maps 1-2 takes priority.
+ *    If a game has any Maps 1-2 lines -> only those Maps 1-2 lines (Map 1 is hidden)
+ *    If a game has no Maps 1-2 lines and has Map 1 lines -> those Map 1 lines (1-map grades)
+ *    Neither -> the game is not shown
+ *  Applies to the Lines tab, slip auto-grading, and graded lines lists.
+ *  The Grader tab manual period selector is separate and can still grade Map 1.
  */
 (function (root) {
   function periodOf(l) {
@@ -30,20 +31,20 @@
     var day = dayFn ? dayFn(raw) : String(raw).slice(0, 10);
     return [a, b].sort().join("|") + "|" + day;
   }
-  /** Lines on the Lines tab: keep a game when it has Map 1 and/or Maps 1-2 lines. Original order is kept. */
+  /** Keep Maps 1-2 lines when a game has any; otherwise keep Map 1. Original order is kept. */
   function linesTabLines(lines, tnFn, dayFn) {
     var flag = {};
     (lines || []).forEach(function (l) {
       if (!isAcceptedPeriod(l)) return;
       var k = gameKey(l, tnFn, dayFn);
-      var g = flag[k] || (flag[k] = { has1: false, has12: false });
-      if (isMap1(l)) g.has1 = true;
+      var g = flag[k] || (flag[k] = { has12: false });
       if (isMaps12(l)) g.has12 = true;
     });
     return (lines || []).filter(function (l) {
       if (!isAcceptedPeriod(l)) return false;
       var g = flag[gameKey(l, tnFn, dayFn)];
-      return !!(g && (g.has1 || g.has12));
+      if (!g) return false;
+      return g.has12 ? isMaps12(l) : isMap1(l);
     });
   }
   var api = { periodOf: periodOf, isMap1: isMap1, isMaps12: isMaps12, isAcceptedPeriod: isAcceptedPeriod, gameKey: gameKey, linesTabLines: linesTabLines };
