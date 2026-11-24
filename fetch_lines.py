@@ -165,13 +165,16 @@ def _lock(gr, e, now, regrade=False):
         st = "hs" if "head" in e["stat"].lower() else "kills" if "kill" in e["stat"].lower() else None
         if not st:
             return
+        # LAN data (grader.py lan_data): match type from games.json "ev", else the 3-day rule. New locks only; REGRADE_TAG is
+        # NOT bumped, so props that are already locked keep their grade.
+        ev, ev_src = gr.match_ev(e.get("team"), e.get("opponent") or "", e.get("start"))
         if "+" in e["player"]:
-            g = gr.grade_combo(e["player"], e.get("team"), st, float(e["line"]), e.get("opponent") or "", e.get("book"), e.get("odds"), period=e.get("period"))
+            g = gr.grade_combo(e["player"], e.get("team"), st, float(e["line"]), e.get("opponent") or "", e.get("book"), e.get("odds"), period=e.get("period"), ev=ev)
         else:
             p = gr.find(e["player"], e.get("team"))
             if not p:
                 return
-            g = gr.grade(p, st, float(e["line"]), e.get("opponent") or "", e.get("team"), e.get("book"), e.get("odds"), period=e.get("period"))
+            g = gr.grade(p, st, float(e["line"]), e.get("opponent") or "", e.get("team"), e.get("book"), e.get("odds"), period=e.get("period"), ev=ev)
         if g:
             o = e["lock"] if regrade else None
             e["lock"] = {"line": float(e["line"]), "proj": g["proj"], "grade": g["grade"], "pick": g["pick"],
@@ -179,6 +182,9 @@ def _lock(gr, e, now, regrade=False):
                          "reasons": g["reasons"], "flag": g.get("flag", ""), "model": g["model"], "odds": e.get("odds"),
                          "hits": g.get("hits"),   # [over, series] vs this line: l5 / l10 / l20 / szn / h2h (single props only)
                          "at": now.isoformat(timespec="seconds"), "stats_updated": STATS_STAMP}
+            if ev:
+                e["lock"]["ev"] = ev   # match type the grade used: "lan" = LAN data inputs (when lan_data is on)
+                e["lock"]["ev_src"] = ev_src
             if regrade:
                 e["lock"]["rg"] = REGRADE_TAG   # marks "regraded once"; the old grade is not kept
             mo = match_odds_for(e) or (o.get("mo") if regrade else None)
