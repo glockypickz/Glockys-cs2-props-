@@ -85,10 +85,10 @@ test("gate on: signed-out users cannot ask", async () => {
   assert.equal(j.login, "/login");
 });
 
-test("loadGPModelFromSource installs the same v1e API", () => {
+test("loadGPModelFromSource installs the same current grader API", () => {
   const src = readFileSync(join(root, "model.js"), "utf8");
   const api = loadGPModelFromSource(src);
-  assert.equal(api.VERSION, "v1e");
+  assert.equal(api.VERSION, "v1f");
   assert.equal(typeof api.grade, "function");
   assert.equal(typeof api.decodePlayers, "function");
 });
@@ -113,9 +113,11 @@ test("Gemini URL must not include the secret (header only); phrasing is stripped
     for (const s of seen) {
       assert.equal(s.url.includes("not-a-real-key"), false);
       assert.doesNotMatch(s.url, /key=/i);
+      assert.match(s.url, /models\/gemini-3\.8-flash:generateContent/);
       if (s.body) {
         const body = JSON.parse(s.body);
-        assert.equal(body.generationConfig.thinkingConfig.thinkingBudget, 0);
+        assert.equal(body.generationConfig.thinkingConfig.thinkingLevel, "low");
+        assert.equal(body.generationConfig.thinkingConfig.thinkingBudget, undefined);
       }
     }
   } finally {
@@ -187,7 +189,7 @@ test("scrubbers strip provider names, including from a model reply", async () =>
     candidates: [{ content: { parts: [{ text: dirty }] } }]
   }), { status: 200, headers: { "content-type": "application/json" } });
   try {
-    const r = await handleAsk(req("/ai/ask", { body: { question: "what's EliGE's headshot percentage on LAN" }, ip: "8.8.4.4" }), env, new URL(ORIGIN + "/ai/ask"), KEY_HASH);
+    const r = await handleAsk(req("/ai/ask", { body: { question: "what's EliGE's headshot percentage on LAN" }, ip: "7.7.7.7" }), env, new URL(ORIGIN + "/ai/ask"), KEY_HASH);
     const j = await r.json();
     assert.equal(r.status, 200, j.error || j.answer);
     assert.doesNotMatch(j.answer, /\b(cito|bo3(?:\.gg)?|kash\s*rock|hltv|gemini|google)\b/i);
@@ -202,7 +204,12 @@ test("scrubbers strip provider names, including from a model reply", async () =>
 });
 
 test("thinkingConfigFor disables thinking on 2.5 and uses a low level on 3.x", () => {
+  assert.equal(T.DEFAULT_MODEL, "gemini-3.8-flash");
+  assert.equal(T.geminiModel({}), "gemini-3.8-flash");
+  assert.equal(T.geminiModel({ GEMINI_MODEL: "gemini-2.5-flash" }), "gemini-3.8-flash");
+  assert.equal(T.geminiModel({ GEMINI_MODEL: "gemini-3.5-flash-lite" }), "gemini-3.5-flash-lite");
   assert.deepEqual(T.thinkingConfigFor("gemini-2.5-flash", 0), { thinkingBudget: 0 });
+  assert.deepEqual(T.thinkingConfigFor("gemini-3.8-flash"), { thinkingLevel: "low" });
   assert.deepEqual(T.thinkingConfigFor("gemini-3.5-flash-lite"), { thinkingLevel: "minimal" });
   assert.equal(T.thinkingConfigFor("some-other-model"), null);
 });
@@ -213,5 +220,33 @@ test("sanitizeDetail redacts keys and keeps a short reason", () => {
   assert.doesNotMatch(s, /AIza/);
   assert.doesNotMatch(s, /not-a-real-key-value/);
   assert.match(s, /\[redacted\]/);
+});
+
+test("404 NOT_FOUND on an unknown model retries gemini-3.8-flash", async () => {
+  const env = mkEnv({ GEMINI_API_KEY: "not-a-real-key", GEMINI_MODEL: "gemini-ghost-model" });
+  const orig = globalThis.fetch;
+  const seen = [];
+  globalThis.fetch = async (url, opts) => {
+    seen.push(String(url));
+    if (String(url).includes("gemini-ghost-model")) {
+      return new Response(JSON.stringify({
+        error: { code: 404, message: "This model models/gemini-ghost-model is no longer available to new users.", status: "NOT_FOUND" }
+      }), { status: 404, headers: { "content-type": "application/json" } });
+    }
+    return new Response(JSON.stringify({
+      candidates: [{ content: { parts: [{ text: "EliGE's headshot percentage on LAN is 56.97%." }] } }]
+    }), { status: 200, headers: { "content-type": "application/json" } });
+  };
+  try {
+    const r = await handleAsk(req("/ai/ask", { body: { question: "what's EliGE's headshot percentage on LAN" }, ip: "5.5.5.5" }), env, new URL(ORIGIN + "/ai/ask"), KEY_HASH);
+    const j = await r.json();
+    assert.equal(r.status, 200);
+    assert.match(j.answer, /56\.97/);
+    assert.ok(seen.some((u) => u.includes("gemini-ghost-model")));
+    assert.ok(seen.some((u) => u.includes("gemini-3.8-flash")));
+    assert.ok(seen.every((u) => !u.includes("not-a-real-key") && !/key=/i.test(u)));
+  } finally {
+    globalThis.fetch = orig;
+  }
 });
 
