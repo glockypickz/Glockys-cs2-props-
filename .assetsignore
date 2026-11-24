@@ -24,3 +24,5 @@ worker.js
 push.js
 support_api.js
 scout_params.json
+ask_ai.js
+ask_lookup.js

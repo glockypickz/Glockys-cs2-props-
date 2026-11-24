@@ -63,6 +63,26 @@ After merging: press *Set up notifications* at `/beta-admin` (or `POST /auth/adm
 
 Tests: `node --test tests/test_push.mjs` (includes the RFC 8291 test vector).
 
+## Ask Glocky (Cloudflare Worker only)
+
+The **Ask Glocky** button opens a chat. Answers use only our existing data (`players.json`, Cito-derived `team_strength.json`, the live `lines.json` board, and `games.json`). The Worker looks up the numbers first (including the same v1be grader math the site uses for over/under questions) and then asks Gemini only to phrase the "Glocky says" reply. It does not read `lines_history.json` or the Track Record.
+
+When someone asks over or under on a line (for example "EliGE over 35.5 kills maps 1-2?"), Glocky runs our grader (Map 1 vs Maps 1-2, LAN rule, head-to-head, bait flag) and the chat shows the current Grader trading card under the reply. If that line is on the board, the board line, book, and opponent are used; otherwise the line in the question is graded.
+
+### Set up the free Gemini key
+
+Ask Glocky stays dark until a Gemini API key is stored as a **Worker secret** named `GEMINI_API_KEY`. Never commit the key, put it in the repo, or type it into the site.
+
+1. Create a free key in [Google AI Studio](https://aistudio.google.com/apikey) (Gemini API, free tier).
+2. Add it as a secret on the `glockys-cs2-props` Worker, either:
+   - From this repo: `npx wrangler secret put GEMINI_API_KEY` (it will prompt; paste the key, then deploy), or
+   - In the Cloudflare dashboard: Workers & Pages → `glockys-cs2-props` → Settings → Variables and Secrets → Add a **Secret** named `GEMINI_API_KEY`.
+3. Deploy once after the secret is in place (a push to `main` auto-deploys). Until the secret is set, signed-in users see "Ask Glocky isn't set up yet."
+
+The default model is `gemini-2.5-flash` (free tier). To use another Flash model later, set a plain Worker variable `GEMINI_MODEL` (not a secret). Google's free-tier limits and terms apply (free prompts may be used to improve their models). The Worker also caps each signed-in user at 20 questions per UTC day.
+
+Tests: `node --test tests/test_ask_lookup.mjs tests/test_ask_ai.mjs`.
+
 ## Shadow S: Scout-style factor projection (admin only, test)
 
 `scout_model.py` grades every upcoming prop a third way and saves it once, before the match starts, as `e["shadow_s"]` in `lines_history.json` (via `shadow.py`). It never changes the live projection, pick, letter or any locked grade.

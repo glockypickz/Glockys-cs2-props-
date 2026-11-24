@@ -1,4 +1,5 @@
 {
+  // Ask Glocky: set the GEMINI_API_KEY Worker secret with `wrangler secret put GEMINI_API_KEY` (never commit it).
   "name": "glockys-cs2-props",
   "main": "worker.js",
   "compatibility_date": "2025-01-01",
