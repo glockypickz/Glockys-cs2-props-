@@ -201,3 +201,17 @@ test("scrubbers strip provider names, including from a model reply", async () =>
   assert.doesNotMatch(systemPrompt(), /\b(cito|bo3(?:\.gg)?|kash\s*rock|hltv|gemini|google)\b/i);
 });
 
+test("thinkingConfigFor disables thinking on 2.5 and uses a low level on 3.x", () => {
+  assert.deepEqual(T.thinkingConfigFor("gemini-2.5-flash", 0), { thinkingBudget: 0 });
+  assert.deepEqual(T.thinkingConfigFor("gemini-3.5-flash-lite"), { thinkingLevel: "minimal" });
+  assert.equal(T.thinkingConfigFor("some-other-model"), null);
+});
+
+test("sanitizeDetail redacts keys and keeps a short reason", () => {
+  const s = T.sanitizeDetail("HTTP 400: bad key=AIzaSyDummyKeyValue1234567890 and secret not-a-real-key-value", "not-a-real-key-value");
+  assert.match(s, /HTTP 400/);
+  assert.doesNotMatch(s, /AIza/);
+  assert.doesNotMatch(s, /not-a-real-key-value/);
+  assert.match(s, /\[redacted\]/);
+});
+

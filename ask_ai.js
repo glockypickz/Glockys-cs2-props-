@@ -164,44 +164,142 @@ function extractText(data) {
   }
 }
 
+// 2.5 Flash accepts thinkingBudget 0 (thinking off). Gemini 3.x, and the
+// Dec 2026 reroute of 2.5-flash to 3.5-flash-lite, reject thinkingBudget 0
+// with HTTP 400. Prefer a low thinking level on 3.x; omit on unknown models.
+export function thinkingConfigFor(model, budget) {
+  const m = String(model || "").toLowerCase();
+  if (m.includes("gemini-2.5")) {
+    return { thinkingBudget: budget != null ? budget : 0 };
+  }
+  if (m.includes("gemini-3")) {
+    return { thinkingLevel: "minimal" };
+  }
+  return null;
+}
+
+export function sanitizeDetail(s, extra) {
+  let t = String(s == null ? "" : s);
+  const secrets = typeof extra === "string" ? [extra] : (Array.isArray(extra) ? extra : []);
+  for (let i = 0; i < secrets.length; i++) {
+    const v = String(secrets[i] || "").trim();
+    if (v.length >= 8) t = t.split(v).join("[redacted]");
+  }
+  t = t.replace(/AIza[0-9A-Za-z_\-]{10,}/g, "[redacted]");
+  t = t.replace(/(?:x-goog-api-key|(?:api|access|secret|private)[-_ ]?key|bearer)\s*[:=]\s*[^\s"',}]+/gi, "[redacted]");
+  t = t.replace(/[?&]key=[^&\s]+/gi, "[redacted]");
+  t = t.replace(/https:\/\/generativelanguage\.googleapis\.com[^\s]*/gi, "generativelanguage.googleapis.com");
+  if (t.length > 400) t = t.slice(0, 400) + "…";
+  return t;
+}
+
+function geminiErrorMessage(data) {
+  try {
+    const err = (data && data.error) || {};
+    const msg = String(err.message || "").trim();
+    const status = String(err.status || "").trim();
+    if (msg && status) return msg + " (" + status + ")";
+    return msg || status;
+  } catch (e) {
+    return "";
+  }
+}
+
+function geminiMeta(data) {
+  const cand = (((data || {}).candidates || [])[0]) || {};
+  const fb = (data || {}).promptFeedback || {};
+  const usage = (data || {}).usageMetadata || {};
+  const thoughts = usage.thoughtsTokenCount != null ? usage.thoughtsTokenCount : usage.thoughts_token_count;
+  return {
+    finishReason: cand.finishReason || cand.finish_reason || "",
+    blockReason: fb.blockReason || fb.block_reason || "",
+    thoughts: thoughts == null ? null : thoughts
+  };
+}
+
+export function formatGeminiDetail(g) {
+  g = g || {};
+  const bits = [];
+  if (g.status === 0 || g.aborted) bits.push(g.error || "timeout or network error");
+  else if (g.status) bits.push("HTTP " + g.status);
+  if (g.error && g.status !== 0) bits.push(g.error);
+  if (g.finishReason) bits.push("finishReason=" + g.finishReason);
+  if (g.blockReason) bits.push("blockReason=" + g.blockReason);
+  if (!g.text) bits.push("empty text");
+  if (g.thoughts != null && g.thoughts !== "") bits.push("thoughtTokens=" + g.thoughts);
+  if (g.imageBytes != null) bits.push("image=" + g.imageBytes + "B");
+  if (g.mime) bits.push("mime=" + g.mime);
+  if (g.retried) bits.push("retried without thinking/json-mime");
+  if (g.firstError) bits.push("first=" + g.firstError);
+  return sanitizeDetail(bits.join(", ") || "unknown Gemini failure");
+}
+
 export async function geminiRequest(env, opts) {
   opts = opts || {};
   const key = String(env.GEMINI_API_KEY || "").trim();
-  const model = encodeURIComponent(geminiModel(env));
-  const url = "https://generativelanguage.googleapis.com/v1beta/models/" + model + ":generateContent";
-  const ctrl = typeof AbortController !== "undefined" ? new AbortController() : null;
-  const t = ctrl ? setTimeout(() => ctrl.abort(), opts.timeoutMs || 15000) : null;
+  const modelName = geminiModel(env);
+  const url = "https://generativelanguage.googleapis.com/v1beta/models/" + encodeURIComponent(modelName) + ":generateContent";
   const parts = opts.parts || [{ text: opts.user || "" }];
-  // Gemini 2.5 Flash thinks by default, and thought tokens count against
-  // maxOutputTokens. A vision/JSON call can spend the whole budget thinking
-  // and come back with empty text (finishReason MAX_TOKENS). Turn thinking
-  // off unless a caller asks for a budget.
-  const gen = {
-    temperature: opts.temperature != null ? opts.temperature : 0.2,
-    maxOutputTokens: opts.maxOutputTokens || 512,
-    thinkingConfig: { thinkingBudget: opts.thinkingBudget != null ? opts.thinkingBudget : 0 }
-  };
-  if (opts.responseMimeType) gen.responseMimeType = opts.responseMimeType;
-  try {
-    const r = await fetch(url, {
-      method: "POST",
-      headers: { "content-type": "application/json", "x-goog-api-key": key },
-      body: JSON.stringify({
-        systemInstruction: { parts: [{ text: opts.system || "" }] },
-        contents: [{ role: "user", parts }],
-        generationConfig: gen
-      }),
-      signal: ctrl ? ctrl.signal : undefined
-    });
-    if (!r.ok) return { ok: false, status: r.status };
-    const data = await r.json();
-    const text = extractText(data);
-    return { ok: !!text, text };
-  } catch (e) {
-    return { ok: false, status: 0 };
-  } finally {
-    if (t) clearTimeout(t);
+  const timeoutMs = opts.timeoutMs || 15000;
+
+  function buildBody(relaxed) {
+    const gen = {
+      temperature: opts.temperature != null ? opts.temperature : 0.2,
+      maxOutputTokens: opts.maxOutputTokens || 512
+    };
+    if (!relaxed) {
+      const tc = thinkingConfigFor(modelName, opts.thinkingBudget != null ? opts.thinkingBudget : 0);
+      if (tc) gen.thinkingConfig = tc;
+      if (opts.responseMimeType) gen.responseMimeType = opts.responseMimeType;
+    }
+    const body = {
+      systemInstruction: { parts: [{ text: opts.system || "" }] },
+      contents: [{ role: "user", parts }],
+      generationConfig: gen
+    };
+    if (opts.safetySettings) body.safetySettings = opts.safetySettings;
+    return body;
   }
+
+  async function once(body) {
+    const ctrl = typeof AbortController !== "undefined" ? new AbortController() : null;
+    const t = ctrl ? setTimeout(function () { ctrl.abort(); }, timeoutMs) : null;
+    try {
+      const r = await fetch(url, {
+        method: "POST",
+        headers: { "content-type": "application/json", "x-goog-api-key": key },
+        body: JSON.stringify(body),
+        signal: ctrl ? ctrl.signal : undefined
+      });
+      let data = null;
+      try { data = await r.json(); }
+      catch (e) {
+        return { ok: false, status: r.status, error: r.ok ? "could not parse Gemini response" : ("HTTP " + r.status), text: "" };
+      }
+      const meta = geminiMeta(data);
+      if (!r.ok) {
+        return { ok: false, status: r.status, error: geminiErrorMessage(data) || ("HTTP " + r.status), text: "", finishReason: meta.finishReason, blockReason: meta.blockReason, thoughts: meta.thoughts };
+      }
+      const text = extractText(data);
+      return { ok: !!text, status: r.status, text, error: text ? "" : "empty text", finishReason: meta.finishReason, blockReason: meta.blockReason, thoughts: meta.thoughts };
+    } catch (e) {
+      const aborted = !!(e && (e.name === "AbortError" || String(e && e.message || e).includes("AbortError")));
+      return { ok: false, status: 0, aborted: aborted, error: aborted ? ("timeout after " + timeoutMs + "ms") : "network error", text: "" };
+    } finally {
+      if (t) clearTimeout(t);
+    }
+  }
+
+  let result = await once(buildBody(false));
+  // If thinkingBudget / responseMimeType is rejected (or already rerouted to a
+  // 3.x model that does not allow thinkingBudget 0), try once in a plain config.
+  if (!result.ok && result.status === 400) {
+    const retry = await once(buildBody(true));
+    retry.retried = true;
+    retry.firstError = result.error || ("HTTP " + result.status);
+    result = retry;
+  }
+  return result;
 }
 
 async function geminiGenerate(env, system, user, timeoutMs) {
@@ -318,4 +416,4 @@ export async function handleAsk(request, env, url, keyHash) {
 }
 
 // test helpers (no secrets)
-export const _test = { hasGeminiKey, geminiModel, DEFAULT_MODEL, USER_DAILY, SETUP_MSG, stripGlockySays, extractText, scrubProviders, PROVIDER_RE };
+export const _test = { hasGeminiKey, geminiModel, DEFAULT_MODEL, USER_DAILY, SETUP_MSG, stripGlockySays, extractText, scrubProviders, PROVIDER_RE, thinkingConfigFor, sanitizeDetail, formatGeminiDetail };
