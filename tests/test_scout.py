@@ -61,6 +61,21 @@ class ScoutTests(unittest.TestCase):
         self.assertEqual(f["n_h2h_maps"], 1)
         self.assertIsNotNone(f["kpr_h2h"])
 
+    def test_blowout_state_and_no_lookahead(self):
+        self.assertEqual(SM.blow_state({"rd": 18, "rw": 13}, 8), "bw")    # 13-5
+        self.assertEqual(SM.blow_state({"rd": 19, "rw": 6}, 8), "cl")     # 6-13
+        self.assertEqual(SM.blow_state({"rd": 18, "rw": 5}, 8), "bl")     # 5-13
+        p = self.pl[0]
+        f1 = SM.features(self.S, p, "Alpha", "Beta", "2026-10-10", "Maps 1-2")
+        pl2 = copy.deepcopy(self.pl)
+        for l in pl2[0]["logs"]:
+            if l["date"] >= "2026-10-10":
+                l["rw"], l["kills"] = 13, 50
+        gr2 = Grader(pl2, {"Alpha": 10, "Beta": 20})
+        f2 = SM.features(SM.ScoutData(pl2, gr2), pl2[0], "Alpha", "Beta", "2026-10-10", "Maps 1-2")
+        self.assertAlmostEqual(f1["x_blow"], f2["x_blow"], places=9)
+        self.assertEqual(f1["blow"], f2["blow"])
+
     def test_map1_scope(self):
         p = self.pl[0]
         f12 = SM.features(self.S, p, "Alpha", "Beta", "2026-10-12", "Maps 1-2")

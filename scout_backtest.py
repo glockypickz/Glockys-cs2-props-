@@ -31,9 +31,65 @@ def series_ev(S, p, mid):
     return S.ev_of(p, mid=mid)
 
 
+def fit_blow(S, gr, lo=TRAIN0, hi=VAL0, thr=8):
+    """Blowout model on TRAIN maps only: logistic P(blowout win) and P(blowout loss) per map from the Elo win chance
+    (as of the day before), and the league kills-per-round ratio in blowout wins / losses / close maps."""
+    from grader import winp
+    X, yw, yl, seen = [], [], [], set()
+    K = {"bw": 0.0, "bl": 0.0, "cl": 0.0}
+    R = {"bw": 0.0, "bl": 0.0, "cl": 0.0}
+    for p in S.rows:
+        pass
+    for pid, rows in S.rows.items():
+        for r in rows:
+            if not (lo <= r["date"] < hi):
+                continue
+            b = SM.blow_state(r, thr)
+            if not b or r["k"] is None:
+                continue
+            K[b] += r["k"]
+            R[b] += r["rd"]
+    for t, (lst, _) in S.team.items():
+        for g in lst:
+            if not (lo <= g["date"] < hi) or g.get("rw") is None:
+                continue
+            m = 2 * g["rw"] - g["rd"]
+            d = winp(gr.elo(t, g["date"]), gr.elo(g["opp"], g["date"])) - 0.5
+            X.append([1.0, d, d * d])
+            yw.append(1.0 if m >= thr else 0.0)
+            yl.append(1.0 if m <= -thr else 0.0)
+    X = np.array(X)
+
+    def logit(y):
+        y = np.array(y)
+        b = np.zeros(3)
+        for _ in range(50):
+            pp = 1 / (1 + np.exp(-(X @ b)))
+            W = pp * (1 - pp)
+            H = (X * W[:, None]).T @ X + 1e-6 * np.eye(3)
+            st = np.linalg.solve(H, X.T @ (y - pp))
+            b += st
+            if np.abs(st).max() < 1e-10:
+                break
+        return [round(float(x), 4) for x in b]
+    tot = sum(K.values()) / sum(R.values())
+    out = {"blow_thr": thr, "bw_c": logit(yw), "bl_c": logit(yl)}
+    for b in K:
+        out["L_" + b] = round(K[b] / R[b] / tot, 4)
+    out["_n_maps"] = len(yw)
+    out["_rate_bw"] = round(float(np.mean(yw)), 4)
+    out["_rate_bl"] = round(float(np.mean(yl)), 4)
+    return out
+
+
 def build():
     gr, pl = build_grader()
     S = SM.ScoutData(pl, gr)
+    BP = fit_blow(S, gr, thr=int(os.environ.get("BLOW_THR", "8")))
+    print("blowout fit", BP, flush=True)
+    PB = {k: v for k, v in BP.items() if not k.startswith("_")}
+    if os.environ.get("K_BLOW"):
+        PB["k_blow"] = float(os.environ["K_BLOW"])
     ev_rows = []
     seen = set()
     for pi, p in enumerate(pl):
@@ -52,7 +108,7 @@ def build():
                 import bisect
                 if bisect.bisect_left(dates, D) < MIN_PRIOR:
                     continue
-                f = SM.features(S, p, p.get("team"), c["opp"], D, per, S.ev_of(p, mid=c["mid"]), bo=S.bo_of(c["mid"]))
+                f = SM.features(S, p, p.get("team"), c["opp"], D, per, S.ev_of(p, mid=c["mid"]), P=PB, bo=S.bo_of(c["mid"]))
                 if not f:
                     continue
                 row = {"player": p["name"], "team": p.get("team"), "opp": c["opp"], "date": D, "period": per, "mid": c["mid"],
@@ -80,7 +136,7 @@ def build():
         D = str(e["start"])[:10]
         per = "Map 1" if is_map1(e) else "Maps 1-2"
         evs = S.ev_of(p, mid=rs.get("mid")) or S.ev_of(p, D=rs.get("date"))
-        f = SM.features(S, p, e.get("team"), e.get("opponent") or "", D, per, evs, bo=S.bo_of(rs.get("mid")))
+        f = SM.features(S, p, e.get("team"), e.get("opponent") or "", D, per, evs, P=PB, bo=S.bo_of(rs.get("mid")))
         if not f:
             continue
         v1 = gr.v1_project(p, st, e.get("opponent") or "", D, period=per)
@@ -89,7 +145,7 @@ def build():
                       "lock_proj": lk.get("proj"), "lock_grade": lk.get("grade"), "lock_pick": lk.get("pick"),
                       "act": float(rs["act"]), "mid": rs.get("mid"), "period": per, "v1": v1,
                       "f": {k: v for k, v in f.items() if k not in ("veto", "veto_top")}, "veto": f["veto_top"]})
-    pickle.dump({"events": ev_rows, "lines": lines}, open(CACHE, "wb"))
+    pickle.dump({"events": ev_rows, "lines": lines, "blow": BP}, open(CACHE, "wb"))
     print("events", len(ev_rows), "lines", len(lines))
 
 
@@ -222,7 +278,8 @@ if __name__ == "__main__":
 
 # ------------------------------------------------------------------ final model + real lines
 # Kept factors: a factor stays only if it cuts VALIDATION MAE by >= KEEP_MIN and does not hurt HOLDOUT (see factor_table).
-# Nov 2026 run: only OPPONENT passed (every scope / stat). LAN, MAPS (veto-weighted per-map KPR), map rounds and Elo did not.
+# Nov 2026 run: only OPPONENT passed (every scope / stat). LAN, MAPS (top-3 veto per-map KPR), map rounds, Elo and BLOWOUT
+# (blow: val -0.004 / -0.003 / 0.000 / +0.001; blowp: no gain) did not.
 KEEP_MIN = 0.005
 FINAL = {("Maps 1-2", "kills"): ["opp"], ("Maps 1-2", "hs"): ["opp"],
          ("Map 1", "kills"): ["opp"], ("Map 1", "hs"): ["opp"]}
@@ -387,6 +444,8 @@ def write_params(path="scout_params.json"):
     P = dict(SM.DEF, **rp)
     coefs = fit_final(E, P)
     hp = {k: v for k, v in SM.DEF.items() if not k.startswith("b") and not k.startswith("rd_")}
+    hp.update({k: v for k, v in (D.get("blow") or {}).items() if not k.startswith("_")})
+    hp["blow_thr"] = (D.get("blow") or {}).get("blow_thr", SM.DEF["blow_thr"])
     out = {"model": SM.MODEL, "fit_window": [TRAIN0, HOLD0], "rounds": {k: round(v, 4) for k, v in rp.items()},
            "hyper": hp, "coefs": {}, "note": "Fitted by scout_backtest.py (fit). Kept factors only; 0 = factor off."}
     for (per, st), (facs, b) in coefs.items():

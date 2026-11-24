@@ -25,7 +25,11 @@ DEF = {"hl": 30.0, "m": 80.0, "w_szn": 0.2, "m_h2h": 60.0, "w_h2h": 0.15,
        # rounds per map: rd = a + b * base + c * pw(1-pw); refit by scout_backtest.py
        "rd_a": 0.0, "rd_b": 1.0, "rd_c": 0.0,
        # log-mean coefficients (0 = factor off); refit by scout_backtest.py
-       "b0": 0.0, "b_lan": 0.0, "b_opp": 0.0, "b_maps": 0.0, "b_mapr": 0.0, "b_elo": 0.0}
+       # blowout: a map won / lost by >= blow_thr rounds (13-5 or worse). P(blowout win / loss) per map =
+       # sigmoid(c0 + c1 * d + c2 * d^2), d = Elo win chance - 0.5; L_* = league kills-per-round ratio in that state.
+       "blow_thr": 8, "k_blow": 150.0, "bw_c": [-1.1, 0.0, 0.0], "bl_c": [-1.1, 0.0, 0.0],
+       "L_bw": 1.0, "L_bl": 1.0, "L_cl": 1.0,
+       "b0": 0.0, "b_lan": 0.0, "b_opp": 0.0, "b_maps": 0.0, "b_mapr": 0.0, "b_elo": 0.0, "b_blow": 0.0, "b_blowp": 0.0}
 
 
 def _day_ord(d):
@@ -63,7 +67,8 @@ class ScoutData:
                 t = tn(p.get("team"))
                 if t and r["rd"]:
                     g = team_maps.setdefault(t, {}).setdefault((mid, r["n"]), {"date": r["date"], "map": r["map"], "rd": r["rd"],
-                                                                                "opp": r["opp"], "ev": r["ev"], "dsum": 0.0, "np": 0})
+                                                                                "opp": r["opp"], "ev": r["ev"], "dsum": 0.0, "np": 0,
+                                                                                "rw": r["rw"] if isinstance(r["rw"], (int, float)) else None})
                     if r["d"] is not None:
                         g["dsum"] += float(r["d"])
                         g["np"] += 1
@@ -191,6 +196,28 @@ class ScoutData:
         return self._conc[key]
 
 
+def _sig(c, d):
+    z = c[0] + c[1] * d + c[2] * d * d
+    return 1.0 / (1.0 + math.exp(-z))
+
+
+def blow_state(r, thr):
+    """'bw' (his team won the map by >= thr rounds), 'bl' (lost by >= thr), 'cl' (closer), None (no round data)."""
+    if not r.get("rd") or r.get("rw") is None:
+        return None
+    m = 2 * float(r["rw"]) - float(r["rd"])
+    return "bw" if m >= thr else "bl" if m <= -thr else "cl"
+
+
+def blow_probs(pw, P):
+    d = pw - 0.5
+    bw, bl = _sig(P["bw_c"], d), _sig(P["bl_c"], d)
+    if bw + bl > 0.95:
+        f = 0.95 / (bw + bl)
+        bw, bl = bw * f, bl * f
+    return bw, bl, 1.0 - bw - bl
+
+
 def _ord_to_iso(o):
     import datetime
     return datetime.date.fromordinal(o).isoformat()
@@ -260,6 +287,26 @@ def features(S, p, team, opp, D, period=None, ev=None, P=None, bo=3):
         x_mapr_pool = math.log(sum(vw[m] * rdm[m] for m in vw) / rbase)
         x_maps = math.log(sum(vt[m] * kpm[m] for m in vt) / kpr_szn)
         x_mapr = math.log(sum(vt[m] * rdm[m] for m in vt) / rbase)
+    # BLOWOUT: predicted blowout win / loss chance per map from the Elo win chance, and his own kills per round in past
+    # blowout wins / blowout losses / close maps (this season, before D), each shrunk toward the league ratio for that state.
+    pbw, pbl, pcl = blow_probs(pw, P)
+    st_k, st_r, st_n = {"bw": 0.0, "bl": 0.0, "cl": 0.0}, {"bw": 0.0, "bl": 0.0, "cl": 0.0}, {"bw": 0, "bl": 0, "cl": 0}
+    for r in szn:
+        b = blow_state(r, P["blow_thr"])
+        if b:
+            st_k[b] += r["k"]
+            st_r[b] += r["rd"]
+            st_n[b] += 1
+    L = {"bw": P["L_bw"], "bl": P["L_bl"], "cl": P["L_cl"]}
+    kst = {b: (st_k[b] + P["k_blow"] * L[b] * kpr_szn) / (st_r[b] + P["k_blow"]) for b in L}
+    mix = pbw * kst["bw"] + pbl * kst["bl"] + pcl * kst["cl"]
+    lmix = pbw * L["bw"] + pbl * L["bl"] + pcl * L["cl"]
+    x_blow = math.log(mix / kpr_szn)
+    x_blowp = math.log(mix / (kpr_szn * lmix))
+    kpm_all = sum(r["k"] for r in szn) / len(szn)
+    blow = {"p_win": round(pbw, 3), "p_loss": round(pbl, 3), "n": st_n,
+            "kpm": {b: (round(sum(r["k"] for r in szn if blow_state(r, P["blow_thr"]) == b) / st_n[b], 1) if st_n[b] else None) for b in L},
+            "kpm_all": round(kpm_all, 1), "kpr_ratio": {b: round(kst[b] / kpr_szn, 3) for b in L}}
     # HEADSHOTS per kill
     hrows = [r for r in pr if r["hs"] is not None and r["k"]]
     hk = kk = 0.0
@@ -273,11 +320,11 @@ def features(S, p, team, opp, D, period=None, ev=None, P=None, bo=3):
     nmaps = 1 if is_map1(period) else 2
     return {"kpr": kpr, "kpr_dec": kpr_dec, "kpr_szn": kpr_szn, "kpr_h2h": kpr_h2h, "n_h2h_maps": len(h),
             "rd_hat": rd_hat, "rbase": rbase, "pw": pw, "nmaps": nmaps, "hspk": hspk,
-            "x_lan": x_lan, "x_opp": x_opp, "x_maps": x_maps, "x_mapr": x_mapr, "x_elo": pw - 0.5,
+            "x_lan": x_lan, "x_opp": x_opp, "x_maps": x_maps, "x_mapr": x_mapr, "x_elo": pw - 0.5, "x_blow": x_blow, "x_blowp": x_blowp, "blow": blow,
             "veto": vw, "veto_top": vt, "bo": bo, "x_maps_pool": x_maps_pool, "x_mapr_pool": x_mapr_pool, "ev": ev, "n_maps_sample": len(szn), "conc_opp": c_o, "sos": sos}
 
 
-FACTORS = ("lan", "opp", "maps", "mapr", "elo", "maps_pool", "mapr_pool")
+FACTORS = ("lan", "opp", "maps", "mapr", "elo", "maps_pool", "mapr_pool", "blow", "blowp")
 MODEL = "shadow-scout-v1"
 PARAMS_FILE = "scout_params.json"
 
@@ -403,6 +450,7 @@ class ScoutGrader:
                              "opps_faced": None if f["sos"] is None else round(f["sos"], 3),
                              "maps_in_sample": f["n_maps_sample"], "team_win_elo": round(f["pw"], 3)}
             out["likely_maps"] = likely_maps(f)
+            out["blowout"] = f["blow"]   # context only (did not pass the holdout test; not in the projection)
             out["bo"] = bo
         else:
             out["combo"] = True
@@ -421,7 +469,7 @@ def project(f, st, P=None):
     mu = math.exp(lm)
     if P["b0"]:
         steps.append(("Calibration", mu - base))
-    for k, label in (("lan", "LAN / online"), ("opp", "Opponent"), ("maps", "Likely maps"), ("mapr", "Map rounds"), ("elo", "Elo")):
+    for k, label in (("lan", "LAN / online"), ("opp", "Opponent"), ("maps", "Likely maps"), ("mapr", "Map rounds"), ("elo", "Elo"), ("blow", "Blowout"), ("blowp", "Blowout (player)")):
         b = P["b_" + k]
         if b:
             lm += b * f["x_" + k]

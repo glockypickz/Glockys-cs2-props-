@@ -69,6 +69,6 @@ Tests: `node --test tests/test_push.mjs` (includes the RFC 8291 test vector).
 
 Likely maps: each team's share of every active-pool map among its Maps 1-2 over the last 180 days (smoothed), averaged for the two teams; the top 3 are kept and renormalized (best-of-5: top 5, format from games.json). On Oct 20+ Bo3 matches 64% of the maps actually played were in our top 3 (a random top 3 of 7 gets 43%).
 
-Tested and dropped (no holdout gain): LAN/online KPR, per-map KPR and per-map rounds weighted by the top-3 maps (or by the whole pool; even with the real maps known it added nothing), and Elo as a kills-per-round factor.
+Tested and dropped (no holdout gain): LAN/online KPR, per-map KPR and per-map rounds weighted by the top-3 maps (or by the whole pool; even with the real maps known it added nothing), and Elo as a kills-per-round factor. Blowouts (a map won or lost 13-5 or wider): the predicted blowout chance (logistic on the Elo win chance) times his own kills per round in past blowout wins / losses / close maps (shrunk to the league ratio) cut validation MAE by only 0.000-0.004, under the 0.005 bar, at thresholds 7 / 8 / 9 and with lighter shrinkage; the player-specific part alone added nothing. It is shown on cards as context only.
 
 Backtest: `python scout_backtest.py build` (features, cached in /tmp), `report` (staged factor selection), `factors` (per-factor table), `final` (holdout + real locked lines), `fit` (writes `scout_params.json`; Apr 1 - Oct 19 fit window). Tests: `python tests/test_scout.py`.
