@@ -109,6 +109,10 @@ async function ensureModel(env, origin) {
   return loadGPModelFromSource(await r.text());
 }
 
+export function resetDataCache() {
+  dataCache = { at: 0, store: null };
+}
+
 export async function loadStore(env, origin) {
   if (dataCache.store && Date.now() - dataCache.at < 60000) return dataCache.store;
   await ensureModel(env, origin);
@@ -531,4 +535,4 @@ export async function handleAsk(request, env, url, keyHash) {
 }
 
 // test helpers (no secrets)
-export const _test = { hasGeminiKey, geminiModel, DEFAULT_MODEL, FALLBACK_MODELS, RETIRED_MODELS, RETRY_DELAYS_MS, USER_DAILY, SETUP_MSG, stripGlockySays, extractText, scrubProviders, PROVIDER_RE, thinkingConfigFor, sanitizeDetail, formatGeminiDetail, isTransient, isNotFound, setRetryDelaysForTest, setSleepForTest };
+export const _test = { hasGeminiKey, geminiModel, DEFAULT_MODEL, FALLBACK_MODELS, RETIRED_MODELS, RETRY_DELAYS_MS, USER_DAILY, SETUP_MSG, stripGlockySays, extractText, scrubProviders, PROVIDER_RE, thinkingConfigFor, sanitizeDetail, formatGeminiDetail, isTransient, isNotFound, setRetryDelaysForTest, setSleepForTest, resetDataCache };
