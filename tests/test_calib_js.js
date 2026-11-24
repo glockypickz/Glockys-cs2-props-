@@ -26,6 +26,6 @@ var capC = M.applyGradeCap({grade:'A',stake:1.5,bait:false}, 'hs', 'lan', false,
 if (capC.grade !== 'A' || capC.gradeCap.applied) { console.error('FAIL lan hs should not cap', capC); process.exit(1); }
 var capD = M.applyGradeCap({grade:'C',stake:0.25,bait:false}, 'kills', 'lan', false, null);
 if (capD.grade !== 'C' || capD.gradeCap.applied) { console.error('FAIL C should stay C', capD); process.exit(1); }
-if (M.VERSION !== 'v1e') { console.error('FAIL VERSION', M.VERSION); process.exit(1); }
+if (M.VERSION !== 'v1f') { console.error('FAIL VERSION', M.VERSION); process.exit(1); }
 
 process.stdout.write(JSON.stringify(out));

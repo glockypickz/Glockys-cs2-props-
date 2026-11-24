@@ -11,10 +11,16 @@ When the match is LAN, every v1 input (last 10, season, head-to-head, same rank 
 - The Breakdown labels each part "· LAN data" with "n LAN of N" series; grade cards show a "LAN data" tag. `lan_data: 0` in PARAMS turns it off.
 - Backtest (`python lan_backtest.py`): it does not improve accuracy. See the PR for the numbers.
 
+### Per-map factor (owner request, Nov 24)
+After the v1 mix and ADR nudge, the projection shrinks toward the player's average on the map(s) being played: all games on that map (not LAN-only), only logs dated strictly before the match day, `proj = (n · map_avg + 5 · proj) / (n + 5)`.
+- **Known maps:** if a completed veto or listed map name is already in (`team_strength.json` `match_maps`; TBA and junk unattributed placeholders ignored), use those. Map 1 uses the first map; Maps 1-2 sums the first two (if only one is known, the second slot is the expected per-map average).
+- **Otherwise:** scout veto full-pool expected-map weights (both teams' recent map shares, same as the Games card pool). Map 1 uses that expected average; Maps 1-2 uses twice it.
+- Grade cards show a "Per-map average" factor. The Games card shows "Confirmed map(s)" when a real veto/listed map is in, without naming a data provider. `map_data: 0` turns the shrink off. Letters stay the v1e edge scale; LAN kills and bait caps are unchanged.
+
 ## Cito API (optional team-strength data)
 - `cito_client.py`: Cito client. It saves every reply to `cito_cache/`, spaces calls 6.5 s apart, and allows at most 14 calls a day, keeping 40 of the monthly allowance in reserve. It retries a 429 after the time given in `Retry-After`.
 - `cito_update.py` is the only script that calls Cito. It runs once a day in the "Update CS2 data" workflow, the only step that gets the `CITO_API_KEY` secret. It writes `team_strength.json` (dated VRS and world ranking points plus team map stats), `cito_ids.json`, and `cito_cache/_results_index.json` (backup results for settling).
-- The active v1 projection and letters do not use Cito rank or map-pool weights. `team_strength.json` is still loaded for display fields, and only entries dated before the match day are used. Set `w_rank` / `w_maps` to 0 to turn those display features off.
+- The active v1 projection and letters do not use Cito rank or map-pool weights (the upcoming-matches reply has no per-match map pick probabilities). Confirmed map names from a completed veto or listed maps in that same reply are stored on `team_strength.json` as `match_maps` and used by the per-map factor when present. `team_strength.json` is still loaded for display fields, and only entries dated before the match day are used. Set `w_rank` / `w_maps` to 0 to turn those display features off.
 - Turning it on: create a Cito key, then add it as the repository secret `CITO_API_KEY`. For local runs, put `CITO_API_KEY=...` in `.env`, which is gitignored and never served.
 - Tests: `python tests/make_mock_cito.py && python tests/test_cito.py` (mock data, no network).
 
@@ -89,7 +95,7 @@ Tests: `node --test tests/test_wins.mjs`.
 
 ## Ask Glocky (Cloudflare Worker only)
 
-The **Ask Glocky** button opens a chat. Answers use only our existing data (`players.json`, `team_strength.json`, the live `lines.json` board, and `games.json`). The Worker looks up the numbers first (including the same v1e grader math the site uses for over/under questions) and then phrases a "Glocky says" reply. It does not read `lines_history.json` or the Track Record. Replies and the chat UI never name data providers; they say "our data" or "Glocky's data".
+The **Ask Glocky** button opens a chat. Answers use only our existing data (`players.json`, `team_strength.json`, the live `lines.json` board, and `games.json`). The Worker looks up the numbers first (including the same v1f grader math the site uses for over/under questions) and then phrases a "Glocky says" reply. It does not read `lines_history.json` or the Track Record. Replies and the chat UI never name data providers; they say "our data" or "Glocky's data".
 
 When someone asks over or under on a line (for example "EliGE over 35.5 kills maps 1-2?"), Glocky runs our grader (Map 1 vs Maps 1-2, LAN rule, head-to-head, bait flag) and the chat shows the current Grader trading card under the reply. If that line is on the board, the board line, book, and opponent are used; otherwise the line in the question is graded.
 

@@ -113,7 +113,7 @@ class LetterTests(unittest.TestCase):
         self.assertEqual(stake, 1.0)
 
     def test_version_and_cutoff(self):
-        self.assertEqual(MODEL_VERSION, "v1e")
+        self.assertEqual(MODEL_VERSION, "v1f")
         self.assertEqual(FIT_CUTOFF, "2026-10-20")
         self.assertEqual(PARAMS["w_l10"], 0.05)  # kill-form input, not the v1 L10 weight
         # v1 blend weights live in v1_project_parts, not PARAMS; check they still sum as documented via a grade.
@@ -137,7 +137,7 @@ class GradeTests(unittest.TestCase):
     def test_grade_has_stake_and_calibrated_p(self):
         r = self.g.grade(self.p, "kills", 23.5, "G2", "Spirit", "Underdog", None)
         self.assertIsNotNone(r)
-        self.assertEqual(r["model"], "v1e")
+        self.assertEqual(r["model"], "v1f")
         self.assertIn(r["grade"], [g for _, g, _ in GRADE_SCALE] + ["F"])
         self.assertIn("stake", r)
         self.assertAlmostEqual(r["p_over"] + (1 - r["p_over"] if r["p_push"] == 0 else 0), 1.0, places=3)
@@ -194,7 +194,7 @@ class CapTests(unittest.TestCase):
         self.assertTrue(r["grade_cap"]["applied"])
         self.assertEqual(r["grade_cap"]["reason"], "lan_kills")
         self.assertIn(r["grade_cap"]["pre_grade"], PLAY_GRADES)
-        self.assertEqual(r["model"], "v1e")
+        self.assertEqual(r["model"], "v1f")
         self.assertNotIn(r["grade"], PLAY_GRADES)
 
     def test_lan_headshots_not_capped(self):
