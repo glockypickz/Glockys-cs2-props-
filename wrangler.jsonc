@@ -18,5 +18,7 @@
   // Community Wins slip screenshots. Create the bucket once before the first deploy
   // (see README):  npx wrangler r2 bucket create glockyz-wins
   "r2_buckets": [{ "binding": "WINS_R2", "bucket_name": "glockyz-wins" }],
+  // Slip reader uses Workers AI first (free Neuron allocation). Binding name is env.AI.
+  "ai": { "binding": "AI" },
   "previews": {}
 }

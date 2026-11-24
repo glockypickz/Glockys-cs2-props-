@@ -226,6 +226,9 @@ test("rejected file types and oversize payloads never mention vendors", async ()
 });
 
 test("UI source has Upload slip on the Grader path and never mentions keys", () => {
+  const wrangler = readFileSync(join(root, "wrangler.jsonc"), "utf8");
+  assert.match(wrangler, /"ai"\s*:\s*\{\s*"binding"\s*:\s*"AI"/);
+  assert.equal(T.WORKERS_AI_MODEL, "@cf/meta/llama-4-scout-17b-16e-instruct");
   const app = readFileSync(join(root, "app.js"), "utf8");
   const css = readFileSync(join(root, "styles.css"), "utf8");
   assert.match(app, /Upload slip/);
@@ -491,6 +494,148 @@ test("when every model stays busy, customers get a busy message and admins see t
   } finally {
     globalThis.fetch = orig;
     setRetryDelaysForTest(null);
+  }
+});
+
+function slipJsonText() {
+  return JSON.stringify({
+    readable: true, cs2: true, book: "PrizePicks", picks: [
+      { player: "EliGE", stat: "kills", line: 35.5, period: "Maps 1-2", side: "over" }
+    ]
+  });
+}
+
+test("Workers AI is the main slip reader and does not call Gemini when it returns JSON", async () => {
+  let geminiCalled = 0;
+  const orig = globalThis.fetch;
+  globalThis.fetch = async () => { geminiCalled++; return new Response("no", { status: 500 }); };
+  const env = mkEnv({
+    AI: { run: async (model, input) => {
+      assert.equal(model, T.WORKERS_AI_MODEL);
+      assert.ok(input.messages.some((m) => Array.isArray(m.content) && m.content.some((c) => c.type === "image_url" && /^data:image\//.test(c.image_url.url))));
+      return { response: slipJsonText() };
+    } }
+  });
+  try {
+    const r = await handleSlip(req("/ai/slip/read", { body: { image: pngB64(), mime: "image/png" }, ip: "10.1.1.1" }), env, new URL(ORIGIN + "/ai/slip/read"), KEY_HASH);
+    const j = await r.json();
+    assert.equal(r.status, 200);
+    assert.equal(j.picks.length, 1);
+    assert.equal(j.picks[0].matched && j.picks[0].matched.name, "EliGE");
+    assert.equal(j.detail, undefined);
+    assert.equal(geminiCalled, 0);
+  } finally {
+    globalThis.fetch = orig;
+  }
+});
+
+test("admin detail names the Workers AI model on a successful read", async () => {
+  const env = mkEnv({
+    AI: { run: async () => ({ response: slipJsonText() }) }
+  });
+  const r = await handleSlip(req("/ai/slip/read", { body: { image: pngB64(), mime: "image/png" }, adminKey: KEY, ip: "10.1.1.2" }), env, new URL(ORIGIN + "/ai/slip/read"), KEY_HASH);
+  const j = await r.json();
+  assert.equal(r.status, 200);
+  assert.match(j.detail, /provider=workers-ai/);
+  assert.match(j.detail, /llama-4-scout-17b-16e-instruct/);
+  assert.doesNotMatch(j.detail, /not-a-real-key|AIza|GEMINI_API_KEY/i);
+});
+
+test("empty or unparseable Workers AI output falls back to Gemini", async () => {
+  const orig = globalThis.fetch;
+  const envBase = () => mkEnv({
+    GEMINI_API_KEY: "not-a-real-key",
+    AI: { run: async () => ({ response: "" }) }
+  });
+  globalThis.fetch = async () => new Response(JSON.stringify({
+    candidates: [{ content: { parts: [{ text: slipJsonText() }] } }]
+  }), { status: 200, headers: { "content-type": "application/json" } });
+  try {
+    const r = await handleSlip(req("/ai/slip/read", { body: { image: pngB64(), mime: "image/png" }, adminKey: KEY, ip: "10.1.1.3" }), envBase(), new URL(ORIGIN + "/ai/slip/read"), KEY_HASH);
+    const j = await r.json();
+    assert.equal(r.status, 200);
+    assert.equal(j.picks.length, 1);
+    assert.match(j.detail, /provider=gemini/);
+    assert.match(j.detail, /workers-ai=empty text/);
+    assert.equal(JSON.stringify(j).includes("not-a-real-key"), false);
+  } finally {
+    globalThis.fetch = orig;
+  }
+
+  T.lastHit.clear();
+  const env = mkEnv({
+    GEMINI_API_KEY: "not-a-real-key",
+    AI: { run: async () => ({ response: "sorry, I cannot help with that" }) }
+  });
+  globalThis.fetch = async () => new Response(JSON.stringify({
+    candidates: [{ content: { parts: [{ text: slipJsonText() }] } }]
+  }), { status: 200, headers: { "content-type": "application/json" } });
+  try {
+    const r = await handleSlip(req("/ai/slip/read", { body: { image: pngB64(), mime: "image/png" }, adminKey: KEY, ip: "10.1.1.4" }), env, new URL(ORIGIN + "/ai/slip/read"), KEY_HASH);
+    const j = await r.json();
+    assert.equal(r.status, 200);
+    assert.match(j.detail, /provider=gemini/);
+    assert.match(j.detail, /workers-ai=unparseable/);
+  } finally {
+    globalThis.fetch = orig;
+  }
+});
+
+test("when Workers AI and Gemini both fail, admins see both attempts", async () => {
+  const orig = globalThis.fetch;
+  const env = mkEnv({
+    GEMINI_API_KEY: "not-a-real-key",
+    AI: { run: async () => { throw new Error("model overloaded"); } }
+  });
+  globalThis.fetch = async () => new Response(JSON.stringify({
+    error: { code: 503, message: "This model is currently experiencing high demand.", status: "UNAVAILABLE" }
+  }), { status: 503, headers: { "content-type": "application/json" } });
+  const { setRetryDelaysForTest } = await import("../ask_ai.js");
+  setRetryDelaysForTest([0, 0]);
+  try {
+    const r = await handleSlip(req("/ai/slip/read", { body: { image: pngB64(), mime: "image/png" }, adminKey: KEY, ip: "10.1.1.5" }), env, new URL(ORIGIN + "/ai/slip/read"), KEY_HASH);
+    const j = await r.json();
+    assert.equal(r.status, 502);
+    assert.match(j.error, /couldn'?t read that slip|a bit busy/i);
+    assert.match(j.detail, /workers-ai=model overloaded/);
+    assert.match(j.detail, /HTTP 503|UNAVAILABLE|gemini-3\.8-flash/);
+    assert.equal(JSON.stringify(j).includes("not-a-real-key"), false);
+  } finally {
+    globalThis.fetch = orig;
+    setRetryDelaysForTest(null);
+  }
+});
+
+test("Workers AI alone is enough to set up the slip reader; Ask Glocky never calls it", async () => {
+  const env = mkEnv({
+    AI: { run: async () => { throw new Error("Ask Glocky should not call Workers AI"); } }
+  });
+  // no GEMINI_API_KEY
+  const setup = await handleSlip(req("/ai/slip/read", { body: { image: pngB64(), mime: "image/png" }, ip: "10.1.1.6" }), mkEnv({
+    AI: { run: async () => ({ response: slipJsonText() }) }
+  }), new URL(ORIGIN + "/ai/slip/read"), KEY_HASH);
+  const sj = await setup.json();
+  assert.equal(setup.status, 200, sj.error);
+  assert.equal(sj.picks.length, 1);
+
+  const { handleAsk } = await import("../ask_ai.js");
+  let ran = 0;
+  const askEnv = mkEnv({
+    GEMINI_API_KEY: "not-a-real-key",
+    AI: { run: async () => { ran++; return { response: "nope" }; } }
+  });
+  const orig = globalThis.fetch;
+  globalThis.fetch = async () => new Response(JSON.stringify({
+    candidates: [{ content: { parts: [{ text: "EliGE's headshot percentage on LAN is 56.97%." }] } }]
+  }), { status: 200, headers: { "content-type": "application/json" } });
+  try {
+    const r = await handleAsk(req("/ai/ask", { body: { question: "what's EliGE's headshot percentage on LAN" }, ip: "10.1.1.7" }), askEnv, new URL(ORIGIN + "/ai/ask"), KEY_HASH);
+    const j = await r.json();
+    assert.equal(r.status, 200);
+    assert.match(j.answer, /56\.97/);
+    assert.equal(ran, 0);
+  } finally {
+    globalThis.fetch = orig;
   }
 });
 

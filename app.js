@@ -467,8 +467,8 @@ function updateSheetCard(){if(HIST==null||typeof GPTrackSheet==='undefined')retu
 function opts(){var t={};DB.forEach(function(p){t[p.team]=1});return '<datalist id="plist">'+DB.map(function(p){return '<option value="'+esc(p.name)+'">'+esc(p.team)}).join('')+'</datalist><datalist id="tlist">'+Object.keys(t).sort().map(function(x){return '<option value="'+esc(x)+'">'}).join('')+'</datalist>'}
 
 // ---- Slip reader (Grader tab): upload a slip screenshot, edit the reads, then grade with our math.
-var slipUI={step:'idle',error:'',note:'',book:'',entry:null,payout:null,picks:[],results:null,busy:false,fileName:''};
-function slipReset(){slipUI={step:'idle',error:'',note:'',book:'',entry:null,payout:null,picks:[],results:null,busy:false,fileName:''}}
+var slipUI={step:'idle',error:'',note:'',book:'',entry:null,payout:null,picks:[],results:null,busy:false,fileName:'',detail:''};
+function slipReset(){slipUI={step:'idle',error:'',note:'',book:'',entry:null,payout:null,picks:[],results:null,busy:false,fileName:'',detail:''}}
 function slipVerdictHtml(r,g){
  if(r.error&&!g)return '<div class="slip-verdict miss">Glocky couldn\'t grade this pick: '+esc(r.error)+'.</div>';
  if(r.verdict==='agree')return '<div class="slip-verdict ok">Glocky agrees — our grade is '+esc(g.pick)+' at a '+esc(g.grade)+(r.like?' (a play we like)':'')+'.</div>';
@@ -504,6 +504,7 @@ function slipReaderHtml(){
  if(slipUI.step==='reading')h+='<div class="muted" style="margin-top:8px">Reading your slip…</div>';
  if(slipUI.step==='grading')h+='<div class="muted" style="margin-top:8px">Grading with our math…</div>';
  if(slipUI.error)h+='<div class="warn" style="margin-top:8px">'+esc(slipUI.error)+'</div>';
+ if(slipUI.detail&&!slipUI.error)h+='<div class="muted" style="margin-top:6px">'+esc(slipUI.detail)+'</div>';
  if(slipUI.note)h+='<div class="muted" style="margin-top:6px">'+esc(slipUI.note)+'</div>';
  if(slipUI.picks.length){
   h+='<h2 style="margin-top:14px">Picks on this slip</h2><div class="muted">Edit anything that looks wrong, then grade the slip.</div>'+slipUI.picks.map(slipRow).join('');
@@ -533,10 +534,11 @@ function slipApplyRead(d){
  slipUI.book=d&&d.book||'';
  slipUI.entry=d&&d.entry!=null?d.entry:null;
  slipUI.payout=d&&d.payout!=null?d.payout:null;
+ slipUI.detail=(d&&d.detail)||'';
  slipUI.picks=(d&&d.picks)||[];
  slipUI.results=null;
  slipUI.step=slipUI.picks.length?'review':'error';
- if(!slipUI.picks.length&&!slipUI.error)slipUI.error=(d&&d.error)||'We couldn\'t find any CS2 kills or headshots picks on that slip.';
+ if(!slipUI.picks.length&&!slipUI.error)slipUI.error=slipErrText(d,'We couldn\'t find any CS2 kills or headshots picks on that slip.');
 }
 function slipErrText(d,fallback){var e=(d&&d.error)||fallback||'Something went wrong.';if(d&&d.detail)e+=' — '+d.detail;return e;}
 function prepareSlipImage(file, cb){
@@ -580,7 +582,7 @@ function prepareSlipImage(file, cb){
 function slipReadFile(file){
  if(!file||slipUI.busy)return;
  slipUI.fileName=file.name||'image';
- slipUI.busy=true;slipUI.step='reading';slipUI.error='';slipUI.results=null;slipUI.picks=[];render();
+ slipUI.busy=true;slipUI.step='reading';slipUI.error='';slipUI.detail='';slipUI.results=null;slipUI.picks=[];render();
  prepareSlipImage(file,function(err,out){
   if(err||!out||!out.dataUrl){slipUI.busy=false;slipUI.step='error';slipUI.error=err||'Could not read that file.';render();if(/too large|5 MB|20 MB/i.test(slipUI.error))toast('Image is too large');return}
   fetch('/ai/slip/read',{method:'POST',credentials:'include',headers:{'Content-Type':'application/json'},body:JSON.stringify({image:out.dataUrl,mime:out.mime||'image/jpeg'})})

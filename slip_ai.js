@@ -3,6 +3,12 @@
 // is a Worker secret and must never be logged, returned, or shown. Images are not stored.
 import { identify, gateState } from "./beta_auth.js";
 import { hasGeminiKey, geminiModel, geminiRequest, loadStore, formatGeminiDetail, sanitizeDetail } from "./ask_ai.js";
+
+// Current Workers AI vision model (newer than Llama 3.2 11B Vision). Official docs
+// do not require a one-time "agree" prompt for this model (Llama 3.2 11B does).
+export const WORKERS_AI_MODEL = "@cf/meta/llama-4-scout-17b-16e-instruct";
+const WORKERS_AI_TIMEOUT_MS = 12000;
+
 import { parseExtracted, parseGeminiJson, matchPick, gradePicks, summarizeSlip } from "./slip_reader.js";
 
 const USER_DAILY = 10;
@@ -133,6 +139,118 @@ export function extractPrompt() {
   ].join(" ");
 }
 
+
+export function hasWorkersAi(env) {
+  return !!(env && env.AI && typeof env.AI.run === "function");
+}
+
+export function workersAiText(result) {
+  if (result == null) return "";
+  if (typeof result === "string") return result.trim();
+  if (typeof result.response === "string") return result.response.trim();
+  if (result.result && typeof result.result.response === "string") return result.result.response.trim();
+  if (result.result && typeof result.result === "string") return result.result.trim();
+  const choice = result.choices && result.choices[0] && result.choices[0].message;
+  if (choice && typeof choice.content === "string") return choice.content.trim();
+  if (Array.isArray(result.picks) || result.readable != null) return JSON.stringify(result);
+  return "";
+}
+
+const SLIP_GUIDED_JSON = {
+  type: "object",
+  properties: {
+    readable: { type: "boolean" },
+    cs2: { type: "boolean" },
+    book: { type: ["string", "null"] },
+    entry: { type: ["number", "null"] },
+    payout: { type: ["number", "null"] },
+    note: { type: ["string", "null"] },
+    picks: {
+      type: "array",
+      items: {
+        type: "object",
+        properties: {
+          player: { type: "string" },
+          team: { type: ["string", "null"] },
+          opponent: { type: ["string", "null"] },
+          stat: { type: "string" },
+          line: { type: "number" },
+          period: { type: ["string", "null"] },
+          side: { type: ["string", "null"] },
+          book: { type: ["string", "null"] }
+        },
+        required: ["player", "stat", "line"]
+      }
+    }
+  },
+  required: ["readable", "cs2", "picks"]
+};
+
+export async function workersAiExtract(env, opts) {
+  opts = opts || {};
+  const model = WORKERS_AI_MODEL;
+  const provider = "workers-ai";
+  if (!hasWorkersAi(env)) return { ok: false, provider, model, error: "Workers AI is not bound", text: "" };
+  const mime = opts.mime || "image/jpeg";
+  const b64 = opts.b64 || "";
+  const dataUrl = "data:" + mime + ";base64," + b64;
+  const timeoutMs = opts.timeoutMs || WORKERS_AI_TIMEOUT_MS;
+  const input = {
+    messages: [
+      { role: "system", content: extractPrompt() },
+      {
+        role: "user",
+        content: [
+          { type: "text", text: "Extract the CS2 slip in this image as JSON." },
+          { type: "image_url", image_url: { url: dataUrl } }
+        ]
+      }
+    ],
+    max_tokens: 2048,
+    temperature: 0,
+    guided_json: SLIP_GUIDED_JSON
+  };
+  try {
+    let timer;
+    const result = await Promise.race([
+      env.AI.run(model, input),
+      new Promise(function (_, reject) {
+        timer = setTimeout(function () { reject(new Error("timeout")); }, timeoutMs);
+      })
+    ]);
+    if (timer) clearTimeout(timer);
+    const text = workersAiText(result);
+    return { ok: !!text, text, provider, model, error: text ? "" : "empty text" };
+  } catch (e) {
+    const msg = e && e.message ? String(e.message) : "Workers AI error";
+    const aborted = /timeout/i.test(msg);
+    return { ok: false, text: "", provider, model, error: aborted ? ("timeout after " + timeoutMs + "ms") : msg, aborted: aborted };
+  }
+}
+
+export function formatSlipReadDetail(opts) {
+  opts = opts || {};
+  const bits = [];
+  if (opts.source) {
+    bits.push("provider=" + (opts.source.provider || ""));
+    if (opts.source.model) bits.push("model=" + opts.source.model);
+  }
+  if (opts.workers && (!opts.source || opts.source.provider !== "workers-ai")) {
+    bits.push("workers-ai=" + (opts.workers.parseError ? "unparseable" : (opts.workers.error || "failed")));
+    if (opts.workers.model) bits.push("workersAiModel=" + opts.workers.model);
+  }
+  if (opts.gemini && (!opts.source || opts.source.provider !== "gemini")) {
+    bits.push(formatGeminiDetail(Object.assign({ provider: "gemini" }, opts.gemini)));
+  } else if (opts.gemini && opts.source && opts.source.provider === "gemini") {
+    if (opts.gemini.tried && opts.gemini.tried.length) bits.push("tried=" + opts.gemini.tried.join(", "));
+    if (opts.gemini.busy) bits.push("retried on busy");
+  }
+  if (opts.parseError) bits.push("parse error: model text was not JSON");
+  if (opts.imageBytes != null) bits.push("image=" + opts.imageBytes + "B");
+  if (opts.mime) bits.push("mime=" + opts.mime);
+  return sanitizeDetail(bits.filter(Boolean).join(", ") || "unknown read failure", opts.secret);
+}
+
 function publicPick(p) {
   return {
     player: p.player || "",
@@ -168,7 +286,6 @@ export async function handleSlip(request, env, url, keyHash) {
   const who = await identify(request, env, keyHash);
   const gate = await gateState(env);
   if (gate === "on" && !who) return json({ error: "login required", login: "/login" }, 401);
-  if (!hasGeminiKey(env)) return json({ error: SETUP_MSG, setup: false }, 503);
 
   if (path === "/ai/slip/grade") {
     let store;
@@ -184,6 +301,8 @@ export async function handleSlip(request, env, url, keyHash) {
     return json({ results: results.map(publicResult), summary, setup: true });
   }
 
+  if (!hasWorkersAi(env) && !hasGeminiKey(env)) return json({ error: SETUP_MSG, setup: false }, 503);
+
   const rl = await rateLimit(env, whoKey(who, request));
   if (!rl.ok) return json({ error: rl.msg }, 429);
 
@@ -193,68 +312,94 @@ export async function handleSlip(request, env, url, keyHash) {
   const imageBytes = img.bytes ? img.bytes.length : 0;
   const b64 = bytesToB64(img.bytes);
   const mime = img.mime;
-  // Drop the raw bytes before calling Gemini. loadStore is deferred until
+  // Drop the raw bytes before calling a model. loadStore is deferred until
   // after the image is also dropped, so we never hold a 5 MB upload and the
   // 8 MB players.json in the Worker's 128 MB isolate at the same time.
   img.bytes = null;
-  const g = await geminiRequest(env, {
-    system: extractPrompt(),
-    parts: [
-      { text: "Extract the CS2 slip in this image as JSON." },
-      { inlineData: { mimeType: mime, data: b64 } }
-    ],
-    timeoutMs: 25000,
-    temperature: 0,
-    maxOutputTokens: 4096,
-    responseMimeType: "application/json",
-    thinkingBudget: 0,
-    // Sportsbook slips can trip default image filters; this is the user's own
-    // screenshot, and we only extract visible player-prop fields.
-    safetySettings: [
-      { category: "HARM_CATEGORY_HARASSMENT", threshold: "BLOCK_NONE" },
-      { category: "HARM_CATEGORY_HATE_SPEECH", threshold: "BLOCK_NONE" },
-      { category: "HARM_CATEGORY_SEXUALLY_EXPLICIT", threshold: "BLOCK_NONE" },
-      { category: "HARM_CATEGORY_DANGEROUS_CONTENT", threshold: "BLOCK_NONE" }
-    ]
-  });
 
-  if (!g.ok) {
-    const payload = {
-      error: g.busy
-        ? "Glocky is a bit busy right now and couldn't read that slip. Try again in a moment."
-        : "Glocky couldn't read that slip just now. Try again in a moment."
-    };
-    if (who && who.admin) payload.detail = sanitizeDetail(formatGeminiDetail(Object.assign({ imageBytes: imageBytes, mime: mime }, g)), env.GEMINI_API_KEY);
-    return json(payload, 502);
-  }
-  const parsed = parseGeminiJson(g.text);
-  if (!parsed) {
-    const payload = { error: "We couldn't read that image. Try a clearer screenshot of a CS2 slip." };
-    if (who && who.admin) {
-      const snippet = g.text ? String(g.text).slice(0, 80) : "";
-      payload.detail = sanitizeDetail("parse error: model text was not JSON" + (snippet ? " (" + snippet + ")" : ""), env.GEMINI_API_KEY);
+  let workers = null;
+  let g = null;
+  let parsed = null;
+  let source = null;
+
+  // Workers AI is the main slip reader. Gemini is the fallback only.
+  if (hasWorkersAi(env)) {
+    workers = await workersAiExtract(env, { mime, b64 });
+    if (workers.ok) {
+      parsed = parseGeminiJson(workers.text);
+      if (parsed) source = workers;
+      else workers.parseError = true;
     }
-    return json(payload, 422);
+  }
+
+  if (!parsed && hasGeminiKey(env)) {
+    g = await geminiRequest(env, {
+      system: extractPrompt(),
+      parts: [
+        { text: "Extract the CS2 slip in this image as JSON." },
+        { inlineData: { mimeType: mime, data: b64 } }
+      ],
+      timeoutMs: 25000,
+      temperature: 0,
+      maxOutputTokens: 4096,
+      responseMimeType: "application/json",
+      thinkingBudget: 0,
+      // Sportsbook slips can trip default image filters; this is the user's own
+      // screenshot, and we only extract visible player-prop fields.
+      safetySettings: [
+        { category: "HARM_CATEGORY_HARASSMENT", threshold: "BLOCK_NONE" },
+        { category: "HARM_CATEGORY_HATE_SPEECH", threshold: "BLOCK_NONE" },
+        { category: "HARM_CATEGORY_SEXUALLY_EXPLICIT", threshold: "BLOCK_NONE" },
+        { category: "HARM_CATEGORY_DANGEROUS_CONTENT", threshold: "BLOCK_NONE" }
+      ]
+    });
+    if (g.ok) {
+      parsed = parseGeminiJson(g.text);
+      if (parsed) source = Object.assign({ provider: "gemini" }, g);
+    }
+  }
+
+  function readDetail(extra) {
+    return formatSlipReadDetail(Object.assign({
+      source, workers, gemini: g, imageBytes, mime, secret: env.GEMINI_API_KEY
+    }, extra || {}));
+  }
+  function withAdminDetail(payload, extra) {
+    if (who && who.admin) payload.detail = readDetail(extra);
+    return payload;
+  }
+
+  if (!parsed) {
+    const parseFail = (workers && workers.parseError) || (g && g.ok && !parseGeminiJson(g.text));
+    const busy = !!(g && g.busy);
+    const payload = {
+      error: parseFail
+        ? "We couldn't read that image. Try a clearer screenshot of a CS2 slip."
+        : (busy
+          ? "Glocky is a bit busy right now and couldn't read that slip. Try again in a moment."
+          : "Glocky couldn't read that slip just now. Try again in a moment.")
+    };
+    return json(withAdminDetail(payload, { parseError: parseFail }), parseFail ? 422 : 502);
   }
 
   const extracted = parseExtracted(parsed);
   if (!extracted.readable) {
-    return json({
+    return json(withAdminDetail({
       readable: false,
       cs2: extracted.cs2,
       error: "We couldn't read that image. Try a clearer screenshot of a CS2 slip.",
       note: extracted.note || "",
       picks: []
-    }, 422);
+    }), 422);
   }
   if (!extracted.cs2 && !extracted.picks.some((p) => p.stat)) {
-    return json({
+    return json(withAdminDetail({
       readable: true,
       cs2: false,
       error: "That slip doesn't look like CS2 props. We only grade CS2 kills and headshots.",
       note: extracted.note || "",
       picks: []
-    }, 422);
+    }), 422);
   }
 
   let store;
@@ -263,16 +408,16 @@ export async function handleSlip(request, env, url, keyHash) {
 
   const picks = extracted.picks.map((p) => matchPick(store, p));
   if (!picks.length) {
-    return json({
+    return json(withAdminDetail({
       readable: true,
       cs2: extracted.cs2,
       error: "We couldn't find any CS2 kills or headshots picks on that slip.",
       note: extracted.note || "",
       picks: []
-    }, 422);
+    }), 422);
   }
 
-  return json({
+  return json(withAdminDetail({
     readable: true,
     cs2: extracted.cs2,
     book: extracted.book || "",
@@ -282,10 +427,11 @@ export async function handleSlip(request, env, url, keyHash) {
     picks: picks.map(publicPick),
     setup: true,
     left: rl.left
-  });
+  }));
 }
 
 export const _test = {
   hasGeminiKey, geminiModel, USER_DAILY, COOLDOWN_MS, MAX_BYTES, SETUP_MSG,
-  sniffMime, b64ToBytes, whoKey, utcDay, lastHit
+  sniffMime, b64ToBytes, whoKey, utcDay, lastHit,
+  hasWorkersAi, workersAiText, workersAiExtract, WORKERS_AI_MODEL, formatSlipReadDetail
 };
