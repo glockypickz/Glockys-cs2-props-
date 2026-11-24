@@ -713,3 +713,70 @@ test("slip read loads our data without fetching model.js from ASSETS", async () 
   assert.equal(j.picks.length, 1);
   assert.equal(j.picks[0].matched && j.picks[0].matched.name, "EliGE");
 });
+
+async function adminAccountCookie(env, name) {
+  name = name || "GlockyPickz";
+  await env.BETA.put("user:" + name, JSON.stringify({ u: name, role: "admin", ver: 0, disabled: false }));
+  const tok = await A.signSession({ u: name, v: 0, exp: Date.now() + 600000 }, SECRET);
+  return A.COOKIE + "=" + tok;
+}
+
+test("failed slip reads do not count toward the daily cap", async () => {
+  const env = mkEnv({
+    AI: { run: async () => { throw new Error("model overloaded"); } }
+  });
+  const day = new Date().toISOString().slice(0, 10);
+  const kvKey = "slip:day:" + day + ":ip:10.8.1.1";
+  await env.BETA.put(kvKey, "9");
+  const fail = await handleSlip(req("/ai/slip/read", { body: { image: pngB64(), mime: "image/png" }, ip: "10.8.1.1" }), env, new URL(ORIGIN + "/ai/slip/read"), KEY_HASH);
+  const fj = await fail.json();
+  assert.equal(fail.status, 502);
+  assert.match(fj.error, /couldn'?t read that slip|a bit busy/i);
+  assert.equal(await env.BETA.get(kvKey), "9");
+
+  T.lastHit.clear();
+  env.AI = { run: async () => ({ response: slipJsonText() }) };
+  const ok = await handleSlip(req("/ai/slip/read", { body: { image: pngB64(), mime: "image/png" }, ip: "10.8.1.1" }), env, new URL(ORIGIN + "/ai/slip/read"), KEY_HASH);
+  const oj = await ok.json();
+  assert.equal(ok.status, 200, oj.error);
+  assert.equal(oj.picks.length, 1);
+  assert.equal(await env.BETA.get(kvKey), "10");
+  assert.equal(oj.left, 0);
+
+  T.lastHit.clear();
+  const blocked = await handleSlip(req("/ai/slip/read", { body: { image: pngB64(), mime: "image/png" }, ip: "10.8.1.1" }), env, new URL(ORIGIN + "/ai/slip/read"), KEY_HASH);
+  assert.equal(blocked.status, 429);
+  assert.equal(await env.BETA.get(kvKey), "10");
+});
+
+test("admin accounts are exempt from the daily slip cap", async () => {
+  const env = mkEnv({
+    AI: { run: async () => ({ response: slipJsonText() }) }
+  });
+  const day = new Date().toISOString().slice(0, 10);
+  const cookie = await adminAccountCookie(env, "GlockyPickz");
+  await env.BETA.put("slip:day:" + day + ":u:GlockyPickz", String(T.USER_DAILY));
+  await env.BETA.put("slip:day:" + day + ":admin", String(T.USER_DAILY));
+  await env.BETA.put("slip:day:" + day + ":ip:10.8.1.2", String(T.USER_DAILY));
+  const r = await handleSlip(req("/ai/slip/read", { body: { image: pngB64(), mime: "image/png" }, cookie, ip: "10.8.1.2" }), env, new URL(ORIGIN + "/ai/slip/read"), KEY_HASH);
+  const j = await r.json();
+  assert.equal(r.status, 200, j.error);
+  assert.equal(j.picks.length, 1);
+  assert.equal(await env.BETA.get("slip:day:" + day + ":u:GlockyPickz"), String(T.USER_DAILY));
+  assert.equal(await env.BETA.get("slip:day:" + day + ":admin"), String(T.USER_DAILY));
+
+  T.lastHit.clear();
+  const header = await handleSlip(req("/ai/slip/read", { body: { image: pngB64(), mime: "image/png" }, adminKey: KEY, ip: "10.8.1.3" }), env, new URL(ORIGIN + "/ai/slip/read"), KEY_HASH);
+  const hj = await header.json();
+  assert.equal(header.status, 200, hj.error);
+
+  T.lastHit.clear();
+  await env.BETA.put("user:cust", JSON.stringify({ u: "cust", role: "user", ver: 0, disabled: false }));
+  const custTok = await A.signSession({ u: "cust", v: 0, exp: Date.now() + 600000 }, SECRET);
+  await env.BETA.put("slip:day:" + day + ":u:cust", String(T.USER_DAILY));
+  const cust = await handleSlip(req("/ai/slip/read", { body: { image: pngB64(), mime: "image/png" }, cookie: A.COOKIE + "=" + custTok, ip: "10.8.1.4" }), env, new URL(ORIGIN + "/ai/slip/read"), KEY_HASH);
+  const cj = await cust.json();
+  assert.equal(cust.status, 429);
+  assert.match(cj.error, /today's slip limit/i);
+});
+

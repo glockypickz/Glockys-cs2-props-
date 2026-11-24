@@ -331,3 +331,51 @@ test("Ask Glocky loads our data without fetching model.js from ASSETS", async ()
     globalThis.fetch = orig;
   }
 });
+
+test("failed Ask Glocky data-load does not count toward the daily cap; admins are exempt", async () => {
+  T.resetDataCache();
+  const env = mkEnv({
+    GEMINI_API_KEY: "not-a-real-key",
+    ASSETS: { fetch: async () => { throw new Error("players.json missing"); } }
+  });
+  const day = new Date().toISOString().slice(0, 10);
+  const kvKey = "ai:day:" + day + ":ip:10.8.2.1";
+  await env.BETA.put(kvKey, "19");
+  const fail = await handleAsk(req("/ai/ask", { body: { question: "what's EliGE's HS% on LAN" }, ip: "10.8.2.1" }), env, new URL(ORIGIN + "/ai/ask"), KEY_HASH);
+  const fj = await fail.json();
+  assert.equal(fail.status, 503);
+  assert.match(fj.error, /couldn't load our data/i);
+  assert.equal(await env.BETA.get(kvKey), "19");
+
+  T.lastHit.clear();
+  T.resetDataCache();
+  const okEnv = mkEnv({ GEMINI_API_KEY: "not-a-real-key" });
+  await okEnv.BETA.put(kvKey, "19");
+  const orig = globalThis.fetch;
+  globalThis.fetch = async () => new Response(JSON.stringify({
+    candidates: [{ content: { parts: [{ text: "EliGE's headshot percentage on LAN is 56.97%." }] } }]
+  }), { status: 200, headers: { "content-type": "application/json" } });
+  try {
+    const ok = await handleAsk(req("/ai/ask", { body: { question: "what's EliGE's HS% on LAN" }, ip: "10.8.2.1" }), okEnv, new URL(ORIGIN + "/ai/ask"), KEY_HASH);
+    const oj = await ok.json();
+    assert.equal(ok.status, 200, oj.error);
+    assert.equal(await okEnv.BETA.get(kvKey), "20");
+
+    T.lastHit.clear();
+    const blocked = await handleAsk(req("/ai/ask", { body: { question: "what's EliGE's HS% on LAN" }, ip: "10.8.2.1" }), okEnv, new URL(ORIGIN + "/ai/ask"), KEY_HASH);
+    assert.equal(blocked.status, 429);
+
+    T.lastHit.clear();
+    await okEnv.BETA.put("user:GlockyPickz", JSON.stringify({ u: "GlockyPickz", role: "admin", ver: 0, disabled: false }));
+    const tok = await A.signSession({ u: "GlockyPickz", v: 0, exp: Date.now() + 600000 }, SECRET);
+    await okEnv.BETA.put("ai:day:" + day + ":u:GlockyPickz", String(T.USER_DAILY));
+    await okEnv.BETA.put("ai:day:" + day + ":admin", String(T.USER_DAILY));
+    const admin = await handleAsk(req("/ai/ask", { body: { question: "what's EliGE's HS% on LAN" }, cookie: A.COOKIE + "=" + tok, ip: "10.8.2.2" }), okEnv, new URL(ORIGIN + "/ai/ask"), KEY_HASH);
+    const aj = await admin.json();
+    assert.equal(admin.status, 200, aj.error);
+    assert.match(aj.answer, /56\.97|EliGE/i);
+  } finally {
+    globalThis.fetch = orig;
+  }
+});
+

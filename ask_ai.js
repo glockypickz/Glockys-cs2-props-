@@ -57,24 +57,32 @@ function utcDay(d) {
 }
 
 function whoKey(who, request) {
-  if (who && who.user) return "u:" + who.user;
   if (who && who.admin) return "admin";
+  if (who && who.user) return "u:" + who.user;
   return "ip:" + clientIp(request);
 }
 
-async function rateLimit(env, key) {
+async function checkRateLimit(env, who, request) {
+  const key = whoKey(who, request);
   const now = Date.now();
   const prev = lastHit.get(key) || 0;
   if (now - prev < COOLDOWN_MS) return { ok: false, retry: true, msg: "Please wait a moment before asking again." };
   lastHit.set(key, now);
+  if (who && who.admin) return { ok: true, unlimited: true };
   if (!env || !env.BETA || typeof env.BETA.get !== "function") return { ok: true };
   const day = utcDay();
   const kvKey = "ai:day:" + day + ":" + key;
   let n = 0;
   try { n = parseInt((await env.BETA.get(kvKey)) || "0", 10) || 0; } catch (e) { n = 0; }
   if (n >= USER_DAILY) return { ok: false, daily: true, msg: "You've reached today's Ask Glocky limit. Try again tomorrow." };
-  try { await env.BETA.put(kvKey, String(n + 1), { expirationTtl: 172800 }); } catch (e) {}
-  return { ok: true, left: USER_DAILY - n - 1 };
+  return { ok: true, kvKey, n, left: USER_DAILY - n };
+}
+
+async function consumeRateLimit(env, rl) {
+  if (!rl || !rl.kvKey || rl.n == null || !env || !env.BETA || typeof env.BETA.put !== "function") return rl;
+  try { await env.BETA.put(rl.kvKey, String(rl.n + 1), { expirationTtl: 172800 }); } catch (e) {}
+  rl.left = USER_DAILY - rl.n - 1;
+  return rl;
 }
 
 function sameOrigin(request, url) {
@@ -496,7 +504,7 @@ export async function handleAsk(request, env, url, keyHash) {
   if (!question) return json({ error: "Ask a question first." }, 400);
   if (question.length > Q_MAX) return json({ error: "Please keep questions under " + Q_MAX + " characters." }, 400);
 
-  const rl = await rateLimit(env, whoKey(who, request));
+  const rl = await checkRateLimit(env, who, request);
   if (!rl.ok) return json({ error: rl.msg }, 429);
 
   let store;
@@ -526,6 +534,7 @@ export async function handleAsk(request, env, url, keyHash) {
     if (who && who.admin) answer += " — " + sanitizeDetail(formatGeminiDetail(g), env.GEMINI_API_KEY);
   } else answer = fallbackPhrase(result);
 
+  await consumeRateLimit(env, rl);
   return json({
     answer,
     grade: result.grade,
@@ -536,4 +545,4 @@ export async function handleAsk(request, env, url, keyHash) {
 }
 
 // test helpers (no secrets)
-export const _test = { hasGeminiKey, geminiModel, DEFAULT_MODEL, FALLBACK_MODELS, RETIRED_MODELS, RETRY_DELAYS_MS, USER_DAILY, SETUP_MSG, stripGlockySays, extractText, scrubProviders, PROVIDER_RE, thinkingConfigFor, sanitizeDetail, formatGeminiDetail, isTransient, isNotFound, setRetryDelaysForTest, setSleepForTest, resetDataCache };
+export const _test = { hasGeminiKey, geminiModel, DEFAULT_MODEL, FALLBACK_MODELS, RETIRED_MODELS, RETRY_DELAYS_MS, USER_DAILY, SETUP_MSG, stripGlockySays, extractText, scrubProviders, PROVIDER_RE, thinkingConfigFor, sanitizeDetail, formatGeminiDetail, isTransient, isNotFound, setRetryDelaysForTest, setSleepForTest, resetDataCache, lastHit, whoKey };
