@@ -78,8 +78,8 @@ The **Wins** tab is a community board where signed-in users post screenshots of 
 The Worker bindings are already in `wrangler.jsonc` (`WINS` KV and `WINS_R2`). You still need to create the R2 bucket once, and the first deploy will create the KV namespace if it is not there yet.
 
 1. Create the R2 bucket (once), from this repo or the dashboard:
-   - `npx wrangler r2 bucket create glockys-wins`
-   - Or: Cloudflare dashboard → R2 → Create bucket → name it exactly `glockys-wins`.
+   - `npx wrangler r2 bucket create glockyz-wins`
+   - Or: Cloudflare dashboard → R2 → Create bucket → name it exactly `glockyz-wins`.
 2. Deploy as usual (`npx wrangler deploy`, or push to `main` if that auto-deploys). Wrangler 4.45+ should create and link the `WINS` KV namespace automatically, the same way as `BETA`. If that step fails: Storage & Databases → KV → Create namespace `glockys-wins`, copy its ID, and add `"id": "<ID>"` next to the `WINS` binding in `wrangler.jsonc`.
 3. After deploy, sign in on the live site and open the **Wins** tab. If the bucket or KV binding is missing, the tab says "The Wins board isn't set up yet."
 
