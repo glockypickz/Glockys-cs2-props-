@@ -81,6 +81,11 @@ check("Kills vs Headshots split", sp.kills.length === 2 && sp.hs.length === 1);
 check("LAN data vs not", sp.lan.length === 2 && sp.notLan.length === 1);
 check("by letter has C, D, B", (sp.byLetter.C || []).length === 1 && (sp.byLetter.D || []).length === 1 && (sp.byLetter.B || []).length === 1);
 check("overall 2-1", S.summary(rows.live).record === "2-1" && S.summary(rows.live).hitPct === 67);
+var bo1e = entry({ player: "Bo1Guy", period: "Map 1", line: 15.5, lock: { line: 15.5, proj: 16, grade: "B", pick: "OVER" }, result: { act: 18, outcome: "hit", bo1: true } });
+var mixedBo1 = S.fromEntries([entry(), bo1e], NOW);
+var spB = S.splits(mixedBo1.live);
+check("bo1 split counts the flagged row", spB.bo1.length === 1 && spB.bo1[0].player === "Bo1Guy" && spB.notBo1.length === 1);
+check("bo1 row keeps the flag", mixedBo1.live.some(function (r) { return r.player === "Bo1Guy" && r.bo1 === true; }));
 
 console.log("scout shadow, same period");
 var withS = entry({
@@ -115,6 +120,9 @@ check("empty state uses the exact sentence", emptyHtml.indexOf("No picks settled
 check("empty state still has the title and explanation", emptyHtml.indexOf("Track record since the update") > -1 && emptyHtml.indexOf("lock.at") > -1);
 var filled = S.html(rows);
 check("filled sheet shows record and splits", filled.indexOf("2-1") > -1 && filled.indexOf("Maps 1-2 vs Map 1") > -1 && filled.indexOf("LAN data vs not") > -1 && filled.indexOf("Kills vs Headshots") > -1 && filled.indexOf("By letter") > -1);
+check("filled sheet includes the Bo1 split", filled.indexOf("Bo1 vs not Bo1") > -1);
+var bo1Html = S.html(mixedBo1);
+check("bo1 sheet names the Bo1 group", bo1Html.indexOf("Bo1 vs not Bo1") > -1 && bo1Html.indexOf(">Bo1<") > -1);
 check("filled sheet includes Scout shadow heading", filled.indexOf("Scout shadow") > -1);
 check("empty does not include a 0-0 record block as the headline", emptyHtml.indexOf("Projection bias") === -1);
 

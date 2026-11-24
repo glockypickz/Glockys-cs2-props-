@@ -111,7 +111,8 @@
         player: e.player, team: e.team, opp: e.opponent, stat: st, period: periodOf(e),
         line: line, act: act, pick: pick, grade: letterOf(lk.grade), proj: isNaN(proj) ? null : proj,
         hit: hit, lat: lk.at || "", start: e.start, lan: isLan(e),
-        model: lk.model || "", cap: lk.cap || null, edge: isEdgeLock(e)
+        model: lk.model || "", cap: lk.cap || null, edge: isEdgeLock(e),
+        bo1: !!(rs && rs.bo1)
       };
       live.push(row);
       var s = e.shadow_s;
@@ -163,6 +164,8 @@
       notLan: rows.filter(function (r) { return !r.lan; }),
       edge: rows.filter(function (r) { return r.edge; }),
       prior: rows.filter(function (r) { return !r.edge; }),
+      bo1: rows.filter(function (r) { return r.bo1; }),
+      notBo1: rows.filter(function (r) { return !r.bo1; }),
       byLetter: byLetter
     };
   }
@@ -204,13 +207,14 @@
     var live = (data && data.live) || [];
     var shadow = (data && data.shadow) || [];
     var h = "<div class=\"card\" style=\"margin-top:12px\"><h2>Track record since the update</h2>";
-    h += "<div class=\"muted\" style=\"margin-bottom:8px\">Only props locked after Nov 24, 2026, 2:09 AM CT, when the new grader changes went live. A pick is included by its lock timestamp (lock.at). The Track Record above is unchanged and still counts every settled pick. Edge letters (v1e) are also split out below so you can judge that version on its own.</div>";
+    h += "<div class=\"muted\" style=\"margin-bottom:8px\">Only props locked after Nov 24, 2026, 2:09 AM CT, when the new grader changes went live. A pick is included by its lock timestamp (lock.at). The Track Record above is unchanged and still counts every settled pick, including Bo1s. The Bo1 split below is that subset only. Maps 1-2 lines on a Bo1 stay void, as the books grade them, and forfeits are not counted as Bo1s. Edge letters (v1e) are also split out below so you can judge that version on its own.</div>";
     if (!live.length) {
       return h + "<div class=\"muted\">" + esc(EMPTY) + "</div></div>";
     }
     var sp = splits(live);
     h += statCells(summary(live));
     h += splitTable("Maps 1-2 vs Map 1", [rowLine("Maps 1-2", sp.maps12), rowLine("Map 1", sp.map1)], esc);
+    h += splitTable("Bo1 vs not Bo1", [rowLine("Bo1", sp.bo1), rowLine("Not Bo1", sp.notBo1)], esc);
     h += splitTable("Kills vs Headshots", [rowLine("Kills", sp.kills), rowLine("Headshots", sp.hs)], esc);
     h += splitTable("LAN data vs not", [rowLine("LAN data", sp.lan), rowLine("Not LAN data", sp.notLan)], esc);
     h += splitTable("By model version", [rowLine("Edge letters (v1e)", sp.edge), rowLine("Earlier post-update locks", sp.prior)], esc);
