@@ -200,6 +200,90 @@
     });
     return { n: vals.length, avg: mean(vals) };
   }
+  // Display-only copy of PR 30 / scout_model.py map projection (not imported, so that file will not conflict):
+  // active pool = maps that are >= 3% of all logged maps in the 60 days before the match;
+  // each team's share of Maps 1-2 slots over the last 180 days, smoothed toward uniform (k_veto 1.5);
+  // average both teams; keep top 3 (top 5 if Bo5) and rescale to 1.
+  var VETO_DAYS = 180, POOL_DAYS = 60, K_VETO = 1.5, POOL_MIN = 0.03;
+  function activePool(rows, day) {
+    var lo = shiftDay(day, -POOL_DAYS), c = {}, n = 0;
+    if (!lo) return [];
+    (rows || []).forEach(function (r) {
+      var d = ymd(r.date);
+      if (!d || !r.map || d < lo || d >= day) return;
+      c[r.map] = (c[r.map] || 0) + 1;
+      n++;
+    });
+    if (!n) return [];
+    return Object.keys(c).filter(function (m) { return c[m] / n >= POOL_MIN; }).sort();
+  }
+  function teamShares(rows, team, day, pool, tnFn) {
+    if (!pool.length || !team) return { w: {}, n: 0 };
+    var lo = shiftDay(day, -VETO_DAYS), c = {}, n = 0, key = (tnFn || tnDef)(team);
+    if (!lo) return { w: {}, n: 0 };
+    (rows || []).forEach(function (r) {
+      var d = ymd(r.date);
+      if (!d || d < lo || d >= day) return;
+      if (r.n !== 1 && r.n !== 2) return;
+      if (!r.map || pool.indexOf(r.map) < 0) return;
+      if ((tnFn || tnDef)(r.team) !== key) return;
+      c[r.map] = (c[r.map] || 0) + 1;
+      n++;
+    });
+    if (!n) return { w: {}, n: 0 };
+    var w = {};
+    pool.forEach(function (m) { w[m] = ((c[m] || 0) + K_VETO / pool.length) / (n + K_VETO); });
+    return { w: w, n: n };
+  }
+  function vetoWeights(rows, team, opp, day, tnFn) {
+    var pool = activePool(rows, day);
+    if (!pool.length) return { pool: [], w: {} };
+    var sa = teamShares(rows, team, day, pool, tnFn);
+    var sb = opp ? teamShares(rows, opp, day, pool, tnFn) : { w: {}, n: 0 };
+    var u = 1 / pool.length, w = {};
+    if (sa.n && sb.n) pool.forEach(function (m) { w[m] = (sa.w[m] || u) + (sb.w[m] || u); });
+    else if (sa.n) w = sa.w;
+    else if (sb.n) w = sb.w;
+    else pool.forEach(function (m) { w[m] = u; });
+    var tw = 0;
+    Object.keys(w).forEach(function (m) { tw += w[m]; });
+    if (tw) Object.keys(w).forEach(function (m) { w[m] /= tw; });
+    return { pool: pool, w: w };
+  }
+  function vetoTop(w, bo) {
+    var k = (bo || 3) >= 5 ? 5 : 3;
+    var top = Object.keys(w || {}).map(function (m) { return { map: m, p: w[m] }; })
+      .sort(function (a, b) { return b.p - a.p || (a.map < b.map ? -1 : a.map > b.map ? 1 : 0); })
+      .slice(0, k);
+    var tw = top.reduce(function (s, x) { return s + x.p; }, 0) || 1;
+    top.forEach(function (x) { x.p = x.p / tw; x.pct = Math.round(100 * x.p); });
+    return top;
+  }
+  function playerMapStat(logs, mapName, st, period, line, before) {
+    var scale = isMap1(period) ? 1 : 2, vals = [], day = ymd(before);
+    (logs || []).forEach(function (l) {
+      if (l[st] == null || String(l.map || "") !== String(mapName)) return;
+      if (isMap1(period) && l.n !== 1) return;
+      if (!isMap1(period) && l.n !== 1 && l.n !== 2) return;
+      var d = ymd(l.date);
+      if (day && d && d >= day) return;
+      vals.push(Number(l[st]));
+    });
+    if (!vals.length) return { n: 0, avg: null, scale: scale, over: 0, under: 0, push: 0 };
+    var raw = mean(vals), avg = raw * scale, over = 0, under = 0, push = 0;
+    vals.forEach(function (v) {
+      var x = v * scale;
+      if (line != null && x > line) over++;
+      else if (line != null && x < line) under++;
+      else push++;
+    });
+    return { n: vals.length, raw: raw, avg: avg, scale: scale, over: over, under: under, push: push };
+  }
+  function projectedTop(rows, team, opp, day, bo, tnFn) {
+    if (!day || day.length < 10 || !rows || !rows.length) return [];
+    var vw = vetoWeights(rows, team, opp, day, tnFn);
+    return vetoTop(vw.w, bo);
+  }
   function findGame(games, team, opp, start, tn) {
     if (!games || !games.length || !team || !opp) return null;
     tn = tn || tnDef;
@@ -339,27 +423,62 @@
       }
     }
 
-    // Likely maps from Cito pick % (not used in the v1 grade)
-    var sa = latestMaps(opts.strength, g.team, before, tn);
-    var sb = g.opp ? latestMaps(opts.strength, g.opp, before, tn) : null;
-    var likely = combinedPick(sa, sb);
-    if (likely.length) {
-      var top = likely.slice(0, 5);
-      var asof = (sa && sa.d) || (sb && sb.d);
-      var mapTxt = "Likely maps from our map-pool pick rates";
-      if (asof) mapTxt += " (as of " + asof + ")";
-      mapTxt += ": " + top.map(function (x) { return x.map + " " + Math.round(x.pct) + "%"; }).join(", ");
-      if (logs && logs.length) {
-        var bits = [];
-        top.forEach(function (x) {
-          var ma = mapAvg(logs, x.map, st, period);
-          if (ma.n >= 3 && ma.avg != null) {
-            bits.push(r1(ma.avg) + " " + sn + " on " + x.map + " (" + ma.n + " " + (isMap1(period) ? "Map 1 maps" : "maps") + ")");
-          }
-        });
-        if (bits.length) mapTxt += ". He averages " + bits.join("; ");
+    // Our projected maps (display only, not used in the v1 grade). Same top-3 / Bo5 top-5 rule as PR 30.
+    var day = ymd(opts.start);
+    if (!day || day.length < 10) day = ymd(opts.today);
+    if (!day || day.length < 10) day = ymd(new Date().toISOString());
+    var game = findGame(opts.games, g.team, g.opp, opts.start, tn);
+    var bo = game && game.bo != null && game.bo !== "" ? +game.bo : 3;
+    var topMaps = projectedTop(opts.teamRows, g.team, g.opp, day, bo, tn);
+    var scored = [];
+    topMaps.forEach(function (x) {
+      var stt = playerMapStat(logs, x.map, st, period, line, day);
+      if (stt.n >= 3 && stt.avg != null) scored.push({ map: x.map, pct: x.pct, p: x.p, stat: stt });
+    });
+    if (scored.length) {
+      var pTw = scored.reduce(function (s, x) { return s + x.p; }, 0) || 1;
+      var wavg = scored.reduce(function (s, x) { return s + x.p * x.stat.avg; }, 0) / pTw;
+      var list = scored.map(function (x) { return x.map + " " + x.pct + "%"; }).join(", ");
+      var poolFav = avgFavors(wavg, line, side);
+      if (poolFav === true) {
+        var poolLead = side === "Over" ? "He exceeds on this map pool" : "He comes in under on this map pool";
+        support.push(item(poolLead + ": on the likely maps (" + list + ") his average is " + r1(wavg) + " " + sn + " on a " + scope + " scale, " + vsLine(wavg, line) + ".", false, "proj-pool"));
+      } else if (poolFav === false) {
+        var poolMiss = side === "Over" ? "He comes up short on this map pool" : "He exceeds on this map pool";
+        risk.push(item(poolMiss + ": on the likely maps (" + list + ") his average is " + r1(wavg) + " " + sn + " on a " + scope + " scale, " + vsLine(wavg, line) + ".", false, "proj-pool"));
       }
-      also.push(item(mapTxt, false, "maps"));
+      scored.forEach(function (x) {
+        var s = x.stat, hits = side === "Under" ? s.under : s.over;
+        var unitM = isMap1(period) ? "Map 1 maps" : "maps";
+        var txt = x.map + " (" + x.pct + "%): he averages " + r1(s.avg) + " " + sn + " on a " + scope + " scale (" + s.n + " " + unitM + "), " + vsLine(s.avg, line) + ", and went " + side + " in " + hits + " of " + s.n + ".";
+        var fav = avgFavors(s.avg, line, side);
+        if (fav === true) support.push(item(txt, false, "proj-map-" + x.map));
+        else if (fav === false) risk.push(item(txt, false, "proj-map-" + x.map));
+        else also.push(item(txt, false, "proj-map-" + x.map));
+      });
+    } else {
+      // Fallback: Cito pick % only when we could not build our own projection with samples
+      var sa = latestMaps(opts.strength, g.team, before, tn);
+      var sb = g.opp ? latestMaps(opts.strength, g.opp, before, tn) : null;
+      var likely = combinedPick(sa, sb);
+      if (likely.length) {
+        var top = likely.slice(0, 5);
+        var asof = (sa && sa.d) || (sb && sb.d);
+        var mapTxt = "Likely maps from our map-pool pick rates";
+        if (asof) mapTxt += " (as of " + asof + ")";
+        mapTxt += ": " + top.map(function (x) { return x.map + " " + Math.round(x.pct) + "%"; }).join(", ");
+        if (logs && logs.length) {
+          var bits = [];
+          top.forEach(function (x) {
+            var ma = mapAvg(logs, x.map, st, period);
+            if (ma.n >= 3 && ma.avg != null) {
+              bits.push(r1(ma.avg) + " " + sn + " on " + x.map + " (" + ma.n + " " + (isMap1(period) ? "Map 1 maps" : "maps") + ")");
+            }
+          });
+          if (bits.length) mapTxt += ". He averages " + bits.join("; ");
+        }
+        also.push(item(mapTxt, false, "maps"));
+      }
     }
 
     // Same-tier already listed from parts. If opponent is ranked but the window was empty:
@@ -458,7 +577,7 @@
     return h;
   }
 
-  var api = { build: build, html: html, inferMatchEv: inferMatchEv };
+  var api = { build: build, html: html, inferMatchEv: inferMatchEv, projectedTop: projectedTop, vetoTop: vetoTop, playerMapStat: playerMapStat, activePool: activePool };
   if (typeof module !== "undefined" && module.exports) module.exports = api;
   else root.GPInsights = api;
 })(typeof window !== "undefined" ? window : this);

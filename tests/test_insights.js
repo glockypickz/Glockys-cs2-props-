@@ -273,6 +273,99 @@ check("skips LAN/online bait bullet when the gap is tiny", tinyGap.bait.every(fu
 check("inferMatchEv returns online from the newest day in the window", I.inferMatchEv(baitCs, "2026-11-22") === "online");
 check("inferMatchEv is null with no start date", I.inferMatchEv(baitCs, "") == null);
 
+console.log("projected maps (scout-style, display only)");
+function rowsFor(team, map, n, dates) {
+  return dates.map(function (d) { return { team: team, map: map, n: n, date: d }; });
+}
+// 60 days before 2026-11-22 is 2026-09-23. Enough of each map to pass the 3% pool cutoff.
+var days = [];
+for (var i = 0; i < 30; i++) days.push("2026-10-" + String((i % 28) + 1).padStart(2, "0"));
+var teamRows = [];
+days.forEach(function (d, i) {
+  // Fnatic plays Dust2 often, then Mirage, then Nuke, plus a little Inferno
+  teamRows.push({ team: "Fnatic", map: "Dust2", n: 1, date: d });
+  teamRows.push({ team: "Fnatic", map: "Dust2", n: 2, date: d });
+  if (i % 2 === 0) { teamRows.push({ team: "Fnatic", map: "Mirage", n: 1, date: d }); teamRows.push({ team: "Fnatic", map: "Mirage", n: 2, date: d }); }
+  if (i % 3 === 0) { teamRows.push({ team: "Fnatic", map: "Nuke", n: 1, date: d }); teamRows.push({ team: "Fnatic", map: "Nuke", n: 2, date: d }); }
+  if (i % 5 === 0) { teamRows.push({ team: "Fnatic", map: "Inferno", n: 1, date: d }); teamRows.push({ team: "Fnatic", map: "Inferno", n: 2, date: d }); }
+  // Vitality: Mirage-heavy
+  teamRows.push({ team: "Vitality", map: "Mirage", n: 1, date: d });
+  teamRows.push({ team: "Vitality", map: "Mirage", n: 2, date: d });
+  if (i % 2 === 0) { teamRows.push({ team: "Vitality", map: "Dust2", n: 1, date: d }); teamRows.push({ team: "Vitality", map: "Dust2", n: 2, date: d }); }
+  if (i % 3 === 0) { teamRows.push({ team: "Vitality", map: "Inferno", n: 1, date: d }); }
+});
+var top3 = I.projectedTop(teamRows, "Fnatic", "Vitality", "2026-11-22", 3, function (s) { return String(s || "").toLowerCase().replace(/[^a-z0-9]/g, ""); });
+check("returns 3 maps for a Bo3", top3.length === 3);
+check("probabilities are rescaled", Math.abs(top3.reduce(function (s, x) { return s + x.p; }, 0) - 1) < 1e-9);
+check("Dust2 and Mirage are in the top 3", top3.some(function (x) { return x.map === "Dust2"; }) && top3.some(function (x) { return x.map === "Mirage"; }));
+var top5 = I.projectedTop(teamRows, "Fnatic", "Vitality", "2026-11-22", 5, function (s) { return String(s || "").toLowerCase().replace(/[^a-z0-9]/g, ""); });
+check("returns up to 5 maps for a Bo5", top5.length >= 3 && top5.length <= 5);
+check("Map 3+ rows are not counted in team shares (only Maps 1-2)", (function () {
+  var extra = teamRows.concat(days.map(function (d) { return { team: "Fnatic", map: "Overpass", n: 3, date: d }; }));
+  var a = I.projectedTop(teamRows, "Fnatic", "Vitality", "2026-11-22", 5, function (s) { return String(s || "").toLowerCase().replace(/[^a-z0-9]/g, ""); });
+  var b = I.projectedTop(extra, "Fnatic", "Vitality", "2026-11-22", 5, function (s) { return String(s || "").toLowerCase().replace(/[^a-z0-9]/g, ""); });
+  // Overpass can enter the 60-day pool (all maps) but shares stay 0 aside from smoothing, so it should not outrank Dust2/Mirage
+  return !b.slice(0, 2).some(function (x) { return x.map === "Overpass"; }) && a[0].map === b[0].map;
+})());
+
+// Player logs: Dust2 high (over a 24.5 Maps 1-2 line after *2), Nuke low (under)
+var plogs = [];
+for (var pi = 0; pi < 6; pi++) {
+  plogs.push({ n: 1, map: "Dust2", kills: 18 + pi, date: "2026-10-0" + (pi + 1) }); // 18..23
+  plogs.push({ n: 2, map: "Dust2", kills: 16 + pi, date: "2026-10-0" + (pi + 1) }); // 16..21  mean 19.5 * 2 = 39.0
+  plogs.push({ n: 1, map: "Mirage", kills: 12, date: "2026-10-1" + (pi + 1 > 9 ? (pi + 1) : "0" + (pi + 1 > 9 ? "" : "")) });
+}
+// fix mirage dates simply
+plogs = plogs.filter(function (l) { return l.map !== "Mirage"; });
+for (var pj = 0; pj < 6; pj++) {
+  plogs.push({ n: 1, map: "Mirage", kills: 12, date: "2026-10-" + String(10 + pj).padStart(2, "0") });
+  plogs.push({ n: 2, map: "Mirage", kills: 11, date: "2026-10-" + String(10 + pj).padStart(2, "0") }); // mean 11.5 * 2 = 23.0 vs 24.5 under
+}
+for (var pk = 0; pk < 6; pk++) {
+  plogs.push({ n: 1, map: "Nuke", kills: 8, date: "2026-10-" + String(10 + pk).padStart(2, "0") });
+  plogs.push({ n: 2, map: "Nuke", kills: 7, date: "2026-10-" + String(10 + pk).padStart(2, "0") }); // mean 7.5 * 2 = 15.0 under
+}
+// two Ancient maps only — must be skipped (<3 samples) even if projected
+plogs.push({ n: 1, map: "Inferno", kills: 30, date: "2026-10-15" });
+plogs.push({ n: 2, map: "Inferno", kills: 30, date: "2026-10-15" });
+
+var tnF = function (s) { return String(s || "").toLowerCase().replace(/[^a-z0-9]/g, ""); };
+var pg = I.build(grade({ line: 24.5, pick: "UNDER", proj: 20.1, edge: -4.4 }), {
+  teamRows: teamRows, logs: plogs, start: "2026-11-22", tn: tnF,
+  games: [{ team1: "Fnatic", team2: "Vitality", bo: 3, start: "2026-11-22T18:00:00Z" }]
+});
+var poolItem = pg.support.concat(pg.risk).filter(function (x) { return x.key === "proj-pool"; })[0];
+check("map-pool summary exists", !!poolItem);
+check("pool summary is not used in the grade", !!poolItem && poolItem.used === false);
+var dust = pg.support.concat(pg.risk, pg.also).filter(function (x) { return x.key === "proj-map-Dust2"; })[0];
+var mir = pg.support.concat(pg.risk, pg.also).filter(function (x) { return x.key === "proj-map-Mirage"; })[0];
+check("Dust2 average is 39.0 on a Maps 1-2 scale (19.5 * 2)", !!dust && /39\.0/.test(dust.text) && /Dust2 \(\d+%\)/.test(dust.text));
+check("Dust2 is a weak map for an Under (goes in What could go wrong)", !!dust && pg.risk.indexOf(dust) > -1 && /above the line/.test(dust.text) && dust.used === false);
+check("Mirage 23.0 is a supportive Under map", !!mir && /23\.0/.test(mir.text) && pg.support.indexOf(mir) > -1 && /below the line/.test(mir.text));
+check("skips Inferno with only 2 maps", pg.support.concat(pg.risk, pg.also).every(function (x) { return x.key !== "proj-map-Inferno"; }));
+check("hit rate and sample size are on the bullet", !!dust && /went Over in |went Under in /.test(dust.text) && /\(12 maps\)/.test(dust.text));
+check("does not also emit the Cito fallback when our projection has samples", pg.also.every(function (x) { return x.key !== "maps"; }));
+
+// Map 1: scale is 1, only n=1 logs (mean Dust2 18..23 = 20.5, not 39)
+var m1p = I.build(grade({
+  period: "Map 1", line: 16.5, proj: 11.2, edge: -5.3, pick: "UNDER",
+  cs: series([{ kills: 14, ev: "online", maps: "Mirage" }, { kills: 16, ev: "lan", maps: "Dust2" }, { kills: 11, ev: "online", maps: "Nuke" }, { kills: 10, ev: "online", maps: "Inferno" }, { kills: 9, ev: "lan", maps: "Ancient" }, { kills: 8, ev: "online", maps: "Mirage" }, { kills: 15, ev: "online", maps: "Dust2" }, { kills: 7, ev: "lan", maps: "Nuke" }, { kills: 6, ev: "online", maps: "Inferno" }, { kills: 12, ev: "online", maps: "Ancient" }]),
+  v1: { parts: [
+    { key: "l10", v: 10.8, n: 10 }, { key: "szn", v: 10.8, n: 10 },
+    { key: "h2h", v: null, n: 0 }, { key: "tier", v: null, n: 0 }, { key: "l3", v: 13.7, n: 3 }
+  ], adr_used: false, adr_mult: 1 }
+}), { teamRows: teamRows, logs: plogs, start: "2026-11-22", tn: tnF, games: [{ team1: "Fnatic", team2: "Vitality", bo: 3, start: "2026-11-22T18:00:00Z" }] });
+var d1 = m1p.support.concat(m1p.risk, m1p.also).filter(function (x) { return x.key === "proj-map-Dust2"; })[0];
+check("Map 1 uses n=1 only and does not double the average", !!d1 && /20\.5/.test(d1.text) && d1.text.indexOf("39.0") < 0 && /Map 1 maps/.test(d1.text));
+
+check("Cito fallback still works when teamRows are missing", (function () {
+  var x = I.build(grade(), { strength: { maps: {
+    fnatic: [{ asof: "2026-11-17", maps: { Dust2: [7, 141, 43.8], Mirage: [2, 37, 12.5] } }],
+    vitality: [{ asof: "2026-11-17", maps: { Dust2: [3, 60, 20], Mirage: [8, 160, 50] } }]
+  } }, logs: plogs, tn: tnF });
+  return x.also.some(function (it) { return it.key === "maps" && /map-pool pick rates/.test(it.text); });
+})());
+
 if (failed) {
   console.log("\n" + failed + " failed");
   process.exit(1);
