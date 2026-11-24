@@ -260,9 +260,12 @@ test("slip read drops the image and only then loads our data; assets are not fet
   const ask = readFileSync(join(root, "ask_ai.js"), "utf8");
   const readAt = slip.indexOf("const img = await readImage(request)");
   const dropAt = slip.indexOf("img.bytes = null");
+  const dropB64At = slip.lastIndexOf('b64 = ""');
   const loadAt = slip.lastIndexOf("store = await loadStore(env, url.origin)");
   assert.ok(readAt >= 0 && dropAt > readAt, "image is dropped after it is read");
-  assert.ok(loadAt > dropAt, "loadStore on the read path runs after the image is dropped");
+  assert.ok(dropB64At > dropAt, "base64 vision payload is cleared after the raw bytes");
+  assert.ok(loadAt > dropB64At, "loadStore on the read path runs after the vision payload is dropped");
+  assert.doesNotMatch(slip, /image:\s*Array\.from|Array\.from\(\s*(?:img\.)?bytes/);
   const gradeFn = slip.indexOf('if (path === "/ai/slip/grade")');
   const gradeLoad = slip.indexOf("store = await loadStore(env, url.origin)", gradeFn);
   assert.ok(gradeFn >= 0 && gradeLoad > gradeFn && gradeLoad < readAt, "grade path still loads data without an image");
@@ -639,3 +642,54 @@ test("Workers AI alone is enough to set up the slip reader; Ask Glocky never cal
   }
 });
 
+
+test("JSON slip uploads keep one base64 string and only sniff header bytes", () => {
+  const raw = pngB64();
+  assert.equal(T.stripDataUrl("data:image/png;base64," + raw), raw);
+  assert.equal(T.b64ByteLength(raw), PNG.length);
+  const slip = readFileSync(join(root, "slip_ai.js"), "utf8");
+  const readFn = slip.indexOf("async function readImage");
+  const jsonPath = slip.indexOf("body.image || body.data || body.file", readFn);
+  const fullDecode = slip.indexOf("b64ToBytes(body && (body.image", readFn);
+  assert.ok(jsonPath > readFn);
+  assert.ok(fullDecode < 0 || fullDecode < readFn, "JSON path must not decode the whole image to bytes");
+  assert.match(slip, /b64ToBytes\(raw\.slice\(0, 24\)\)/);
+});
+
+test("data-load failures include admin detail with the real reason, never the key", async () => {
+  AT.resetDataCache();
+  const env = mkEnv({
+    GEMINI_API_KEY: "not-a-real-key",
+    AI: { run: async () => ({ response: slipJsonText() }) },
+    ASSETS: { fetch: async () => { throw new Error("Memory limit exceeded"); } }
+  });
+  const customer = await handleSlip(req("/ai/slip/read", { body: { image: pngB64(), mime: "image/png" }, ip: "10.2.1.1" }), env, new URL(ORIGIN + "/ai/slip/read"), KEY_HASH);
+  const cj = await customer.json();
+  assert.equal(customer.status, 503);
+  assert.match(cj.error, /couldn't load our data/i);
+  assert.equal(cj.detail, undefined);
+  assert.equal(JSON.stringify(cj).includes("not-a-real-key"), false);
+  assert.doesNotMatch(JSON.stringify(cj), /Memory limit exceeded|workers-ai|llama-4/i);
+
+  AT.resetDataCache();
+  T.lastHit.clear();
+  const admin = await handleSlip(req("/ai/slip/read", { body: { image: pngB64(), mime: "image/png" }, adminKey: KEY, ip: "10.2.1.2" }), env, new URL(ORIGIN + "/ai/slip/read"), KEY_HASH);
+  const aj = await admin.json();
+  assert.equal(admin.status, 503);
+  assert.match(aj.error, /couldn't load our data/i);
+  assert.match(aj.detail, /data-load=Memory limit exceeded/);
+  assert.match(aj.detail, /provider=workers-ai/);
+  assert.match(aj.detail, /llama-4-scout-17b-16e-instruct/);
+  assert.match(aj.detail, /image=\d+B/);
+  assert.equal(String(aj.detail).includes("not-a-real-key"), false);
+  assert.doesNotMatch(aj.error, /Memory limit exceeded|workers-ai|llama-4|Gemini/i);
+
+  AT.resetDataCache();
+  T.lastHit.clear();
+  const grade = await handleSlip(req("/ai/slip/grade", { body: { picks: [{ player: "EliGE", stat: "kills", line: 35.5, period: "Maps 1-2", side: "over" }] }, adminKey: KEY, ip: "10.2.1.3" }), env, new URL(ORIGIN + "/ai/slip/grade"), KEY_HASH);
+  const gj = await grade.json();
+  assert.equal(grade.status, 503);
+  assert.match(gj.error, /couldn't load our data/i);
+  assert.match(gj.detail, /data-load=Memory limit exceeded/);
+  assert.equal(String(gj.detail).includes("not-a-real-key"), false);
+});

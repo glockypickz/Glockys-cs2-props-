@@ -78,8 +78,19 @@ function sniffMime(bytes, hinted) {
   return null;
 }
 
+function stripDataUrl(b64) {
+  return String(b64 || "").replace(/^data:image\/[a-zA-Z0-9+.-]+;base64,/, "").replace(/\s+/g, "");
+}
+
+function b64ByteLength(s) {
+  const t = String(s || "");
+  if (!t) return 0;
+  const pad = t.endsWith("==") ? 2 : (t.endsWith("=") ? 1 : 0);
+  return Math.max(0, ((t.length >> 2) * 3) - pad);
+}
+
 function b64ToBytes(b64) {
-  const s = String(b64 || "").replace(/^data:image\/[a-zA-Z0-9+.-]+;base64,/, "").replace(/\s+/g, "");
+  const s = stripDataUrl(b64);
   if (!s) return null;
   try {
     const bin = atob(s);
@@ -118,12 +129,17 @@ async function readImage(request) {
   }
   let body;
   try { body = await request.json(); } catch (e) { return { error: "Bad request" }; }
-  const bytes = b64ToBytes(body && (body.image || body.data || body.file));
-  if (!bytes) return { error: "Please upload a PNG, JPG, or WebP image of your slip." };
-  if (bytes.length > MAX_BYTES) return { error: "Please use an image under 5 MB." };
-  const mime = sniffMime(bytes, body.mime || body.type);
+  // Keep one base64 string. Decoding the whole image to bytes (and worse,
+  // to a number[]) would compete with the 8.4 MB players.json parse in
+  // the Worker's 128 MB isolate. Sniff only the header bytes.
+  const raw = stripDataUrl(body && (body.image || body.data || body.file));
+  if (!raw) return { error: "Please upload a PNG, JPG, or WebP image of your slip." };
+  const imageBytes = b64ByteLength(raw);
+  if (imageBytes > MAX_BYTES) return { error: "Please use an image under 5 MB." };
+  const head = b64ToBytes(raw.slice(0, 24));
+  const mime = sniffMime(head, body.mime || body.type);
   if (!mime || !ALLOWED.has(mime)) return { error: "Please upload a PNG, JPG, or WebP image of your slip." };
-  return { mime, bytes };
+  return { mime, b64: raw, imageBytes };
 }
 
 export function extractPrompt() {
@@ -225,6 +241,10 @@ export async function workersAiExtract(env, opts) {
     const msg = e && e.message ? String(e.message) : "Workers AI error";
     const aborted = /timeout/i.test(msg);
     return { ok: false, text: "", provider, model, error: aborted ? ("timeout after " + timeoutMs + "ms") : msg, aborted: aborted };
+  } finally {
+    // Drop the data URL so loadStore can parse players.json without
+    // sharing the isolate with the vision payload.
+    try { input.messages = []; } catch (err) {}
   }
 }
 
@@ -246,6 +266,11 @@ export function formatSlipReadDetail(opts) {
     if (opts.gemini.busy) bits.push("retried on busy");
   }
   if (opts.parseError) bits.push("parse error: model text was not JSON");
+  if (opts.dataLoad) {
+    const err = opts.dataLoad;
+    const msg = err && err.message ? String(err.message) : String(err || "failed");
+    bits.push("data-load=" + msg);
+  }
   if (opts.imageBytes != null) bits.push("image=" + opts.imageBytes + "B");
   if (opts.mime) bits.push("mime=" + opts.mime);
   return sanitizeDetail(bits.filter(Boolean).join(", ") || "unknown read failure", opts.secret);
@@ -290,7 +315,13 @@ export async function handleSlip(request, env, url, keyHash) {
   if (path === "/ai/slip/grade") {
     let store;
     try { store = await loadStore(env, url.origin); }
-    catch (e) { return json({ error: "Glocky couldn't load our data just now. Try again in a moment." }, 503); }
+    catch (e) {
+      const payload = { error: "Glocky couldn't load our data just now. Try again in a moment." };
+      if (who && who.admin) {
+        payload.detail = formatSlipReadDetail({ dataLoad: e, secret: env.GEMINI_API_KEY });
+      }
+      return json(payload, 503);
+    }
     let body;
     try { body = await request.json(); } catch (e) { return json({ error: "Bad request" }, 400); }
     const rawPicks = Array.isArray(body && body.picks) ? body.picks : [];
@@ -309,13 +340,14 @@ export async function handleSlip(request, env, url, keyHash) {
   const img = await readImage(request);
   if (img.error) return json({ error: img.error }, 400);
 
-  const imageBytes = img.bytes ? img.bytes.length : 0;
-  const b64 = bytesToB64(img.bytes);
+  const imageBytes = img.imageBytes != null ? img.imageBytes : (img.bytes ? img.bytes.length : 0);
+  let b64 = img.b64 || (img.bytes ? bytesToB64(img.bytes) : "");
   const mime = img.mime;
   // Drop the raw bytes before calling a model. loadStore is deferred until
   // after the image is also dropped, so we never hold a 5 MB upload and the
   // 8 MB players.json in the Worker's 128 MB isolate at the same time.
   img.bytes = null;
+  img.b64 = null;
 
   let workers = null;
   let g = null;
@@ -402,9 +434,18 @@ export async function handleSlip(request, env, url, keyHash) {
     }), 422);
   }
 
+  // Release the vision payload before parsing players.json. A data URL or
+  // (especially) a number[] copy of the image plus that parse can exceed
+  // the 128 MB isolate; makeStore already avoids fully decoding players
+  // for the same reason.
+  b64 = "";
   let store;
   try { store = await loadStore(env, url.origin); }
-  catch (e) { return json({ error: "Glocky couldn't load our data just now. Try again in a moment." }, 503); }
+  catch (e) {
+    return json(withAdminDetail({
+      error: "Glocky couldn't load our data just now. Try again in a moment."
+    }, { dataLoad: e }), 503);
+  }
 
   const picks = extracted.picks.map((p) => matchPick(store, p));
   if (!picks.length) {
@@ -433,5 +474,6 @@ export async function handleSlip(request, env, url, keyHash) {
 export const _test = {
   hasGeminiKey, geminiModel, USER_DAILY, COOLDOWN_MS, MAX_BYTES, SETUP_MSG,
   sniffMime, b64ToBytes, whoKey, utcDay, lastHit,
-  hasWorkersAi, workersAiText, workersAiExtract, WORKERS_AI_MODEL, formatSlipReadDetail
+  hasWorkersAi, workersAiText, workersAiExtract, WORKERS_AI_MODEL, formatSlipReadDetail,
+  stripDataUrl, b64ByteLength
 };
