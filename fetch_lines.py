@@ -1,4 +1,4 @@
-"""Fetch CS2 Maps 1-2 kills/headshots lines (PrizePicks + Underdog) from the KashRock API -> lines.json.
+"""Fetch CS2 Maps 1-2 and Map 1 kills/headshots lines (PrizePicks + Underdog) from the KashRock API -> lines.json.
 
 KashRock returns props as `groups` (one per player + market). Each group has a `dfs` list of
 offers (book, line, odds, over/under, alt-line flag). We keep the main OVER offer per book.
@@ -11,7 +11,12 @@ import json, os, sys, time, datetime, urllib.request, urllib.error, urllib.parse
 BASE = os.environ.get("KASHROCK_BASE_URL", "https://kashrock.up.railway.app").rstrip("/")
 KEY = os.environ.get("KASHROCK_API_KEY", "")
 BOOKS = ["prizepicks", "underdog"]
-MARKETS = {"CS2_KILLS_MAPS_1_2": "Kills", "CS2_HEADSHOTS_MAPS_1_2": "Headshots"}
+MARKETS = {
+    "CS2_KILLS_MAPS_1_2": ("Kills", "Maps 1-2"),
+    "CS2_HEADSHOTS_MAPS_1_2": ("Headshots", "Maps 1-2"),
+    "CS2_KILLS_MAP_1": ("Kills", "Map 1"),
+    "CS2_HEADSHOTS_MAP_1": ("Headshots", "Map 1"),
+}
 PAGE = 100          # groups per request
 MAX_PAGES = 20
 
@@ -160,13 +165,16 @@ def _lock(gr, e, now, regrade=False):
         st = "hs" if "head" in e["stat"].lower() else "kills" if "kill" in e["stat"].lower() else None
         if not st:
             return
+        # LAN data (grader.py lan_data): match type from games.json "ev", else the 3-day rule. New locks only; REGRADE_TAG is
+        # NOT bumped, so props that are already locked keep their grade.
+        ev, ev_src = gr.match_ev(e.get("team"), e.get("opponent") or "", e.get("start"))
         if "+" in e["player"]:
-            g = gr.grade_combo(e["player"], e.get("team"), st, float(e["line"]), e.get("opponent") or "", e.get("book"), e.get("odds"))
+            g = gr.grade_combo(e["player"], e.get("team"), st, float(e["line"]), e.get("opponent") or "", e.get("book"), e.get("odds"), period=e.get("period"), ev=ev)
         else:
             p = gr.find(e["player"], e.get("team"))
             if not p:
                 return
-            g = gr.grade(p, st, float(e["line"]), e.get("opponent") or "", e.get("team"), e.get("book"), e.get("odds"))
+            g = gr.grade(p, st, float(e["line"]), e.get("opponent") or "", e.get("team"), e.get("book"), e.get("odds"), period=e.get("period"), ev=ev)
         if g:
             o = e["lock"] if regrade else None
             e["lock"] = {"line": float(e["line"]), "proj": g["proj"], "grade": g["grade"], "pick": g["pick"],
@@ -174,6 +182,9 @@ def _lock(gr, e, now, regrade=False):
                          "reasons": g["reasons"], "flag": g.get("flag", ""), "model": g["model"], "odds": e.get("odds"),
                          "hits": g.get("hits"),   # [over, series] vs this line: l5 / l10 / l20 / szn / h2h (single props only)
                          "at": now.isoformat(timespec="seconds"), "stats_updated": STATS_STAMP}
+            if ev:
+                e["lock"]["ev"] = ev   # match type the grade used: "lan" = LAN data inputs (when lan_data is on)
+                e["lock"]["ev_src"] = ev_src
             if regrade:
                 e["lock"]["rg"] = REGRADE_TAG   # marks "regraded once"; the old grade is not kept
             mo = match_odds_for(e) or (o.get("mo") if regrade else None)
@@ -202,6 +213,12 @@ def moved_entry(by, l, t0):
     for e in by.values():
         if (e["book"], e["player"], e["stat"]) != (l["book"], l["player"], l["stat"]) or e.get("result"):
             continue
+        try:
+            from grader import period_of
+            if period_of(e) != period_of(l):
+                continue
+        except Exception:
+            pass
         if _key_txt(e.get("team")) != _key_txt(l.get("team")) or _key_txt(e.get("opponent")) != _key_txt(l.get("opponent")):
             continue
         t1 = parse_time(e.get("start"))
@@ -230,23 +247,28 @@ def update_history(lines, now_iso):
         _MO = None
     except Exception as ex:
         print("cito odds skipped:", ex)
-    by = {(e["book"], e["player"], e["stat"], e["start"]): e for e in old}
+    try:
+        from grader import hist_key, period_of
+    except Exception:
+        hist_key = lambda e, start=None: (e["book"], e["player"], e["stat"], start if start is not None else e.get("start") or "", "Maps 1-2")
+        period_of = lambda e, default="Maps 1-2": (e.get("period") if isinstance(e, dict) else e) or default
+    by = {hist_key(e): e for e in old}
     for l in lines:
         start = l.get("starts_at") or ""
         if not start:
             continue
-        k = (l["book"], l["player"], l["stat"], start)
+        k = hist_key(l, start)
         t0 = parse_time(start)
         e = by.get(k)
         if e is None:
             e = moved_entry(by, l, t0)
             if e is not None:   # same match, new start time: move the existing entry (its lock / grade are never touched)
-                by.pop((e["book"], e["player"], e["stat"], e["start"]), None)
+                by.pop(hist_key(e), None)
                 e["start"] = start
                 by[k] = e
         if e is None:
             by[k] = {"book": l["book"], "player": l["player"], "team": l.get("team", ""),
-                     "opponent": l.get("opponent", ""), "stat": l["stat"], "start": start,
+                     "opponent": l.get("opponent", ""), "stat": l["stat"], "period": period_of(l), "start": start,
                      "line": l["line"], "first_line": l["line"], "odds": l.get("odds"), "first_odds": l.get("odds"),
                      "first_seen": now_iso, "last_seen": now_iso}
         elif t0 is None or now is None or now < t0:
@@ -302,10 +324,13 @@ def write_pregame(entries, now):
         if t0 is None or not (lo <= t0 <= now):
             continue
         lk = e.get("lock") or {}
-        out.append({"book": e["book"], "player": e["player"], "team": e.get("team", ""), "opponent": e.get("opponent", ""),
-                    "stat": e["stat"], "start": e["start"], "line": e["line"], "first_line": e.get("first_line"),
-                    "odds": e.get("odds"),
-                    "lock": ({"grade": lk["grade"], "pick": lk.get("pick"), "model": lk.get("model")} if lk.get("grade") else None)})
+        row = {"book": e["book"], "player": e["player"], "team": e.get("team", ""), "opponent": e.get("opponent", ""),
+               "stat": e["stat"], "start": e["start"], "line": e["line"], "first_line": e.get("first_line"),
+               "odds": e.get("odds"),
+               "lock": ({"grade": lk["grade"], "pick": lk.get("pick"), "model": lk.get("model")} if lk.get("grade") else None)}
+        if e.get("period"):
+            row["period"] = e["period"]
+        out.append(row)
     json.dump({"updated": now.isoformat(timespec="seconds"), "entries": out}, open(PREGAME_FILE, "w", encoding="utf-8"),
               separators=(",", ":"), ensure_ascii=False)
     print(PREGAME_FILE + ":", len(out), "started props")
@@ -316,7 +341,7 @@ def main():
         sys.exit("KASHROCK_API_KEY is not set, keeping the old lines.json")
     seen, lines, fetched = set(), [], None
     for book in BOOKS:
-        for market, stat in MARKETS.items():
+        for market, (stat, period) in MARKETS.items():
             offset, kept = 0, 0
             for _ in range(MAX_PAGES):
                 d = fetch("/v7/cs2/props", {"board": "dfs", "book": book, "market": market,
@@ -343,7 +368,7 @@ def main():
                         "team": g.get("team") or o.get("team") or "",
                         "opponent": g.get("opponent") or o.get("opponent") or "",
                         "stat": stat,
-                        "period": "Maps 1-2",
+                        "period": period,
                         "line": line,
                         "odds": o.get("odds"),
                         "starts_at": g.get("start_time") or g.get("event_time") or o.get("event_time") or "",

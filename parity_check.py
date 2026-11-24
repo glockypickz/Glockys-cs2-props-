@@ -12,8 +12,8 @@ const M=require('./model.js');const fs=require('fs');
 const d=M.decodePlayers(JSON.parse(fs.readFileSync('players.json','utf8')));const cases=JSON.parse(fs.readFileSync(0,'utf8'));
 const S=process.env.STRENGTH?JSON.parse(fs.readFileSync(process.env.STRENGTH,'utf8')):null;
 const ctx=M.build(d.players,cases.length&&cases[0].params||null,S,d.ranks||{});
-const out=cases.map(c=>{const p=d.players[c.i];const g=M.grade(ctx,p,c.st,c.line,c.opp,{team:c.team,book:c.book,odds:c.odds,before:c.before});
- return g?{proj:g.proj,p_over:g.pOver,grade:g.grade,pick:g.pick,edge_pp:g.edgePP,reasons:g.reasons,flag:g.flag,hits:g.hits,p_hr:g.pHr,kd:g.kd,kpm:g.kpm,hsp:g.hsp,bait:!!g.bait}:null});
+const out=cases.map(c=>{const p=d.players[c.i];const g=M.grade(ctx,p,c.st,c.line,c.opp,{team:c.team,book:c.book,odds:c.odds,before:c.before,ev:c.ev});
+ const ev=M.matchEv(ctx,c.team,c.opp,c.start,[]);return g?{mev:ev,lan:!!(g.v1&&g.v1.lan&&g.v1.lan.used),proj:g.proj,p_over:g.pOver,grade:g.grade,pick:g.pick,edge_pp:g.edgePP,reasons:g.reasons,flag:g.flag,hits:g.hits,p_hr:g.pHr,kd:g.kd,kpm:g.kpm,hsp:g.hsp,bait:!!g.bait}:null});
 process.stdout.write(JSON.stringify({params:M.PARAMS,ctxp:ctx.P,aliases:M.TEAM_ALIASES,out:out}));
 """
 
@@ -21,7 +21,7 @@ process.stdout.write(JSON.stringify({params:M.PARAMS,ctxp:ctx.P,aliases:M.TEAM_A
 def main():
     d = load_players("players.json")
     bad = 0
-    for extra in (None, {"w_line": 0.0}, {"w_line": 0.5}):
+    for extra in (None, {"w_line": 0.0}, {"w_line": 0.5}, {"lan_data": 0}, {"lan_k": 0.5, "lan_adr_min": 1}):
         bad += run(d, extra)
     if os.path.exists(MOCK):
         for extra in (None, {"w_line": 0.0}, {"w_line": 0.0, "w_rank": 1.0, "w_maps": 1.0, "rank_s": 2.0}):
@@ -61,6 +61,9 @@ def run(d, extra, strength=None):
         opp = rnd.choice([l.get("opp") for l in p["logs"]] or [""])
         cases.append({"i": i, "st": st, "line": rnd.choice([12.5, 15.5, 27.5, 30.0, 32.5]), "opp": opp, "team": p.get("team"),
                       "book": rnd.choice(["PrizePicks", "Underdog", ""]), "odds": rnd.choice([None, -112, -137, 105]), "before": "9999"})
+    for c in cases:   # LAN data: Python decides the match type (no games.json), JS must agree and grade with it
+        c["start"] = c["before"] if c["before"] != "9999" else "2026-11-20"
+        c["ev"] = G.match_ev(c["team"], c["opp"], c["start"], games=[])[0]
     if extra:
         cases[0]["params"] = extra
     env = dict(os.environ, STRENGTH=strength or "")
@@ -73,7 +76,9 @@ def run(d, extra, strength=None):
         print("TEAM_ALIASES differ"); bad += 1
     for c, j in zip(cases, js["out"]):
         p = d["players"][c["i"]]
-        g = G.grade(p, c["st"], c["line"], c["opp"], c["team"], c["book"], c["odds"], c["before"])
+        g = G.grade(p, c["st"], c["line"], c["opp"], c["team"], c["book"], c["odds"], c["before"], ev=c["ev"])
+        if j is not None and j["mev"][0] != c["ev"]:
+            bad += 1; print("match_ev differs", c, j["mev"]); continue
         if (g is None) != (j is None):
             bad += 1; print("one side None", c, g, j); continue
         if g is None:
@@ -86,7 +91,8 @@ def run(d, extra, strength=None):
             bad += 1
             if bad < 10:
                 print("MISMATCH", c, {k: g[k] for k in ("mu_model", "p_over", "grade", "pick", "reasons", "hits", "p_hr", "bait")}, j)
-    print("parity (strength %s, param overrides %s): %d cases, %d mismatches, grades %s" % (strength or "none", extra, len(cases), bad,
+    print("parity (strength %s, param overrides %s): %d cases, %d mismatches, LAN-data grades %d, grades %s" % (strength or "none", extra, len(cases), bad,
+          sum(1 for j in js["out"] if j and j["lan"]),
           dict(__import__("collections").Counter(j["grade"] for j in js["out"] if j))))
     return bad
 
