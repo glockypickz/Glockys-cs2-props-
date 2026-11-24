@@ -1,0 +1,42 @@
+{
+  "fit_cutoff": "2026-10-20",
+  "model": "v1t",
+  "lock_window": [
+    "2026-11-13",
+    "2026-11-22"
+  ],
+  "calib": {
+    "kills": {
+      "Maps 1-2": {
+        "dist": "norm",
+        "bias": 0.003,
+        "scale": 8.248,
+        "n": 34164,
+        "brier_early": 0.24313
+      },
+      "Map 1": {
+        "dist": "norm",
+        "bias": 0.032,
+        "scale": 5.694,
+        "n": 38520,
+        "brier_early": 0.2352
+      }
+    },
+    "hs": {
+      "Maps 1-2": {
+        "dist": "norm",
+        "bias": 0.056,
+        "scale": 5.158,
+        "n": 34164,
+        "brier_early": 0.23311
+      },
+      "Map 1": {
+        "dist": "norm",
+        "bias": 0.041,
+        "scale": 3.56,
+        "n": 38520,
+        "brier_early": 0.2164
+      }
+    }
+  }
+}

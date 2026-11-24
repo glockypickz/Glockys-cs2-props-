@@ -179,8 +179,9 @@ def _lock(gr, e, now, regrade=False):
             o = e["lock"] if regrade else None
             e["lock"] = {"line": float(e["line"]), "proj": g["proj"], "grade": g["grade"], "pick": g["pick"],
                          "p_over": g["p_over"], "p_pick": g["p_pick"], "be": g["be"], "edge_pp": g["edge_pp"],
+                         "stake": g.get("stake"),
                          "reasons": g["reasons"], "flag": g.get("flag", ""), "model": g["model"], "odds": e.get("odds"),
-                         "hits": g.get("hits"),   # [over, series] vs this line: l5 / l10 / l20 / szn / h2h (single props only)
+                         "hits": g.get("hits"),   # [hits, series] on the chosen side vs this line: l5 / l10 / l20 / szn / h2h
                          "at": now.isoformat(timespec="seconds"), "stats_updated": STATS_STAMP}
             if ev:
                 e["lock"]["ev"] = ev   # match type the grade used: "lan" = LAN data inputs (when lan_data is on)
