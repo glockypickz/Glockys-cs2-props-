@@ -189,7 +189,12 @@ def _lock(gr, e, now, regrade=False):
                          "p_over": g["p_over"], "p_pick": g["p_pick"], "be": g["be"], "edge_pp": g["edge_pp"],
                          "reasons": g["reasons"], "flag": g.get("flag", ""), "model": g["model"], "odds": e.get("odds"),
                          "hits": g.get("hits"),   # [over, series] vs this line: l5 / l10 / l20 / szn / h2h (single props only)
+                         "stake": g.get("stake"),
                          "at": now.isoformat(timespec="seconds"), "stats_updated": STATS_STAMP}
+            cap = g.get("grade_cap") or {}
+            if cap.get("applied"):
+                e["lock"]["cap"] = cap.get("reason")
+                e["lock"]["pre_grade"] = cap.get("pre_grade")
             if ev:
                 e["lock"]["ev"] = ev   # match type the grade used: "lan" = LAN data inputs (when lan_data is on)
                 e["lock"]["ev_src"] = ev_src
