@@ -38,8 +38,10 @@ function utcDay(d) {
 }
 
 function whoKey(who, request) {
-  if (who && who.user) return "u:" + who.user;
+  // Admin accounts also have who.user; check admin first so they share the
+  // admin cooldown key and are not billed as a regular user.
   if (who && who.admin) return "admin";
+  if (who && who.user) return "u:" + who.user;
   return "ip:" + clientIp(request);
 }
 
@@ -49,19 +51,27 @@ function sameOrigin(request, url) {
   return true;
 }
 
-async function rateLimit(env, key) {
+async function checkRateLimit(env, who, request) {
+  const key = whoKey(who, request);
   const now = Date.now();
   const prev = lastHit.get(key) || 0;
   if (now - prev < COOLDOWN_MS) return { ok: false, retry: true, msg: "Please wait a moment before uploading again." };
   lastHit.set(key, now);
+  if (who && who.admin) return { ok: true, unlimited: true };
   if (!env || !env.BETA || typeof env.BETA.get !== "function") return { ok: true };
   const day = utcDay();
   const kvKey = "slip:day:" + day + ":" + key;
   let n = 0;
   try { n = parseInt((await env.BETA.get(kvKey)) || "0", 10) || 0; } catch (e) { n = 0; }
   if (n >= USER_DAILY) return { ok: false, daily: true, msg: "You've reached today's slip limit (10). Try again tomorrow." };
-  try { await env.BETA.put(kvKey, String(n + 1), { expirationTtl: 172800 }); } catch (e) {}
-  return { ok: true, left: USER_DAILY - n - 1 };
+  return { ok: true, kvKey, n, left: USER_DAILY - n };
+}
+
+async function consumeRateLimit(env, rl) {
+  if (!rl || !rl.kvKey || rl.n == null || !env || !env.BETA || typeof env.BETA.put !== "function") return rl;
+  try { await env.BETA.put(rl.kvKey, String(rl.n + 1), { expirationTtl: 172800 }); } catch (e) {}
+  rl.left = USER_DAILY - rl.n - 1;
+  return rl;
 }
 
 function sniffMime(bytes, hinted) {
@@ -334,7 +344,7 @@ export async function handleSlip(request, env, url, keyHash) {
 
   if (!hasWorkersAi(env) && !hasGeminiKey(env)) return json({ error: SETUP_MSG, setup: false }, 503);
 
-  const rl = await rateLimit(env, whoKey(who, request));
+  const rl = await checkRateLimit(env, who, request);
   if (!rl.ok) return json({ error: rl.msg }, 429);
 
   const img = await readImage(request);
@@ -458,6 +468,7 @@ export async function handleSlip(request, env, url, keyHash) {
     }), 422);
   }
 
+  await consumeRateLimit(env, rl);
   return json(withAdminDetail({
     readable: true,
     cs2: extracted.cs2,

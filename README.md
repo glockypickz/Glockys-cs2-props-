@@ -109,7 +109,7 @@ Ask Glocky stays dark until a Gemini API key is stored as a **Worker secret** na
    - In the Cloudflare dashboard: Workers & Pages → `glockys-cs2-props` → Settings → Variables and Secrets → Add a **Secret** named `GEMINI_API_KEY`.
 3. Deploy once after the secret is in place (a push to `main` auto-deploys). Until the secret is set, signed-in users see "Ask Glocky isn't set up yet."
 
-The default model is `gemini-3.8-flash`. Retired names such as `gemini-2.5-flash` are mapped to that default. To use another Flash model, set a plain Worker variable `GEMINI_MODEL` (not a secret). If a model returns 404 NOT_FOUND, or stays busy (503/429/500/504) after two short retries, the Worker tries `gemini-3.8-flash`, then `gemini-3.5-flash-lite`, then `gemini-3.6-flash`. Google's free-tier limits and terms apply (free prompts may be used to improve their models). The Worker also caps each signed-in user at 20 questions per UTC day.
+The default model is `gemini-3.8-flash`. Retired names such as `gemini-2.5-flash` are mapped to that default. To use another Flash model, set a plain Worker variable `GEMINI_MODEL` (not a secret). If a model returns 404 NOT_FOUND, or stays busy (503/429/500/504) after two short retries, the Worker tries `gemini-3.8-flash`, then `gemini-3.5-flash-lite`, then `gemini-3.6-flash`. Google's free-tier limits and terms apply (free prompts may be used to improve their models). The Worker also caps each signed-in customer at 20 questions per UTC day. Admin accounts are not capped. A question that fails before we can answer (for example a data-load error) does not count.
 
 Tests: `node --test tests/test_ask_lookup.mjs tests/test_ask_ai.mjs tests/test_worker_no_eval.mjs`.
 
@@ -120,7 +120,7 @@ Signed-in users (when the beta gate is on) can upload a PrizePicks or Underdog C
 
 The slip reader uses **Workers AI** first (`@cf/meta/llama-4-scout-17b-16e-instruct`, a current vision-capable model on the free Neuron allocation). The `AI` binding is declared in `wrangler.jsonc` and is created on deploy. If Workers AI errors, returns empty text, or returns text that is not JSON, the existing Gemini chain is used as fallback (same `GEMINI_API_KEY` as Ask Glocky). Ask Glocky itself stays on Gemini. The vision payload (base64 data URL) is dropped before `players.json` is parsed so the two are not held together in the Worker's 128 MB isolate; the image is never converted to a `number[]`. If data still fails to load, admins see the real reason in `detail`. Official Cloudflare docs do not require a one-time Meta `"agree"` request for Llama 4 Scout (that step is only documented for Llama 3.2 11B Vision).
 
-Limits: PNG, JPG, or WebP, up to 5 MB; 10 slips per signed-in user per UTC day, plus a short cooldown. The reader needs the Workers AI binding, or the Gemini secret as fallback. Until one of those is in place, it says it isn't set up yet.
+Limits: PNG, JPG, or WebP, up to 5 MB; 10 slips per signed-in customer per UTC day, plus a short cooldown. Admin accounts are not capped. Failed reads (the model never extracts a slip, or we return an error) do not count toward the cap. The reader needs the Workers AI binding, or the Gemini secret as fallback. Until one of those is in place, it says it isn't set up yet.
 
 Tests: `node --test tests/test_slip_reader.mjs tests/test_slip_ai.mjs tests/test_worker_no_eval.mjs`.
 
