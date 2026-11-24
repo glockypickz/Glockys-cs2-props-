@@ -7,7 +7,8 @@
  *    If a game has no Maps 1-2 lines and has Map 1 lines -> those Map 1 lines (1-map grades)
  *    Neither -> the game is not shown
  *  Applies to the Lines tab, slip auto-grading, and graded lines lists.
- *  The Lines tab can filter Map 1-only games vs Maps 1-2 games when both exist.
+ *  The Lines tab board does not use that rule. It keeps every line and, when both kinds are up for the selected
+ *  day and book, shows an All / Maps 1-2 / Map 1 filter (periodChoice / periodFilter below). The default view is Maps 1-2.
  *  Games with no PrizePicks or Underdog (or manual) lines are not listed on Lines or Games.
  *  The Grader tab manual period selector is separate and can still grade Map 1.
  */
@@ -67,10 +68,36 @@
     if (!g || !keys) return false;
     return !!keys[gameKey({ team: g.team1, opponent: g.team2, start: g.start || g.starts_at }, tnFn, dayFn)];
   }
+  /** mode: "all" | "12" (Maps 1-2) | "m1" (Map 1). Anything else counts as "all". */
+  function periodMatches(l, mode) {
+    if (mode === "12") return isMaps12(l);
+    if (mode === "m1") return isMap1(l);
+    return true;
+  }
+  function periodFilter(rows, mode) {
+    return (rows || []).filter(function (l) { return periodMatches(l, mode); });
+  }
+  /** Lines tab filter state for the rows of the selected day and book (every line, no either/or rule applied).
+   *  show: both kinds are up, so the filter is shown. mode: what to show now. n: row counts per button.
+   *  `chosen` is the saved click ("all", "12", "m1" or nothing). Nothing chosen means Maps 1-2, as before.
+   *  With only one kind up there is nothing to filter, so mode is "all". */
+  function periodChoice(rows, chosen) {
+    var n = { "12": 0, m1: 0, all: 0 };
+    (rows || []).forEach(function (l) {
+      if (isMaps12(l)) n["12"]++;
+      else if (isMap1(l)) n.m1++;
+      else return;
+      n.all++;
+    });
+    var show = n["12"] > 0 && n.m1 > 0;
+    var mode = chosen === "all" || chosen === "m1" || chosen === "12" ? chosen : "12";
+    return { show: show, mode: show ? mode : "all", n: n };
+  }
   var api = {
     periodOf: periodOf, isMap1: isMap1, isMaps12: isMaps12, isAcceptedPeriod: isAcceptedPeriod,
     isPpUd: isPpUd, gameKey: gameKey, linesTabLines: linesTabLines,
-    listedGameKeys: listedGameKeys, gameIsListed: gameIsListed
+    listedGameKeys: listedGameKeys, gameIsListed: gameIsListed,
+    periodMatches: periodMatches, periodFilter: periodFilter, periodChoice: periodChoice
   };
   if (typeof module !== "undefined" && module.exports) module.exports = api;
   else root.GPMap1 = api;
