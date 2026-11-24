@@ -2,7 +2,7 @@
 // extracts picks from the uploaded image. All grades come from our grader. The API key
 // is a Worker secret and must never be logged, returned, or shown. Images are not stored.
 import { identify, gateState } from "./beta_auth.js";
-import { hasGeminiKey, geminiModel, geminiRequest, loadStore } from "./ask_ai.js";
+import { hasGeminiKey, geminiModel, geminiRequest, loadStore, formatGeminiDetail, sanitizeDetail } from "./ask_ai.js";
 import { parseExtracted, parseGeminiJson, matchPick, gradePicks, summarizeSlip } from "./slip_reader.js";
 
 const USER_DAILY = 10;
@@ -190,6 +190,7 @@ export async function handleSlip(request, env, url, keyHash) {
   const img = await readImage(request);
   if (img.error) return json({ error: img.error }, 400);
 
+  const imageBytes = img.bytes ? img.bytes.length : 0;
   const b64 = bytesToB64(img.bytes);
   const mime = img.mime;
   // Drop the raw bytes before calling Gemini. loadStore is deferred until
@@ -206,12 +207,31 @@ export async function handleSlip(request, env, url, keyHash) {
     temperature: 0,
     maxOutputTokens: 4096,
     responseMimeType: "application/json",
-    thinkingBudget: 0
+    thinkingBudget: 0,
+    // Sportsbook slips can trip default image filters; this is the user's own
+    // screenshot, and we only extract visible player-prop fields.
+    safetySettings: [
+      { category: "HARM_CATEGORY_HARASSMENT", threshold: "BLOCK_NONE" },
+      { category: "HARM_CATEGORY_HATE_SPEECH", threshold: "BLOCK_NONE" },
+      { category: "HARM_CATEGORY_SEXUALLY_EXPLICIT", threshold: "BLOCK_NONE" },
+      { category: "HARM_CATEGORY_DANGEROUS_CONTENT", threshold: "BLOCK_NONE" }
+    ]
   });
 
-  if (!g.ok) return json({ error: "Glocky couldn't read that slip just now. Try again in a moment." }, 502);
+  if (!g.ok) {
+    const payload = { error: "Glocky couldn't read that slip just now. Try again in a moment." };
+    if (who && who.admin) payload.detail = sanitizeDetail(formatGeminiDetail(Object.assign({ imageBytes: imageBytes, mime: mime }, g)), env.GEMINI_API_KEY);
+    return json(payload, 502);
+  }
   const parsed = parseGeminiJson(g.text);
-  if (!parsed) return json({ error: "We couldn't read that image. Try a clearer screenshot of a CS2 slip." }, 422);
+  if (!parsed) {
+    const payload = { error: "We couldn't read that image. Try a clearer screenshot of a CS2 slip." };
+    if (who && who.admin) {
+      const snippet = g.text ? String(g.text).slice(0, 80) : "";
+      payload.detail = sanitizeDetail("parse error: model text was not JSON" + (snippet ? " (" + snippet + ")" : ""), env.GEMINI_API_KEY);
+    }
+    return json(payload, 422);
+  }
 
   const extracted = parseExtracted(parsed);
   if (!extracted.readable) {

@@ -524,6 +524,7 @@ function slipApplyRead(d){
  slipUI.step=slipUI.picks.length?'review':'error';
  if(!slipUI.picks.length&&!slipUI.error)slipUI.error=(d&&d.error)||'We couldn\'t find any CS2 kills or headshots picks on that slip.';
 }
+function slipErrText(d,fallback){var e=(d&&d.error)||fallback||'Something went wrong.';if(d&&d.detail)e+=' — '+d.detail;return e;}
 function prepareSlipImage(file, cb){
  var typ=String(file.type||'').toLowerCase();
  var ok=typ==='image/png'||typ==='image/jpeg'||typ==='image/jpg'||typ==='image/webp'||typ==='image/heic'||typ==='image/heif'||/\.(png|jpe?g|webp|heic|heif)$/i.test(file.name||'');
@@ -573,10 +574,10 @@ function slipReadFile(file){
    .then(function(x){
      slipUI.busy=false;
      if(x.status===401){slipUI.error='Please sign in to use the slip reader.';slipUI.step='error'}
-     else if(x.status===503&&x.d&&x.d.error){slipUI.error=x.d.error;slipUI.step='error'}
-     else if(x.status===429&&x.d&&x.d.error){slipUI.error=x.d.error;slipUI.step='error'}
+     else if(x.status===503&&x.d&&x.d.error){slipUI.error=slipErrText(x.d);slipUI.step='error'}
+     else if(x.status===429&&x.d&&x.d.error){slipUI.error=slipErrText(x.d);slipUI.step='error'}
      else if(x.ok&&x.d&&x.d.picks&&x.d.picks.length){slipApplyRead(x.d);toast('Check the picks, then grade the slip')}
-     else{slipUI.error=(x.d&&x.d.error)||'We couldn\'t read that image. Try a clearer screenshot of a CS2 slip.';slipUI.step='error';if(x.d)slipApplyRead(x.d)}
+     else{slipUI.error=slipErrText(x.d,'We couldn\'t read that image. Try a clearer screenshot of a CS2 slip.');slipUI.step='error';if(x.d)slipApplyRead(x.d)}
      render();var el=$('slipreader');if(el)el.scrollIntoView({block:'start'})
    })
    .catch(function(){slipUI.busy=false;slipUI.step='error';slipUI.error='Could not reach Glocky. Check your connection and try again.';render()});
@@ -905,12 +906,12 @@ function chatSlipFile(file){
    .then(function(x){
      var a;
      if(x.status===401)a='Please sign in to use the slip reader.';
-     else if(x.d&&x.d.error&&!(x.ok&&x.d.picks&&x.d.picks.length))a=x.d.error;
+     else if(x.d&&x.d.error&&!(x.ok&&x.d.picks&&x.d.picks.length))a=slipErrText(x.d);
      else if(x.ok&&x.d&&x.d.picks&&x.d.picks.length){
        slipApplyRead(x.d);
        var lines=x.d.picks.map(function(p){return (p.player||'?')+' '+(p.side||'')+' '+(p.line!=null?p.line:'')+' '+(p.stat==='hs'?'headshots':'kills')+' '+(p.period||'')});
        a='I found '+x.d.picks.length+' pick'+(x.d.picks.length===1?'':'s')+' on this slip:\n'+lines.join('\n')+'\n\nYou can fix any misreads on the Grader tab, then grade the slip.';
-     }else a=(x.d&&x.d.error)||'We couldn\'t read that image. Try a clearer screenshot of a CS2 slip.';
+     }else a=slipErrText(x.d,'We couldn\'t read that image. Try a clearer screenshot of a CS2 slip.');
      fillAssistant(wait,String(a).replace(/^\s*glocky says[:\-\s]*/i,''),null);
      if(x.ok&&x.d&&x.d.picks&&x.d.picks.length){
        var btn=document.createElement('button');btn.type='button';btn.className='b';btn.setAttribute('data-act','slipto');btn.textContent='Review on Grader';
