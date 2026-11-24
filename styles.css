@@ -234,3 +234,40 @@ header img{filter:drop-shadow(0 0 10px rgba(0,255,102,.35));animation:gpglow 3.5
 .ins-leg>span{display:inline-flex;align-items:center;gap:7px}
 .ins-leg .ins-dot{margin-top:0}
 @media(max-width:500px){.ins-why-title{font-size:15px}.ins-list li{font-size:13px}}
+
+
+/* 1T-style grade cards (Lines, Grader, Slip) */
+.t1-legend{margin-top:6px;display:flex;flex-wrap:wrap;align-items:center;gap:6px}
+.t1-legend .hb{min-width:auto;padding:2px 7px;flex-direction:row;gap:0}
+.t1-wrap{padding:10px 0;border-bottom:1px solid var(--line)}
+.t1-wrap:last-child{border:0}
+.t1-acts{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-top:8px}
+.t1-acts button{margin-top:0}
+.t1card{border:1px solid rgba(0,255,102,.28);border-radius:14px;padding:12px 14px;background:rgba(8,12,10,.72)}
+.t1card.under{border-color:rgba(255,77,109,.35)}
+.t1-main{display:flex;justify-content:space-between;gap:12px;align-items:flex-start}
+.t1-left{min-width:0;flex:1}
+.t1-right{text-align:right;flex:0 0 auto;min-width:124px}
+.t1-who{font-size:13px;color:var(--silver);margin-bottom:2px}
+.t1-who b{color:#fff;font-size:16px;margin-right:4px}
+.t1-line{font-size:14px;margin:2px 0 6px}
+.t1-line b{font-size:22px;font-weight:900;margin-right:6px}
+.t1-est{font-size:15px;font-weight:800;color:var(--green);white-space:nowrap}
+.t1card.under .t1-est{color:var(--red)}
+.t1-est b{font-size:22px}
+.t1-arr{font-size:12px;margin-right:2px}
+.t1-gs{display:flex;align-items:center;justify-content:flex-end;gap:8px;margin:6px 0 2px;font-weight:700;color:var(--silver)}
+.t1-box{display:inline-block;min-width:42px;padding:3px 8px;border:1.5px solid var(--green);border-radius:8px;font:800 16px/1.1 system-ui;color:var(--green);text-align:center}
+.t1-box.mid{border-color:var(--amber);color:var(--amber)}
+.t1-box.low{border-color:var(--red);color:var(--red)}
+.t1-edge{font-size:13px;color:var(--silver)}
+.t1-foot{display:flex;justify-content:space-between;gap:8px;margin-top:8px;padding-top:8px;border-top:1px solid var(--line);color:var(--muted);font-size:12px}
+.t1card .hbs{margin-top:4px}
+.hb.hi{border-color:#4da3ff;color:#4da3ff}
+.hb.eq{border-color:#6b7280;color:#c8cdd2}
+.hb.lo{border-color:var(--red);color:var(--red)}
+@media(max-width:520px){
+  .t1-main{flex-direction:column;gap:8px}
+  .t1-right{text-align:left;min-width:0}
+  .t1-gs{justify-content:flex-start}
+}

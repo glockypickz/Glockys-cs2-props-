@@ -3,21 +3,26 @@
 Python copy of model.js (the site uses model.js). Keep the two in step: parity_check.py compares them.
 Uses players.json (per-map logs + ranks) and, when present, team_strength.json (Cito-derived, see cito_update.py). No network.
 
-How a prop is graded (active grader for new locks)
-  1. v1 projection, same as grader_legacy.py: 35% last 10 Maps 1-2 series, 20% all logged series,
-     20% head-to-head vs the opponent (from the first meeting), 15% vs teams of the same rank tier
-     (ordinal ranks from players.json at grade time), 10% last 3 series. Missing pieces are dropped
-     and the rest are renormalized. Then a small ADR form adjustment (capped at 5%).
-     Only series dated strictly before `before` (the match day when provided) are used.
-  2. Letter from the projection edge pct = (proj - line) / line, live v1 cutoffs (no shadow shift):
-       A+ = pct >= +0.15, B >= +0.05, C >= -0.02, D >= -0.10, else F.
-       Pick = OVER if proj >= line, else UNDER. No plain A, no E, no hit-rate letter override.
-  3. v2 Under break-even rule (does not change the pick): when the v1 pick is Under and the v1 letter
-     is D or F, compute a negative-binomial P(under) from the 1-decimal projection blended 0.7 toward
-     the line (the shipped w_line), vs break-even from stored odds or the book default.
-     F if P(under) - BE >= +3pp (grade_f); else D.
-  4. Filters and the bait flag are display-only; they do not change the letter or pick.
-  Already-locked props keep the letter stored on the lock; this path is for new grades only.
+How a prop is graded (active grader for new locks, model v1t)
+  1. v1 projection, unchanged weights: 35% last 10, 20% all logged series (season, always a
+     non-zero weight), 20% head-to-head (from the first meeting), 15% same rank tier, 10% last 3,
+     then a small ADR form adjustment (capped at 5%). Map 1 props use a 1-map projection. LAN
+     matches use the merged LAN-data rule. Only series dated strictly before `before` are used.
+  2. Side probability from a calibrated residual distribution, fit per stat and period (kills /
+     headshots, Maps 1-2 / Map 1) on walk-forward series dated before 2026-10-20 (no look-ahead).
+     actual ~ Normal or Laplace (chosen on that early slice) with mean = proj + bias, scale as fit.
+     Integer lines use a continuity correction: P(push) = F(line+0.5) - F(line-0.5); P(over) and
+     P(under) are then conditioned on no push. .5 lines have P(push) = 0.
+  3. Pick is the side with the higher no-push probability (proj vs line on a tie).
+     Edge pts = (P(side) - book break-even) * 100. Break-even is the implied probability from
+     stored American odds when present, else PrizePicks 57.7% / Underdog 53%, else 57.7%.
+  4. Letter and stake units from that edge (same scale on Over and Under):
+       A+ >= +18 pts (2U), A >= +15 (1.5U), B+ >= +12 (1U), B >= +8 (1U),
+       C+ >= +5 (0.5U), C >= +2 (0.25U), D >= 0 (0U), F below break-even (0U).
+     Auto slips use A+ / A / B+ / B with no filter flag.
+  5. Filters and the bait flag are display-only; they do not change the letter or pick.
+  Already-locked props keep the letter stored on the lock (REGRADE_TAG is not bumped). This path
+  is for new grades only. Track Record keeps the old stored letters.
 """
 import re, math, bisect
 
@@ -91,7 +96,34 @@ PARAMS = {"m": 100, "half_life": 8, "n_max": 200, "m_team": 1500, "elo_k": 16, "
 # as locked v2 picks pile up and lower w_line (here AND in model.js) only if the holdout supports it.
 BOOK_BE = {"prizepicks": 0.577, "underdog": 0.53}   # break-even per pick when no odds are stored
 DEFAULT_BE = 0.577                                  # unknown book / manual line: assume PrizePicks
-MODEL_VERSION = "v1be"
+MODEL_VERSION = "v1t"
+
+# Calibrated residual of (actual - v1 projection). Fit on walk-forward series dated before
+# FIT_CUTOFF (2026-10-20) only; see calib_fit.py. Keys are (stat, period). "scale" is the Normal
+# stddev or the Laplace scale b. Combo props use bias * n and scale * sqrt(n).
+FIT_CUTOFF = "2026-10-20"
+CALIB = {
+    "kills": {
+        "Maps 1-2": {"dist": "norm", "bias": 0.003, "scale": 8.248},
+        "Map 1":    {"dist": "norm", "bias": 0.032, "scale": 5.694},
+    },
+    "hs": {
+        "Maps 1-2": {"dist": "norm", "bias": 0.056, "scale": 5.158},
+        "Map 1":    {"dist": "norm", "bias": 0.041, "scale": 3.56},
+    },
+}
+# (min edge pts, letter, stake units). First match wins. F is anything below 0 (below break-even).
+# The 1T Scout example (Over 66.5% vs Underdog 53% => about +13.5 pts) is a B+ 1U play.
+GRADE_SCALE = (
+    (18, "A+", 2.0),
+    (15, "A",  1.5),
+    (12, "B+", 1.0),
+    (8,  "B",  1.0),
+    (5,  "C+", 0.5),
+    (2,  "C",  0.25),
+    (0,  "D",  0.0),
+)
+
 H2H_EXTRA_LIVE = True   # live v1 blend also sees the older meetings in h2h.json (owner, Nov 19). Set False to go back to players.json logs only.
 
 ALIASES = {"4Z": "EP.-4Z", "Ag1l": "agl"}
@@ -118,6 +150,81 @@ def period_of(val, default=PERIOD_12):
 
 def is_map1(val):
     return period_of(val) == PERIOD_MAP1
+
+
+# Abramowitz & Stegun 7.1.26, same coefficients in model.js (parity).
+_ERF_P = 0.3275911
+_ERF_A = (0.254829592, -0.284496736, 1.421413741, -1.453152027, 1.061405429)
+
+
+def erf_as(x):
+    sign = 1.0 if x >= 0 else -1.0
+    ax = abs(float(x))
+    t = 1.0 / (1.0 + _ERF_P * ax)
+    a = t * (_ERF_A[0] + t * (_ERF_A[1] + t * (_ERF_A[2] + t * (_ERF_A[3] + t * _ERF_A[4]))))
+    return sign * (1.0 - a * math.exp(-ax * ax))
+
+
+def norm_cdf(z):
+    return 0.5 * (1.0 + erf_as(z / math.sqrt(2.0)))
+
+
+def laplace_cdf(z):
+    """CDF of a Laplace(0, 1) at z (z = (x-mean)/scale)."""
+    return 0.5 * math.exp(z) if z < 0 else 1.0 - 0.5 * math.exp(-z)
+
+
+def calib_of(st, period=None):
+    per = period_of(period)
+    block = CALIB.get(st) or CALIB["kills"]
+    return dict(block.get(per) or block["Maps 1-2"])
+
+
+def residual_probs(proj, line, st, period=None, n_players=1, calib=None):
+    """P(over), P(push), P(under) from the calibrated residual, then over/under conditioned on no push.
+
+    Integer lines use a continuity correction so P(push) = P(line-0.5 < X < line+0.5).
+    .5 (or other non-integer) lines have P(push) = 0. n_players scales a combo sum.
+    """
+    c = calib if calib is not None else calib_of(st, period)
+    n = max(int(n_players or 1), 1)
+    mean = float(proj) + float(c.get("bias") or 0.0) * n
+    scale = float(c.get("scale") or 0.0) * math.sqrt(n)
+    dist = c.get("dist") or "norm"
+
+    def F(x):
+        if scale <= 1e-12:
+            return 0.0 if x < mean else 1.0 if x > mean else 0.5
+        z = (float(x) - mean) / scale
+        return norm_cdf(z) if dist != "laplace" else laplace_cdf(z)
+
+    line = float(line)
+    if abs(line - round(line)) < 1e-9:
+        lo, hi = line - 0.5, line + 0.5
+        p_push = max(0.0, F(hi) - F(lo))
+        p_over = max(0.0, 1.0 - F(hi))
+        p_under = max(0.0, F(lo))
+    else:
+        p_push = 0.0
+        p_over = max(0.0, 1.0 - F(line))
+        p_under = max(0.0, F(line))
+    s = p_over + p_push + p_under
+    if s > 0:
+        p_over, p_push, p_under = p_over / s, p_push / s, p_under / s
+    nopush = max(1e-12, 1.0 - p_push)
+    return p_over / nopush, p_push, p_under / nopush
+
+
+def letter_from_edge(epp):
+    """Letter and stake units from edge pts = (P(side) - break-even) * 100."""
+    try:
+        e = float(epp)
+    except (TypeError, ValueError):
+        return "F", 0.0
+    for lo, letter, stake in GRADE_SCALE:
+        if e >= lo:
+            return letter, stake
+    return "F", 0.0
 
 
 def hist_key(e, start=None):
@@ -863,14 +970,18 @@ class Grader:
         out["kd_s"] = (K + self.P["k_kd"]) / (D + self.P["k_kd"]) if sz else None
         return out
 
-    def hitrates(self, p, st, line, opp=None, before="9999", period=None):
-        """Series that went OVER this exact line (equal = not over), only series dated before `before`.
-        l5 / l10 / l15 / l20 = last 5 / 10 / 15 / 20 (l5-l15: Players-tab research only, not graded); szn = this calendar year (the match's year, else the newest series' year);
-        h2h = vs this opponent. Each is [over, series]. p = decayed, shrunk hit rate used when w_hr > 0."""
+    def hitrates(self, p, st, line, opp=None, before="9999", period=None, side=None):
+        """Hits vs this exact line, only series dated before `before`.
+        Default side is OVER (actual > line; equal is not a hit). Pass side='UNDER' for actual < line
+        (the model's chosen side on Under cards). l5 / l10 / l15 / l20 = last 5 / 10 / 15 / 20;
+        szn = this calendar year; h2h = vs this opponent. Each is [hits, series].
+        p = decayed, shrunk OVER rate (unchanged; used only when w_hr > 0, shipped off)."""
         P = self.P
         cs = [c for c in self.series(p, period) if c["date"] < before and c.get(st) is not None]
         yr = str(before)[:4] if before != "9999" else (cs[0]["date"][:4] if cs else "")
-        hx = lambda rows: [sum(1 for c in rows if c[st] > line), len(rows)]
+        under = str(side or "").upper() == "UNDER"
+        pred = (lambda v: v < line) if under else (lambda v: v > line)
+        hx = lambda rows: [sum(1 for c in rows if pred(c[st])), len(rows)]
         out = {"l5": hx(cs[:5]), "l10": hx(cs[:10]), "l15": hx(cs[:15]), "l20": hx(cs[:20]),
                "szn": hx([c for c in cs if c["date"][:4] == yr]),
                "h2h": hx([c for c in self.h2h_series(p, opp, before, period=period) if c.get(st) is not None])}
@@ -1084,33 +1195,29 @@ class Grader:
         d = self.v1_project_parts(p, st, opp, before, period=period, ev=ev)
         return None if d is None else d["proj"]
 
-    def _v1_result(self, mu, line, st, book, odds, reasons=None):
-        """Shade the v1 projection, apply the Under break-even D/F rule, attach NB display fields."""
-        g, pick = v1_shade(mu, line)
-        if g is None:
+    def _v1_result(self, mu, line, st, book, odds, reasons=None, period=None, n_players=1):
+        """v1 projection + calibrated P(side), edge vs book break-even, letter and stake. New locks only."""
+        if line is None or (isinstance(line, float) and math.isnan(line)) or float(line) == 0:
             return None
-        pre_grade, pre_pick = g, pick
         proj = round1(mu)
-        g, pick, epp_u, be_u, pu_u = under_be_letter(g, pick, proj, line, st, book, odds, self.P)
+        po, p_push, pu = residual_probs(proj, float(line), st, period, n_players)
+        if abs(po - pu) < 1e-6:
+            pick = "OVER" if proj >= float(line) else "UNDER"
+        else:
+            pick = "OVER" if po > pu else "UNDER"
+        p_pick = po if pick == "OVER" else pu
+        be = break_even(book, odds)
+        epp = (p_pick - be) * 100
+        g, stake = letter_from_edge(epp)
         size = self.P["size_kills"] if st == "kills" else self.P["size_hs"]
         mu_f = blend_mean(proj, float(line), size, self.P["w_line"])
-        over, eq, under = nb_probs(mu_f, size, float(line))
-        nopush = max(1e-12, 1 - eq)
-        po, pu = over / nopush, under / nopush
-        be = break_even(book, odds)
-        if epp_u is not None:
-            epp, p_pick = epp_u, (pu_u if pu_u is not None else pu)
-            be = be_u if be_u is not None else be
-        else:
-            p_pick = max(po, pu)
-            epp = (p_pick - be) * 100
         reasons = list(reasons or [])
         return {"proj": proj, "mu_model": proj, "mu_blend": round(mu_f, 2), "edge": round(proj - float(line), 1),
-                "grade": g, "pick": pick,
-                "p_over": round(po, 4), "p_push": round(eq, 4), "p_pick": round(p_pick, 4), "be": round(be, 4),
+                "grade": g, "pick": pick, "stake": stake,
+                "p_over": round(po, 4), "p_push": round(p_push, 4), "p_pick": round(p_pick, 4), "be": round(be, 4),
                 "edge_pp": round(epp, 2), "reasons": reasons, "flag": "; ".join(reasons), "model": MODEL_VERSION,
                 "hr_blend": None, "hr_upgrade": None, "model_grade": g, "model_pick": pick,
-                "under_be": {"applied": epp_u is not None, "pu": pu_u, "be": be_u, "epp": epp_u, "pre_grade": pre_grade}}
+                "under_be": {"applied": False, "pu": None, "be": None, "epp": None, "pre_grade": None}}
 
     def grade(self, p, st, line, opp, team=None, book=None, odds=None, before="9999", period=None, ev=None):
         if line is None or (isinstance(line, float) and math.isnan(line)):
@@ -1120,12 +1227,12 @@ class Grader:
             return None
         n = len([c for c in self.series(p, period) if c["date"] < before])
         reasons = self.filters(p, team, n, before, period=period)
-        r = self._v1_result(det["proj"], float(line), st, book, odds, reasons)
+        r = self._v1_result(det["proj"], float(line), st, book, odds, reasons, period=period)
         if not r:
             return None
         r["v1"] = det
         r["period"] = period_of(period)
-        hits = self.hitrates(p, st, float(line), opp, before, period=period)
+        hits = self.hitrates(p, st, float(line), opp, before, period=period, side=r["pick"])
         r["hits"] = {k: hits[k] for k in ("l5", "l10", "l15", "l20", "szn", "h2h")}
         r["p_hr"] = round(hits["p"], 4)
         empty_kpm = {k: None for k in ("l5", "l10", "l15", "l20", "szn")}
@@ -1146,7 +1253,7 @@ class Grader:
         return r
 
     def grade_combo(self, name, team, st, line, opp, book=None, odds=None, before="9999", period=None, ev=None):
-        """Combo prop: sum of each player's v1 projection vs the combined line, then the same letters / Under rule."""
+        """Combo prop: sum of each player's v1 projection vs the combined line, then the same calibrated letter and stake (combo residual scale * sqrt(n))."""
         names = [n.strip() for n in str(name).split("+") if n.strip()]
         if len(names) < 2:
             return None
@@ -1162,7 +1269,7 @@ class Grader:
             nser = len([c for c in self.series(p, period) if c["date"] < before])
             nmin = min(nmin, nser)
             reasons += [n + ": " + x for x in self.filters(p, team, nser, before, period=period)]
-        r = self._v1_result(mu, float(line), st, book, odds, reasons)
+        r = self._v1_result(mu, float(line), st, book, odds, reasons, period=period, n_players=len(names))
         if not r:
             return None
         r["n"] = nmin
