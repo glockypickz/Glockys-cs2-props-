@@ -448,16 +448,50 @@ def mark_stale(reason, path=LINES_FILE, now=None):
     return data
 
 
+def unfiltered_groups(fetch_fn, book):
+    """Every CS2 group a book has, no market filter. Returns (groups, fetched_at).
+
+    KashRock's market filter answers "no_props_listed" for the Maps 1-2 markets even while those props are on the
+    board (the same filter works for Map 1, and the unfiltered feed carries the Maps 1-2 offers with the same
+    stat_type). So when a filtered call comes back empty we read the book's whole board once and pick offers by stat_type.
+    """
+    groups, offset, fetched = [], 0, None
+    for _ in range(MAX_PAGES):
+        d = fetch_fn("/v7/cs2/props", {"board": "dfs", "book": book, "limit": PAGE, "offset": offset})
+        if not d.get("available", True):
+            break
+        fetched = d.get("fetched_at") or fetched
+        page = d.get("groups") or []
+        groups.extend(page)
+        if not d.get("has_more") or not page:
+            break
+        offset += len(page)
+    return groups, fetched
+
+
 def collect_lines(fetch_fn=None):
     """Pull every market. Raises on HTTP / network failure. Returns (lines, fetched_at)."""
     fetch_fn = fetch_fn or fetch
     seen, lines, fetched = set(), [], None
     for book in BOOKS:
+        whole = None   # this book's unfiltered board, fetched at most once per run
         for market, (stat, period) in MARKETS.items():
             offset, kept = 0, 0
             for _ in range(MAX_PAGES):
                 d = fetch_fn("/v7/cs2/props", {"board": "dfs", "book": book, "market": market,
                                               "limit": PAGE, "offset": offset})
+                fetched = d.get("fetched_at") or fetched
+                if offset == 0 and (not d.get("available", True) or not (d.get("groups") or [])):
+                    reason = d.get("reason")
+                    if whole is None:
+                        whole = unfiltered_groups(fetch_fn, book)
+                        print(f"{book}: market filter empty for {market}, read the unfiltered board ({len(whole[0])} groups)")
+                    mine = [g for g in whole[0] if pick_offer(g, market)]
+                    if not mine:
+                        print(f"{book} {market}: not available ({reason})")
+                        break
+                    print(f"{book} {market}: {len(mine)} groups from the unfiltered board")
+                    d = {"available": True, "groups": mine, "has_more": False, "fetched_at": whole[1]}
                 if not d.get("available", True):
                     print(f"{book} {market}: not available ({d.get('reason')})")
                     break
