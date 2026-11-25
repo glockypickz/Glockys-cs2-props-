@@ -78,6 +78,14 @@ def dry_run():
     print("fetched_at:", fetched, "| total lines:", len(lines))
     for (book, stat, period), n in sorted(Counter((l["book"], l["stat"], l["period"]) for l in lines).items()):
         print(f"  {book:12} {stat:10} {period:12} {n}")
+    print("  Maps 1-2 by match (team vs opponent, starts_at: kills / headshots):")
+    by = {}
+    for l in lines:
+        if l["period"] == "Maps 1-2":
+            k = (l["book"], " vs ".join(sorted([l["team"] or "?", l["opponent"] or "?"])), l["starts_at"])
+            by.setdefault(k, Counter())[l["stat"]] += 1
+    for (book, m, st), c in sorted(by.items(), key=lambda kv: kv[0][2]):
+        print(f"    {book:10} {m:45} {st}  kills {c['Kills']} / hs {c['Headshots']}")
     for l in [x for x in lines if x["period"] == "Maps 1-2"][:3]:
         print("  sample Maps 1-2:", clean(json.dumps({k: l[k] for k in ("player", "team", "opponent", "stat", "line", "starts_at", "book")})))
 
