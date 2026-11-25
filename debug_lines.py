@@ -106,7 +106,20 @@ def survey():
 def main():
     if not KEY:
         sys.exit("KASHROCK_API_KEY is not set")
-    survey()
+    print("\n=== sample Maps 1+2 groups (unfiltered, offset 100)")
+    code, d = fetch("/v7/cs2/props", {"board": "dfs", "book": "prizepicks", "limit": 100, "offset": 100})
+    groups = (d.get("groups") if isinstance(d, dict) else None) or []
+    c = Counter()
+    sample = None
+    for g in groups:
+        for o in (g.get("dfs") or []):
+            c[(o.get("canonical_market_key"), o.get("stat_type"), o.get("market_type"), str(o.get("direction")), bool(o.get("is_alt_line")))] += 1
+            if sample is None and o.get("canonical_market_key") == "CS2_KILLS_MAPS_1_2":
+                sample = g
+    for k, v in c.most_common(30):
+        print(k, v)
+    print("group-level keys:", sorted([k for k in (groups[0].keys() if groups else [])]))
+    print("SAMPLE GROUP:", clean(json.dumps(sample)[:3500]))
     return
     show("prizepicks Maps 1-2 kills", {"board": "dfs", "book": "prizepicks", "market": "CS2_KILLS_MAPS_1_2", "limit": 5})
     show("prizepicks Maps 1-2 headshots", {"board": "dfs", "book": "prizepicks", "market": "CS2_HEADSHOTS_MAPS_1_2", "limit": 3}, samples=1)
