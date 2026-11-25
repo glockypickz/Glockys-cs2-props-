@@ -237,7 +237,7 @@ function isGradeQuestion(q, line) {
 
 // "Name on the lines": "name in the stats". Same table as ALIASES in app.js and grader.py (tests/test_ask_aliases.mjs
 // keeps the three equal). Matched on the letters and digits only, so "Koala" and "koala " work too.
-export const ALIASES = { "4Z": "EP.-4Z", "Ag1l": "agl", "koala": "koaLx" };
+export const ALIASES = { "4Z": "EP.-4Z", "Ag1l": "agl", "koala": "koaLx", "EmiliaQAQ": "Emilia-3-" };
 
 function aliasFor(name) {
   const GM = M();
