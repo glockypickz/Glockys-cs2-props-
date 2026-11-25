@@ -23,6 +23,9 @@ function playerNameKeys(name) {
   add(name);
   const core = String(name || "").split(/\s+[x×]\s+/i)[0].trim();
   if (core && core !== String(name || "").trim()) add(core);
+  // "Gafolo *Certto Telecom": a sponsor after " *" is not part of the name. ("NLG* s1n" has no space before the star, so it is left alone.)
+  const nosp = String(name || "").split(/\s+\*/)[0].trim();
+  if (nosp && nosp !== String(name || "").trim()) add(nosp);
   return keys;
 }
 
@@ -232,6 +235,17 @@ function isGradeQuestion(q, line) {
   return false;
 }
 
+// "Name on the lines": "name in the stats". Same table as ALIASES in app.js and grader.py (tests/test_ask_aliases.mjs
+// keeps the three equal). Matched on the letters and digits only, so "Koala" and "koala " work too.
+export const ALIASES = { "4Z": "EP.-4Z", "Ag1l": "agl", "koala": "koaLx" };
+
+function aliasFor(name) {
+  const GM = M();
+  const k = GM.norm(name);
+  for (const a of Object.keys(ALIASES)) if (GM.norm(a) === k) return ALIASES[a];
+  return null;
+}
+
 export function findPlayer(store, name, team) {
   const GM = M();
   const k = GM.norm(name);
@@ -241,6 +255,12 @@ export function findPlayer(store, name, team) {
   if (team) pool = pool.filter((p) => GM.teq(p.team, team));
   if (pool.length === 1) return hydratePlayer(store, pool[0]);
   if (pool.length > 1) return hydratePlayer(store, pickBest(pool));
+  const al = aliasFor(name);
+  if (al) {
+    let ap = ix.exact.get(GM.norm(al)) || [];
+    if (team) ap = ap.filter((p) => GM.teq(p.team, team));
+    if (ap.length) return hydratePlayer(store, pickBest(ap));
+  }
   if (k.length < 3) return null;
   const loose = [];
   for (const [nk, arr] of ix.exact) {
@@ -289,6 +309,13 @@ function playersInQuestion(store, q) {
   for (const [nk, arr] of store.index.exact) {
     if (nk.length < 3) continue;
     if (qn.includes(nk)) hits.push({ nk, arr, n: nk.length });
+  }
+  // A name that only exists as an alias ("koala" for "koaLx") is not an index key, so look for it here too.
+  for (const from of Object.keys(ALIASES)) {
+    const ak = GM.norm(from);
+    if (ak.length < 3 || !qn.includes(ak) || hits.some((h) => h.nk === ak)) continue;
+    const arr = store.index.exact.get(GM.norm(ALIASES[from]));
+    if (arr && arr.length) hits.push({ nk: ak, arr, n: ak.length });
   }
   hits.sort((a, b) => b.n - a.n);
   const picked = [];
