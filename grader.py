@@ -137,9 +137,9 @@ CAP_STAKE = 0.5
 
 H2H_EXTRA_LIVE = True   # live v1 blend also sees the older meetings in h2h.json (owner, Nov 19). Set False to go back to players.json logs only.
 
-ALIASES = {"4Z": "EP.-4Z", "Ag1l": "agl"}
+ALIASES = {"4Z": "EP.-4Z", "Ag1l": "agl", "koala": "koaLx"}
 # Book / bo3.gg team-name variants (keys and values are tn() keys). Same table in model.js.
-TEAM_ALIASES = {"betm33": "33", "wraithpcific": "pcific", "lowcortisolbr": "lowcortisol", "lifesagame": "lag"}
+TEAM_ALIASES = {"betm33": "33", "wraithpcific": "pcific", "lowcortisolbr": "lowcortisol", "lifesagame": "lag", "dendelecs": "dendele"}
 
 PERIOD_12 = "Maps 1-2"
 PERIOD_MAP1 = "Map 1"

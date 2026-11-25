@@ -91,7 +91,7 @@ function gamesAge(){var u=META.games_iso;if(!u||u.indexOf('T')<0)return null;var
 function rankOf(name){var k=norm(name);for(var t in RANK)if(norm(t)===k)return RANK[t];return null}
 // ---- player matching: exact name first, then safe fallbacks (so spelling differences between the lines feed and the stats still match)
 // ALIASES: add "name on the lines" : "name in the stats" for any player the automatic rules can't or shouldn't match.
-var ALIASES={"4Z":"EP.-4Z","Ag1l":"agl"};
+var ALIASES={"4Z":"EP.-4Z","Ag1l":"agl","koala":"koaLx"};
 function canon(s){var k=norm(s).replace(/0/g,'o').replace(/1/g,'i').replace(/3/g,'e').replace(/4/g,'a').replace(/5/g,'s').replace(/7/g,'t');return k.replace(/(.)\1+/g,'$1')}
 var IDX=null,IDXN=-1,FM={};
 function pIndex(){if(IDX&&IDXN===DB.length)return IDX;IDX={exact:{},canon:{}};IDXN=DB.length;FM={};
