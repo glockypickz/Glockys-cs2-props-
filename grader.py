@@ -137,7 +137,7 @@ CAP_STAKE = 0.5
 
 H2H_EXTRA_LIVE = True   # live v1 blend also sees the older meetings in h2h.json (owner, Nov 19). Set False to go back to players.json logs only.
 
-ALIASES = {"4Z": "EP.-4Z", "Ag1l": "agl", "koala": "koaLx"}
+ALIASES = {"4Z": "EP.-4Z", "Ag1l": "agl", "koala": "koaLx", "EmiliaQAQ": "Emilia-3-"}
 # Book / bo3.gg team-name variants (keys and values are tn() keys). Same table in model.js.
 TEAM_ALIASES = {"betm33": "33", "wraithpcific": "pcific", "lowcortisolbr": "lowcortisol", "lifesagame": "lag", "dendelecs": "dendele"}
 
@@ -562,7 +562,12 @@ def merge_cito(players, path="players_cito.json"):
         have.setdefault(canon(p["name"]), []).append(p.get("team"))
     out, n = list(players), 0
     for e in extra:
-        if not e.get("logs") or any(teq(t, e.get("team")) for t in have.get(canon(e["name"]), [])):
+        if not e.get("logs"):
+            continue
+        # a Cito player whose name is an alias of a players.json player is the same person, not a new one
+        # (otherwise its older copy would win the exact-name match over the up-to-date bo3.gg record)
+        keys = [canon(e["name"])] + ([canon(ALIASES[e["name"]])] if e["name"] in ALIASES else [])
+        if any(teq(t, e.get("team")) for k in keys for t in have.get(k, [])):
             continue
         out.append({"name": e["name"], "team": e.get("team"), "logs": e["logs"], "src": "cito"})
         n += 1
