@@ -70,9 +70,31 @@ def show(title, params, samples=2):
         print(clean(json.dumps(g)[:2500]))
 
 
+def dry_run():
+    """Run the real fetch (fetch_lines.collect_lines) and print what it would write. Writes nothing."""
+    import fetch_lines
+    lines, fetched = fetch_lines.collect_lines()
+    print("\n=== DRY RUN: lines the site would get (nothing written)")
+    print("fetched_at:", fetched, "| total lines:", len(lines))
+    for (book, stat, period), n in sorted(Counter((l["book"], l["stat"], l["period"]) for l in lines).items()):
+        print(f"  {book:12} {stat:10} {period:12} {n}")
+    print("  Maps 1-2 by match (team vs opponent, starts_at: kills / headshots):")
+    by = {}
+    for l in lines:
+        if l["period"] == "Maps 1-2":
+            k = (l["book"], " vs ".join(sorted([l["team"] or "?", l["opponent"] or "?"])), l["starts_at"])
+            by.setdefault(k, Counter())[l["stat"]] += 1
+    for (book, m, st), c in sorted(by.items(), key=lambda kv: kv[0][2]):
+        print(f"    {book:10} {m:45} {st}  kills {c['Kills']} / hs {c['Headshots']}")
+    for l in [x for x in lines if x["period"] == "Maps 1-2"][:3]:
+        print("  sample Maps 1-2:", clean(json.dumps({k: l[k] for k in ("player", "team", "opponent", "stat", "line", "starts_at", "book")})))
+
+
 def main():
     if not KEY:
         sys.exit("KASHROCK_API_KEY is not set")
+    if "--dry-run" in sys.argv:
+        return dry_run()
     show("prizepicks Maps 1-2 kills", {"board": "dfs", "book": "prizepicks", "market": "CS2_KILLS_MAPS_1_2", "limit": 5})
     show("prizepicks Maps 1-2 headshots", {"board": "dfs", "book": "prizepicks", "market": "CS2_HEADSHOTS_MAPS_1_2", "limit": 3}, samples=1)
     show("underdog Maps 1-2 kills", {"board": "dfs", "book": "underdog", "market": "CS2_KILLS_MAPS_1_2", "limit": 3}, samples=1)

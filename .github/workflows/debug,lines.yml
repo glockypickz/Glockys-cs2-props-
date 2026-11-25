@@ -15,4 +15,4 @@ jobs:
       - name: Ask KashRock what it has
         env:
           KASHROCK_API_KEY: ${{ secrets.KASHROCK_API_KEY }}
-        run: python debug_lines.py
+        run: python debug_lines.py --dry-run
