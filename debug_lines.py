@@ -70,9 +70,44 @@ def show(title, params, samples=2):
         print(clean(json.dumps(g)[:2500]))
 
 
+def survey():
+    """Read-only: every PrizePicks CS2 group by market (all pages), and who lists Maps 1-2 at all."""
+    print("\n=== survey: all prizepicks CS2 groups by market")
+    offset, tot = 0, Counter()
+    labels, periods = Counter(), Counter()
+    for _ in range(20):
+        code, d = fetch("/v7/cs2/props", {"board": "dfs", "book": "prizepicks", "limit": 100, "offset": offset})
+        if not isinstance(d, dict):
+            print("HTTP", code, clean(str(d))[:200]); break
+        groups = d.get("groups") or []
+        for g in groups:
+            for o in (g.get("dfs") or []):
+                tot[o.get("canonical_market_key") or o.get("stat_type")] += 1
+                labels[o.get("market_label")] += 1
+                md = o.get("metadata") or {}
+                periods[str(md.get("period") or md.get("map") or md.get("scope") or "")] += 1
+                break
+        print("page offset", offset, "groups", len(groups), "has_more", d.get("has_more"))
+        if not d.get("has_more") or not groups:
+            break
+        offset += len(groups)
+    print("groups by market key:", dict(tot))
+    print("groups by market label:", dict(labels))
+    print("groups by metadata period/map/scope:", dict(periods))
+    print("\n=== who lists Maps 1-2 kills / headshots (market filter, limit 1)")
+    for book in ["prizepicks", "underdog", "parlayplay", "pick6", "sleeper", "betr", "boom", "chalkboard", "getpicks", "thunderpick", "bovada"]:
+        row = []
+        for m in ("CS2_KILLS_MAPS_1_2", "CS2_HEADSHOTS_MAPS_1_2", "CS2_KILLS_MAP_1"):
+            code, d = fetch("/v7/cs2/props", {"board": "dfs", "book": book, "market": m, "limit": 1})
+            row.append(m + "=" + (str(d.get("total_groups")) if isinstance(d, dict) else "HTTP" + str(code)))
+        print(book, " ".join(row))
+
+
 def main():
     if not KEY:
         sys.exit("KASHROCK_API_KEY is not set")
+    survey()
+    return
     show("prizepicks Maps 1-2 kills", {"board": "dfs", "book": "prizepicks", "market": "CS2_KILLS_MAPS_1_2", "limit": 5})
     show("prizepicks Maps 1-2 headshots", {"board": "dfs", "book": "prizepicks", "market": "CS2_HEADSHOTS_MAPS_1_2", "limit": 3}, samples=1)
     show("underdog Maps 1-2 kills", {"board": "dfs", "book": "underdog", "market": "CS2_KILLS_MAPS_1_2", "limit": 3}, samples=1)
