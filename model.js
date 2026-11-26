@@ -298,7 +298,21 @@ function gradeCombo(ctx,ps,names,st,line,opp,o){o=o||{};var mu=0,reasons=[],nmin
  for(var i=0;i<ps.length;i++){var p=ps[i],pj=v1Project(ctx,p,st,opp,o.before,o.period,o.ev);if(pj==null)return null;mu+=pj;var nser=series(ctx,p,o.period).filter(function(c){return c.date<(o.before||'9999')}).length;nmin=Math.min(nmin,nser);parts.push({name:p.name,proj:pj,n:nser});
   filters(ctx,p,o.team,nser,o.before,o.period).forEach(function(x){reasons.push(names[i]+': '+x)})}
  var r=v1Result(ctx,mu,+line,st,o.book,o.odds,reasons,o.period,ps.length);if(!r)return null;r.n=nmin;r.parts=parts;r.period=isMap1Period(o.period)?'Map 1':'Maps 1-2';r.bait=false;applyGradeCap(r,st,o.ev,false,null);return r}
+// Admin Shadow tab: per-day hit rate of a shadow grader (hist entry field `key`, e.g. 'shadow_s' = Scout) next to the live lock on the same props.
+// hist = lines_history entries, dayOf(isoStart) = Central date, nowMs = clock. Counts settled props only; pushes, voids, skipped and upcoming are left out.
+// "play" = the shadow letter is one the live Track Record stakes (C and up). Returns {days:[row...] newest first, total:row}.
+var STAKED_LETTERS={'A+':1,A:1,'B+':1,B:1,'C+':1,C:1};
+function shadowDaily(hist,key,dayOf,nowMs){var by={},tot=newDayRow('all');
+ function newDayRow(d){return{day:d,n:0,w:0,ln:0,lw:0,pn:0,pw:0,kn:0,kw:0,hn:0,hw:0,on:0,ow:0,un:0,uw:0}}
+ (hist||[]).forEach(function(e){var x=e&&e[key];if(!x||x.skipped||x.pick==null||x.line==null)return;var t=new Date(e.start).getTime();if(isNaN(t)||t>nowMs)return;
+  var rs=e.result;if(!rs||rs.act==null||rs.outcome==='void')return;var act=+rs.act,line=+x.line;if(isNaN(act)||isNaN(line)||act===line)return;
+  var d=dayOf(e.start);if(!d)return;var row=by[d]||(by[d]=newDayRow(d));var over=x.pick==='OVER',hit=over?act>line:act<line;
+  var lk=e.lock&&e.lock.grade?e.lock:null,lh=lk&&act!==+lk.line?(lk.pick==='OVER'?act>+lk.line:act<+lk.line):null;
+  var st=String(e.stat||'').toLowerCase()==='headshots'||String(e.stat||'').toLowerCase()==='hs'?'h':'k';
+  [row,tot].forEach(function(r){r.n++;if(hit)r.w++;if(lh!=null){r.ln++;if(lh)r.lw++}if(STAKED_LETTERS[x.grade]){r.pn++;if(hit)r.pw++}
+   if(st==='h'){r.hn++;if(hit)r.hw++}else{r.kn++;if(hit)r.kw++}if(over){r.on++;if(hit)r.ow++}else{r.un++;if(hit)r.uw++}})});
+ return{days:Object.keys(by).sort().reverse().map(function(d){return by[d]}),total:tot}}
 var api={PARAMS:PARAMS,VERSION:VERSION,TEAM_ALIASES:TEAM_ALIASES,CALIB:CALIB,GRADE_SCALE:GRADE_SCALE,FIT_CUTOFF:FIT_CUTOFF,PLAY_GRADES:PLAY_GRADES,CAP_LETTER:CAP_LETTER,tn:tn,teq:teq,norm:norm,breakEven:breakEven,americanBe:americanBe,nbProbs:nbProbs,lineMean:lineMean,erfAs:erfAs,normCdf:normCdf,laplaceCdf:laplaceCdf,residualProbs:residualProbs,letterFromEdge:letterFromEdge,calibOf:calibOf,applyGradeCap:applyGradeCap,capReasons:capReasons,
- build:build,decodePlayers:decodePlayers,hitrates:hitrates,isBait:isBait,prepStrength:prepStrength,pRank:pRank,pwin:pwin,mapRounds:mapRounds,series:series,map1Combos:map1Combos,isMap1Period:isMap1Period,elo:elo,project:project,v1Project:v1Project,v1ProjectParts:v1ProjectParts,matchEv:matchEv,normMap:normMap,confirmedMaps:confirmedMaps,mapBlend:mapBlend,vetoWeights:vetoWeights,filters:filters,finish:finish,grade:grade,gradeCombo:gradeCombo};
+ build:build,decodePlayers:decodePlayers,hitrates:hitrates,isBait:isBait,prepStrength:prepStrength,pRank:pRank,pwin:pwin,mapRounds:mapRounds,series:series,map1Combos:map1Combos,isMap1Period:isMap1Period,elo:elo,project:project,v1Project:v1Project,v1ProjectParts:v1ProjectParts,matchEv:matchEv,normMap:normMap,confirmedMaps:confirmedMaps,mapBlend:mapBlend,vetoWeights:vetoWeights,filters:filters,finish:finish,grade:grade,gradeCombo:gradeCombo,shadowDaily:shadowDaily};
 if(typeof module!=='undefined'&&module.exports)module.exports=api;else root.GPModel=api;
 })(typeof window!=='undefined'?window:this);
