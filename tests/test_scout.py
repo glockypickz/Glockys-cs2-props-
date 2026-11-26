@@ -131,6 +131,31 @@ class ScoutTests(unittest.TestCase):
         shadow.apply(self.gr, e2, t0 + datetime.timedelta(minutes=1), t0)   # started: nothing written
         self.assertNotIn("shadow_s", e2)
 
+    def test_trust_shrinks_letters_not_picks(self):
+        """Scout grades on a mean pulled toward the line (scout_params.json "trust"): same pick and projection, never a higher letter."""
+        order = ["A+", "A", "B+", "B", "C+", "C", "D", "F"]
+        cfg = SM.load_params()
+        self.assertTrue(0 < cfg["trust"] < 1)
+        full, half = dict(cfg, trust=1.0), dict(cfg, trust=0.5)
+        S1, S2 = SM.ScoutGrader(self.gr, params=full), SM.ScoutGrader(self.gr, params=half)
+        seen_drop = False
+        for line in (22.5, 26.5, 30.5, 34.5, 40.5):
+            e = {"book": "PrizePicks", "player": "a0", "team": "Alpha", "opponent": "Beta", "stat": "Kills",
+                 "start": "2026-10-20T18:00:00Z", "line": line, "odds": -137}
+            a, b = S1.grade_entry(e), S2.grade_entry(e)
+            self.assertNotIn("skipped", a)
+            for k in ("pick", "proj", "edge", "edge_pct", "line"):
+                self.assertEqual(a[k], b[k], k)
+            self.assertGreaterEqual(order.index(b["grade"]), order.index(a["grade"]))
+            self.assertNotIn("trust", a)
+            self.assertEqual(b["trust"], 0.5)
+            seen_drop = seen_drop or order.index(b["grade"]) > order.index(a["grade"])
+        self.assertTrue(seen_drop)          # a big gap must lose letter strength
+        e = {"book": "PrizePicks", "player": "a0", "team": "Alpha", "opponent": "Beta", "stat": "Kills",
+             "start": "2026-10-20T18:00:00Z", "line": 22.5, "odds": -137}
+        self.assertEqual(S1.grade_entry(e)["grade"], "A+")
+        self.assertNotEqual(S2.grade_entry(e)["grade"], "A+")
+
 
 if __name__ == "__main__":
     unittest.main()

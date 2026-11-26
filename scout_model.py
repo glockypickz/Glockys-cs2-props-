@@ -474,9 +474,18 @@ class ScoutGrader:
             if f0 is None:
                 f0, steps0 = f, steps
         r = self.gr._v1_result(mu, line, st, e.get("book"), e.get("odds"))
+        # Only part of Scout's gap from the book line has been real (about a third on 3,035 real lines), so the letter and
+        # stake are graded on a mean pulled toward the line. The pick and the shown projection stay Scout's own.
+        trust = float((self.cfg or {}).get("trust", 1.0))
+        grade, pick = r["grade"], r["pick"]
+        if line and trust < 1.0:
+            rt = self.gr._v1_result(line + trust * (mu - line), line, st, e.get("book"), e.get("odds"))
+            grade = rt["grade"] if rt["pick"] == pick else "F"
         out = {"model": MODEL, "line": line, "proj": round(mu, 1), "edge": round(mu - line, 1),
-               "edge_pct": round((mu - line) / line, 4) if line else None, "grade": r["grade"], "pick": r["pick"],
+               "edge_pct": round((mu - line) / line, 4) if line else None, "grade": grade, "pick": pick,
                "period": "Map 1" if is_map1(e) else "Maps 1-2", "ev": ev}
+        if trust < 1.0:
+            out["trust"] = trust
         if len(names) == 1:
             f = f0
             out["steps"] = [[lbl, round(v, 2)] for lbl, v in steps0]

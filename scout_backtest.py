@@ -453,6 +453,11 @@ def write_params(path="scout_params.json"):
         for f, v in zip(facs, b[1:]):
             c["b_" + f] = round(float(v), 4)
         out["coefs"]["%s|%s" % (per, st)] = c
+    try:   # a refit must not silently undo the letter-grading trust setting (graded on a mean pulled toward the line)
+        prev = json.load(open(path, encoding="utf-8"))
+        out.update({k: prev[k] for k in ("trust", "trust_note") if k in prev})
+    except Exception:
+        pass
     json.dump(out, open(path, "w"), indent=1)
     print(json.dumps(out, indent=1))
 
