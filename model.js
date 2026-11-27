@@ -44,7 +44,7 @@ function capReasons(st,ev,bait,det){var out=[];if(bait)out.push('bait');if(st===
 function applyGradeCap(r,st,ev,bait,det){if(!r)return r;if(bait==null)bait=!!r.bait;if(det==null)det=r.v1;var reasons=capReasons(st,ev,bait,det),pre=r.grade,applied=!!reasons.length&&!!PLAY_GRADES[pre];
  if(applied){r.grade=CAP_LETTER;r.stake=CAP_STAKE;r.modelGrade=CAP_LETTER}
  r.gradeCap={applied:applied,reason:reasons.length?reasons.join('+'):null,preGrade:applied?pre:null};return r}
-var TEAM_ALIASES={"betm33": "33", "wraithpcific": "pcific", "lowcortisolbr": "lowcortisol", "lifesagame": "lag", "dendelecs": "dendele"};
+var TEAM_ALIASES={"betm33": "33", "wraithpcific": "pcific", "lowcortisolbr": "lowcortisol", "lifesagame": "lag", "dendelecs": "dendele", "honved": "honvd"};
 var SKIP={team:1,esports:1,esport:1,gaming:1,club:1,clan:1};
 function norm(s){return String(s||'').toLowerCase().replace(/[^a-z0-9]/g,'')}
 function tn(s){var k=String(s||'').toLowerCase().split(/[^a-z0-9]+/).filter(function(w){return w&&!SKIP[w]}).join('');return Object.prototype.hasOwnProperty.call(TEAM_ALIASES,k)?TEAM_ALIASES[k]:k}
