@@ -302,9 +302,9 @@ function gradeCombo(ctx,ps,names,st,line,opp,o){o=o||{};var mu=0,reasons=[],nmin
 // hist = lines_history entries, dayOf(isoStart) = Central date, nowMs = clock. Counts settled props only; pushes, voids, skipped and upcoming are left out.
 // "play" = the shadow letter is one the live Track Record stakes (C and up). Returns {days:[row...] newest first, total:row}.
 var STAKED_LETTERS={'A+':1,A:1,'B+':1,B:1,'C+':1,C:1};
-function shadowDaily(hist,key,dayOf,nowMs){var by={},tot=newDayRow('all');
+function shadowDaily(hist,key,dayOf,nowMs,opts){var maps12Only=!!(opts&&opts.maps12Only);var by={},tot=newDayRow('all');
  function newDayRow(d){return{day:d,n:0,w:0,ln:0,lw:0,pn:0,pw:0,kn:0,kw:0,hn:0,hw:0,on:0,ow:0,un:0,uw:0}}
- (hist||[]).forEach(function(e){var x=e&&e[key];if(!x||x.skipped||x.pick==null||x.line==null)return;var t=new Date(e.start).getTime();if(isNaN(t)||t>nowMs)return;
+ (hist||[]).forEach(function(e){var x=e&&e[key];if(!x||x.skipped||x.pick==null||x.line==null)return;if(maps12Only&&isMap1Period(e.period))return;var t=new Date(e.start).getTime();if(isNaN(t)||t>nowMs)return;
   var rs=e.result;if(!rs||rs.act==null||rs.outcome==='void')return;var act=+rs.act,line=+x.line;if(isNaN(act)||isNaN(line)||act===line)return;
   var d=dayOf(e.start);if(!d)return;var row=by[d]||(by[d]=newDayRow(d));var over=x.pick==='OVER',hit=over?act>line:act<line;
   var lk=e.lock&&e.lock.grade?e.lock:null,lh=lk&&act!==+lk.line?(lk.pick==='OVER'?act>+lk.line:act<+lk.line):null;

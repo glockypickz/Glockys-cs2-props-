@@ -48,6 +48,30 @@ test('works with no history', () => {
 });
 test('the helper is wired into the Shadow tab', () => {
   const app = require('node:fs').readFileSync(require('node:path').join(__dirname, '..', 'app.js'), 'utf8');
-  assert.match(app, /GPModel\.shadowDaily\(HIST,'shadow_s',cday,NOW\(\)\)/);
+  assert.match(app, /GPModel\.shadowDaily\(HIST,'shadow_s',cday,NOW\(\),\{maps12Only:true\}\)/);
   assert.match(app, /Shadow S \(Scout\) · hit rate by day/);
+});
+
+// Map 1 props can be left out of the Scout record (admin Shadow tab asks for this).
+const MIX = [
+  e('2026-11-24T10:00:00Z', { period: 'Maps 1-2' }),                                       // counted: win
+  Object.assign(e('2026-11-24T10:00:00Z', { r: { act: 10, outcome: 'miss' } }), { period: null }),   // old entry with no period = Maps 1-2: counted, loss
+  e('2026-11-24T10:00:00Z', { period: 'Map 1' }),                                          // Map 1: left out
+  e('2026-11-24T10:00:00Z', { period: 'Map 1', stat: 'Headshots' }),                       // Map 1: left out
+];
+test('maps12Only drops Map 1 props but keeps Maps 1-2 and entries with no period', () => {
+  const all = M.shadowDaily(MIX, 'shadow_s', CT, NOW);
+  const m12 = M.shadowDaily(MIX, 'shadow_s', CT, NOW, { maps12Only: true });
+  assert.equal(all.total.n, 4);
+  assert.equal(m12.total.n, 2);
+  assert.equal(m12.total.w, 1);
+  assert.equal(m12.total.hn, 0);               // the Map 1 headshot prop is gone
+  assert.equal(m12.days.length, 1);
+});
+test('without the option nothing changes (other callers keep Map 1)', () => {
+  assert.equal(M.shadowDaily(MIX, 'shadow_s', CT, NOW, {}).total.n, 4);
+});
+test('the Scout record block in the Shadow tab skips Map 1 props', () => {
+  const app = require('node:fs').readFileSync(require('node:path').join(__dirname, '..', 'app.js'), 'utf8');
+  assert.match(app, /var sAll=\[\],sUp=0;[^\n]*if\(x\.skipped\)|var x=e\.shadow_s;if\(!x\|\|x\.skipped\)return;if\(GPModel\.isMap1Period\(e\.period\)\)return;/);
 });
